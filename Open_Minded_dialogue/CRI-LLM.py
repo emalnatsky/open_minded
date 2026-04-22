@@ -27,7 +27,7 @@ class CRI_ScriptedDialogue(SICApplication):
     Minimal Child-Robot Interaction scripted dialogue.
     4-5 turn scripted exchange with a simple LLM call injected, so GPT generates
     a short personalised response instead of a canned line (Nebula? rn since i already used gpt
-    im going with it but will change later.
+    im going with it but will change later?)
 
     Graceful fallback: if the LLM call fails or times out, a default
     response is used so the dialogue continues uninterrupted.
@@ -45,8 +45,7 @@ class CRI_ScriptedDialogue(SICApplication):
             "llm_turn":  False,
         },
         {
-            "question":  "Ik vind het zelf leuk om spelletjes te bedenken en mysteries op te lossen. 
-            Wat vind je echt leuk om te doen? ",
+            "question":  "Ik vind het zelf leuk om spelletjes te bedenken en mysteries op te lossen. Wat vind je echt leuk om te doen? ",
             "follow_up": "Wow, zo cool!",
             "llm_turn":  True,
         },
