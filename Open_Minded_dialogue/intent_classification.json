@@ -1,0 +1,173 @@
+{
+  "info_intent": {
+    "version": "2.0.0",
+    "description": "Locked JSON contract for intent classification results. Both the stub classifier and Lena's real LLM classifier MUST return this exact structure. Do not add or remove without informing the excel sheet.",
+    "valid_intents": [
+      "add",
+      "update_memory",
+      "update_dialogue",
+      "delete",
+      "inspect",
+      "answer",
+      "question",
+      "social",
+      "none"
+    ],
+    "valid_fields": [
+      "hobby_1", "hobby_2", "hobby_3", "hobby_4", "hobby_fav",
+      "sports_enjoys", "sports_fav", "sports_plays", "sports_fav_play",
+      "music_enjoys", "music_plays_instrument", "music_instrument",
+      "books_enjoys", "books_fav_genre", "books_fav_title",
+      "freetime_fav", "has_best_friend",
+      "animals_enjoys", "animal_fav",
+      "has_pet", "pet_type", "pet_name",
+      "fav_food",
+      "fav_subject", "school_strength", "school_difficulty",
+      "interest", "aspiration", "role_model",
+      "age"
+    ],
+    "intent_groups": {
+      "um_write": ["add", "update_memory", "delete"],
+      "um_read":  ["inspect"],
+      "dialogue_only": ["update_dialogue", "answer", "question", "social", "none"]
+    }
+  },
+
+  "schema": {
+    "intent": {
+      "type": "string",
+      "required": true,
+      "allowed_values": ["add", "update_memory", "update_dialogue", "delete", "inspect", "answer", "question", "social", "none"],
+      "description": "The action the child's utterance is performing."
+    },
+    "field": {
+      "type": "string|null",
+      "required": true,
+      "allowed_values": "see valid_fields in info_intent, or null",
+      "description": "Which UM field the utterance targets. Null for answer, question, social, none."
+    },
+    "value": {
+      "type": "string|null",
+      "required": true,
+      "description": "The value to write (add/update_memory/update_dialogue only). Null for everything else."
+    },
+    "confidence": {
+      "type": "float",
+      "required": true,
+      "range": [0.0, 1.0],
+      "description": "Classifier confidence score. Stub classifier always returns 1.0. Real classifier returns model probability."
+    }
+  },
+
+  "intent_definitions": {
+    "add": {
+      "description": "Child provides new information about themselves that should be stored in the UM.",
+      "triggers_um_write": true,
+      "example_nl": "Mijn lievelingseten is pizza"
+    },
+    "update_memory": {
+      "description": "Child explicitly corrects something already stored in the robot's memory. Requires a UM overwrite.",
+      "triggers_um_write": true,
+      "example_nl": "Eigenlijk is mijn lievelingseten niet meer pizza, het is nu sushi",
+      "distinction_from_update_dialogue": "update_memory = correcting the robot's stored knowledge. Keywords like 'niet meer', 'eigenlijk', 'dat klopt niet meer'."
+    },
+    "update_dialogue": {
+      "description": "Child corrects themselves mid-turn, within the same conversational exchange. No UM write yet — just update what the robot heard this turn.",
+      "triggers_um_write": false,
+      "example_nl": "Pizza... nee wacht, ik bedoel sushi",
+      "distinction_from_update_memory": "update_dialogue = self-correction in the moment. Keywords like 'nee wacht', 'ik bedoel', 'laat maar'."
+    },
+    "delete": {
+      "description": "Child wants the robot to forget something stored about them.",
+      "triggers_um_write": true,
+      "example_nl": "Vergeet wat ik zei over mijn huisdier"
+    },
+    "inspect": {
+      "description": "Child asks what the robot knows or remembers about them.",
+      "triggers_um_write": false,
+      "example_nl": "Wat weet je over mijn lievelingshobby?"
+    },
+    "answer": {
+      "description": "Child is directly answering the robot's most recent question. No UM write — dialogue continues normally.",
+      "triggers_um_write": false,
+      "example_nl": "Pizza",
+      "note": "Most common intent during scripted flow. Field may be inferred from the current dialogue turn context."
+    },
+    "question": {
+      "description": "Child asks the robot a question. Robot should answer before continuing scripted flow.",
+      "triggers_um_write": false,
+      "example_nl": "Waarom wil je dat weten?",
+      "example_nl_2": "Ben jij echt een robot?"
+    },
+    "social": {
+      "description": "Child says something conversational, emotional, or reactive but not informational. Robot mirrors briefly then continues.",
+      "triggers_um_write": false,
+      "example_nl": "Haha dat is grappig",
+      "example_nl_2": "Oké!",
+      "example_nl_3": "Ja!"
+    },
+    "none": {
+      "description": "Silence, gibberish, or Whisper returned nothing meaningful. Robot prompts child to respond.",
+      "triggers_um_write": false,
+      "example_nl": "um eh ja nee",
+      "example_nl_2": ""
+    }
+  },
+
+  "examples": {
+    "add": {
+      "utterance": "Mijn lievelingseten is pizza",
+      "result": { "intent": "add", "field": "fav_food", "value": "pizza", "confidence": 1.0 }
+    },
+    "update_memory": {
+      "utterance": "Eigenlijk is mijn lievelingseten niet meer pizza, het is nu sushi",
+      "result": { "intent": "update_memory", "field": "fav_food", "value": "sushi", "confidence": 1.0 }
+    },
+    "update_dialogue": {
+      "utterance": "Pizza... nee wacht, ik bedoel sushi",
+      "result": { "intent": "update_dialogue", "field": "fav_food", "value": "sushi", "confidence": 1.0 }
+    },
+    "delete": {
+      "utterance": "Vergeet wat ik zei over mijn huisdier",
+      "result": { "intent": "delete", "field": "has_pet", "value": null, "confidence": 1.0 }
+    },
+    "inspect": {
+      "utterance": "Wat weet je over mijn lievelingshobby?",
+      "result": { "intent": "inspect", "field": "hobby_fav", "value": null, "confidence": 1.0 }
+    },
+    "answer": {
+      "utterance": "Pizza",
+      "result": { "intent": "answer", "field": null, "value": "pizza", "confidence": 1.0 }
+    },
+    "question": {
+      "utterance": "Waarom wil je dat weten?",
+      "result": { "intent": "question", "field": null, "value": null, "confidence": 1.0 }
+    },
+    "social": {
+      "utterance": "Haha dat is grappig",
+      "result": { "intent": "social", "field": null, "value": null, "confidence": 1.0 }
+    },
+    "none": {
+      "utterance": "um ja oké",
+      "result": { "intent": "none", "field": null, "value": null, "confidence": 1.0 }
+    }
+  },
+
+  "stub_classifier_behaviour": {
+    "confidence": 1.0,
+    "notes": "Stub always returns confidence=1.0 since it is rule-based. When swapping in the real classifier, confidence will be a genuine probability from the model."
+  },
+
+  "dialogue_routing": {
+    "description": "How DialogueManager should route based on intent",
+    "add":            "Call set_field(child_id, field, value). Confirm back to child.",
+    "update_memory":  "Call set_field(child_id, field, value). Confirm change to child. Triggers UM write.",
+    "update_dialogue":"Update local turn variable only. No UM write. Continue scripted flow.",
+    "delete":         "Call delete_field(child_id, field). Confirm deletion to child.",
+    "inspect":        "Call get_field(child_id, field). Read value back to child.",
+    "answer":         "Acknowledge and continue scripted flow.",
+    "question":       "Answer the child's question, then continue scripted flow.",
+    "social":         "Mirror the emotion briefly, then continue scripted flow.",
+    "none":           "Prompt child to respond or continue with next scripted turn."
+  }
+}
