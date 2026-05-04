@@ -704,6 +704,24 @@ VALID_FIELDS: dict[str, dict] = {
         "mistake_priority": None,
         "stored_cleanly": True,
     },
+
+    "child_name": {
+        # Optional field if you want the name to be in the database
+        "storage": "scalar",
+        "type": "string",
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "sociaal",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Child's name",
+        "gate_by": None,
+        "gate_condition": None,
+        "gate_value": None,
+        "declined_sentinel": None,
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
 }
 
 
