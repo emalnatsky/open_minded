@@ -1,0 +1,134 @@
+{
+  "info_intent": {
+    "version": "3.0.0",
+    "description": "Locked JSON contract for intent classification results. Both the stub classifier and the GPT classifier MUST return this exact structure. Do not add or remove without informing the team. v3.0.0: intents renamed to make um_* vs dialogue_* distinction explicit.",
+    "valid_intents": [
+      "um_add",
+      "um_update",
+      "um_delete",
+      "um_inspect",
+      "dialogue_update",
+      "dialogue_answer",
+      "dialogue_question",
+      "dialogue_social",
+      "dialogue_none"
+    ],
+    "intent_groups": {
+      "um_write":      ["um_add", "um_update", "um_delete"],
+      "um_read":       ["um_inspect"],
+      "dialogue_only": ["dialogue_update", "dialogue_answer", "dialogue_question", "dialogue_social", "dialogue_none"]
+    },
+    "valid_fields": [
+      "hobby_1", "hobby_2", "hobby_3", "hobby_4", "hobby_fav",
+      "sports_enjoys", "sports_fav", "sports_plays", "sports_fav_play",
+      "music_enjoys", "music_plays_instrument", "music_instrument",
+      "books_enjoys", "books_fav_genre", "books_fav_title",
+      "freetime_fav", "has_best_friend",
+      "animals_enjoys", "animal_fav",
+      "has_pet", "pet_type", "pet_name",
+      "fav_food",
+      "fav_subject", "school_strength", "school_difficulty",
+      "interest", "aspiration", "role_model",
+      "age"
+    ]
+  },
+
+  "schema": {
+    "intent": {
+      "type": "string",
+      "required": true,
+      "allowed_values": ["um_add", "um_update", "um_delete", "um_inspect", "dialogue_update", "dialogue_answer", "dialogue_question", "dialogue_social", "dialogue_none"],
+      "description": "The action the child utterance is performing. um_* = touches GraphDB. dialogue_* = conversation only, no database write."
+    },
+    "field": {
+      "type": "string|null",
+      "required": true,
+      "allowed_values": "see valid_fields in info_intent, or null",
+      "description": "Which UM field the utterance targets. Null for dialogue_answer, dialogue_question, dialogue_social, dialogue_none."
+    },
+    "value": {
+      "type": "string|null",
+      "required": true,
+      "description": "The value to write (um_add/um_update/dialogue_update only). Null for everything else."
+    },
+    "confidence": {
+      "type": "float",
+      "required": true,
+      "range": [0.0, 1.0],
+      "description": "Classifier confidence score. Stub always returns 1.0. GPT classifier returns a real probability. Below 0.7 triggers fallback to stub classifier."
+    }
+  },
+
+  "intent_definitions": {
+    "um_add":           { "description": "Child provides new information about themselves that should be stored in the UM.", "triggers_um_write": true,  "example_nl": "Mijn lievelingseten is pizza" },
+    "um_update":        { "description": "Child explicitly corrects something already stored in the robot's memory. Requires a UM overwrite in GraphDB.", "triggers_um_write": true,  "example_nl": "Eigenlijk is mijn lievelingseten niet meer pizza, het is nu sushi" },
+    "um_delete":        { "description": "Child wants the robot to forget something stored about them. Triggers a delete in GraphDB.", "triggers_um_write": true,  "example_nl": "Vergeet wat ik zei over mijn huisdier" },
+    "um_inspect":       { "description": "Child asks what the robot knows or remembers about them. Triggers a read from GraphDB.", "triggers_um_write": false, "example_nl": "Wat weet je over mijn lievelingshobby?" },
+    "dialogue_update":  { "description": "Child corrects themselves mid-turn. No GraphDB write — just update what the robot heard this turn.", "triggers_um_write": false, "example_nl": "Pizza... nee wacht, ik bedoel sushi" },
+    "dialogue_answer":  { "description": "Child is directly answering the robot's most recent question. No GraphDB write.", "triggers_um_write": false, "example_nl": "Pizza" },
+    "dialogue_question":{ "description": "Child asks the robot a question about itself or the world.", "triggers_um_write": false, "example_nl": "Waarom wil je dat weten?" },
+    "dialogue_social":  { "description": "Child says something conversational, emotional, or reactive. Robot mirrors briefly then continues.", "triggers_um_write": false, "example_nl": "Haha dat is grappig" },
+    "dialogue_none":    { "description": "Silence, gibberish, Whisper returned nothing, or GPT confidence below threshold.", "triggers_um_write": false, "example_nl": "um eh ja nee" }
+  },
+
+  "examples": {
+    "um_add":           { "utterance": "Mijn lievelingseten is pizza",                                          "result": { "intent": "um_add",            "field": "fav_food",  "value": "pizza",  "confidence": 1.0 } },
+    "um_update":        { "utterance": "Eigenlijk is mijn lievelingseten niet meer pizza, het is nu sushi",     "result": { "intent": "um_update",         "field": "fav_food",  "value": "sushi",  "confidence": 1.0 } },
+    "um_delete":        { "utterance": "Vergeet wat ik zei over mijn huisdier",                                 "result": { "intent": "um_delete",         "field": "has_pet",   "value": null,     "confidence": 1.0 } },
+    "um_inspect":       { "utterance": "Wat weet je over mijn lievelingshobby?",                                "result": { "intent": "um_inspect",        "field": "hobby_fav", "value": null,     "confidence": 1.0 } },
+    "dialogue_update":  { "utterance": "Pizza... nee wacht, ik bedoel sushi",                                   "result": { "intent": "dialogue_update",   "field": "fav_food",  "value": "sushi",  "confidence": 1.0 } },
+    "dialogue_answer":  { "utterance": "Pizza",                                                                  "result": { "intent": "dialogue_answer",   "field": null,        "value": "pizza",  "confidence": 1.0 } },
+    "dialogue_question":{ "utterance": "Waarom wil je dat weten?",                                              "result": { "intent": "dialogue_question",  "field": null,        "value": null,     "confidence": 1.0 } },
+    "dialogue_social":  { "utterance": "Haha dat is grappig",                                                   "result": { "intent": "dialogue_social",   "field": null,        "value": null,     "confidence": 1.0 } },
+    "dialogue_none":    { "utterance": "um ja oké",                                                              "result": { "intent": "dialogue_none",     "field": null,        "value": null,     "confidence": 1.0 } }
+  },
+
+  "stub_classifier_behaviour": {
+    "confidence": 1.0,
+    "notes": "Stub always returns confidence=1.0 since it is rule-based. Used as fallback when GPT confidence < 0.7 or GPT call fails entirely."
+  },
+
+  "gpt_classifier": {
+    "version": "1.0.0",
+    "model": "gpt-4o-mini",
+    "confidence_threshold": 0.7,
+    "fallback": "stub_classifier",
+    "fallback_intent": "dialogue_none",
+    "system_prompt": "You are an intent classifier for a child-robot interaction system. A NAO robot called Leo is talking to a Dutch child aged 8-11. The child speaks Dutch. Your job is to classify what the child said into exactly one intent, identify the UM field if relevant, extract the value if relevant, and return a confidence score 0.0-1.0. Naming: um_* intents touch the database, dialogue_* intents are conversation only. Return ONLY valid JSON, no markdown, no explanation.",
+    "few_shot_examples": [
+      { "utterance": "Mijn lievelingseten is pizza",                           "result": { "intent": "um_add",            "field": "fav_food",    "value": "pizza",      "confidence": 0.97 } },
+      { "utterance": "Ik wil later dokter worden",                             "result": { "intent": "um_add",            "field": "aspiration",  "value": "dokter",     "confidence": 0.95 } },
+      { "utterance": "Ik heb een hond die Koekje heet",                        "result": { "intent": "um_add",            "field": "pet_name",    "value": "Koekje",     "confidence": 0.93 } },
+      { "utterance": "Eigenlijk niet meer pizza, nu is het sushi",             "result": { "intent": "um_update",         "field": "fav_food",    "value": "sushi",      "confidence": 0.95 } },
+      { "utterance": "Dat klopt niet, mijn lievelingsvak is gym niet rekenen", "result": { "intent": "um_update",         "field": "fav_subject", "value": "gym",        "confidence": 0.94 } },
+      { "utterance": "Vergeet wat ik zei over mijn huisdier",                  "result": { "intent": "um_delete",         "field": "has_pet",     "value": null,         "confidence": 0.98 } },
+      { "utterance": "Wis mijn lievelingseten",                                "result": { "intent": "um_delete",         "field": "fav_food",    "value": null,         "confidence": 0.96 } },
+      { "utterance": "Wat weet je over mijn lievelingshobby?",                 "result": { "intent": "um_inspect",        "field": "hobby_fav",   "value": null,         "confidence": 0.96 } },
+      { "utterance": "Wat is mijn lievelingseten volgens jou?",                "result": { "intent": "um_inspect",        "field": "fav_food",    "value": null,         "confidence": 0.95 } },
+      { "utterance": "Pizza... nee wacht, ik bedoel sushi",                    "result": { "intent": "dialogue_update",   "field": "fav_food",    "value": "sushi",      "confidence": 0.92 } },
+      { "utterance": "Nee toch, laat maar, ik bedoelde tekenen",               "result": { "intent": "dialogue_update",   "field": "hobby_fav",   "value": "tekenen",    "confidence": 0.90 } },
+      { "utterance": "Voetbal",                                                 "result": { "intent": "dialogue_answer",   "field": null,          "value": "voetbal",    "confidence": 0.88 } },
+      { "utterance": "Negen jaar",                                              "result": { "intent": "dialogue_answer",   "field": null,          "value": "negen jaar", "confidence": 0.85 } },
+      { "utterance": "Waarom wil je dat weten?",                               "result": { "intent": "dialogue_question", "field": null,          "value": null,         "confidence": 0.95 } },
+      { "utterance": "Ben jij echt een robot?",                                "result": { "intent": "dialogue_question", "field": null,          "value": null,         "confidence": 0.97 } },
+      { "utterance": "Haha dat is grappig",                                    "result": { "intent": "dialogue_social",   "field": null,          "value": null,         "confidence": 0.99 } },
+      { "utterance": "Oké!",                                                   "result": { "intent": "dialogue_social",   "field": null,          "value": null,         "confidence": 0.96 } },
+      { "utterance": "um eh ja nee",                                           "result": { "intent": "dialogue_none",     "field": null,          "value": null,         "confidence": 0.91 } },
+      { "utterance": "",                                                        "result": { "intent": "dialogue_none",     "field": null,          "value": null,         "confidence": 1.00 } }
+    ],
+    "output_format": "Return ONLY a valid JSON object with exactly these four keys: intent (string from valid_intents), field (string from valid_fields or null), value (string or null), confidence (float 0.0-1.0). No markdown fences, no explanation, no extra keys."
+  },
+
+  "dialogue_routing": {
+    "description": "How the controller should route based on intent. um_* requires Eunike's API. dialogue_* is conversation only.",
+    "um_add":            "POST /api/um/{child_id}/fields with field+value. Confirm back to child.",
+    "um_update":         "POST /api/um/{child_id}/fields with field+value. Confirm change to child.",
+    "um_delete":         "DELETE /api/um/{child_id}/field/{field}. Confirm deletion to child.",
+    "um_inspect":        "GET /api/um/{child_id}/field/{field}. Read value back to child.",
+    "dialogue_update":   "Update local turn variable only. No GraphDB write. Continue scripted flow.",
+    "dialogue_answer":   "Acknowledge and continue scripted flow.",
+    "dialogue_question": "Answer the child's question, then continue scripted flow.",
+    "dialogue_social":   "Mirror the emotion briefly, then continue scripted flow.",
+    "dialogue_none":     "Prompt child to respond or continue with next scripted turn."
+  }
+}
