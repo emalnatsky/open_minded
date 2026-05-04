@@ -8,6 +8,10 @@ available here.
 Returns the same JSON structure as Lena's real LLM classifier:
     {intent, field, value, confidence}
 
+Intent naming convention (v3.0.0):
+    um_*        — touches GraphDB (read or write via Eunike's API)
+    dialogue_*  — conversation only, no database operation
+
 Swap StubIntentClassifier for the real one via DialogueManager's
 constructor (the interface is identical).
 
@@ -30,7 +34,6 @@ from typing import Optional
 def _load_valid_fields(schema_path: str = "um_field_schema.json") -> list:
     path = Path(schema_path)
     if not path.exists():
-        # fallback hardcoded list so classifier still works without the file
         return [
             "hobby_1", "hobby_2", "hobby_3", "hobby_4", "hobby_fav",
             "sports_enjoys", "sports_fav", "sports_plays", "sports_fav_play",
@@ -49,8 +52,7 @@ def _load_valid_fields(schema_path: str = "um_field_schema.json") -> list:
 
 
 # ---------------------------------------------------------------------------
-# Field aliases: Dutch keywords/phrases that map to a field name.
-# Each list covers how a child would naturally refer to that field.
+# Field aliases
 # ---------------------------------------------------------------------------
 
 FIELD_ALIASES: dict = {
@@ -150,74 +152,77 @@ FIELD_ALIASES: dict = {
 
 
 # ---------------------------------------------------------------------------
-# Intent patterns — evaluated in order (DO NOT CHANGE important cuz confusion for add), first match wins
-#no spaces around | — spaces inside regex mean literal space characters
+# Intent patterns — evaluated in order, first match wins.
+# DO NOT reorder without understanding the priority logic.
+# Naming convention: um_* = touches DB, dialogue_* = conversation only.
 # ---------------------------------------------------------------------------
 
 _INTENT_PATTERNS: list = [
-    # DELETE — check first
+    # UM_DELETE — check first
     (re.compile(
         r"\b(vergeet|verwijder|wis|schrap|gooi weg|dat klopt niet meer|niet meer waar)\b",
         re.IGNORECASE,
-    ), "delete"),
+    ), "um_delete"),
 
-    # UPDATE_MEMORY — child corrects robot's stored knowledge, check before update_dialogue
-    # keywords signal deliberate correction of stored info
+    # UM_UPDATE — child corrects robot's stored knowledge, check before dialogue_update
     (re.compile(
         r"\b(eigenlijk niet meer|dat was fout|dat klopt niet|corrigeer|dat is veranderd|"
         r"niet meer|ik had het fout|was vroeger|nu is het anders)\b",
         re.IGNORECASE,
-    ), "update_memory"),
+    ), "um_update"),
 
-    # UPDATE_DIALOGUE — child corrects themselves mid-turn, check before add
-    # keywords signal immediate self-correction in this moment
+    # DIALOGUE_UPDATE — child corrects themselves mid-turn, check before um_add
     (re.compile(
         r"\b(nee wacht|ik bedoel|laat maar|nee toch|ik bedoelde|wacht nee|"
         r"eigenlijk bedoel ik|nee ik bedoel)\b",
         re.IGNORECASE,
-    ), "update_dialogue"),
+    ), "dialogue_update"),
 
-    # INSPECT — child asks what robot knows about THEM, check before add
-    # so "weet je nog wat mijn X is" routes correctly
+    # UM_INSPECT — child asks what robot knows about THEM, check before um_add
     (re.compile(
         r"\b(wat weet je|weet je nog|herinner je|wat heb je|vertel me|laat zien|"
         r"wat staat er|klopt het dat|weet je wat mijn|wat is mijn)\b",
         re.IGNORECASE,
-    ), "inspect"),
+    ), "um_inspect"),
 
-    # QUESTION — child asks robot about itself or the world, check before add
-    # so robot-directed questions don't get classified as add
+    # DIALOGUE_QUESTION — child asks robot about itself or the world
     (re.compile(
         r"\b(waarom|hoe heet jij|wat kan jij|ben jij|hoe werkt|wat doe jij|"
         r"waarom wil je|wie ben jij|wat ben jij|kan jij)\b",
         re.IGNORECASE,
-    ), "question"),
+    ), "dialogue_question"),
 
-    # SOCIAL — conversational filler, emotions, simple yes/no reactions
+    # DIALOGUE_SOCIAL — conversational filler, emotions, simple yes/no
     (re.compile(
-        r"\b(haha|hehe|grappig|leuk|cool|wow|super|geweldig|oké|oke|ja|nee|"
+        r"\b(haha|hehe|grappig|leuk|cool|wow|super|geweldig|oké|oke|"
         r"jaja|nee nee|echt waar|wauw|tof|nice)\b",
         re.IGNORECASE,
-    ), "social"),
+    ), "dialogue_social"),
 
-    # ADD — natural Dutch child phrasing, providing new info about themselves
+    # UM_ADD — child provides new info about themselves
     (re.compile(
         r"\b(ik vind|mijn .{1,30} is|ik heet|ik ben|ik heb|ik doe|ik speel|ik lees|"
         r"ik wil|ik hou van|mijn lievelings|ik word later|later wil ik)\b",
         re.IGNORECASE,
-    ), "add"),
+    ), "um_add"),
 
-    # ANSWER — short responses that are likely answers to robot's question
-    # checked last before none, catches single words / short phrases
+    # DIALOGUE_NONE — filler sounds and hesitation (check BEFORE dialogue_answer)
+    # Matches ONLY strings made entirely of filler words: "um", "um eh ja nee" etc.
+    (re.compile(
+        r"^\s*(um|uh|eh|hmm?|ahh?|uhh?)(\s+(um|uh|eh|hmm?|ahh?|uhh?|ja|nee))*\s*$",
+        re.IGNORECASE,
+    ), "dialogue_none"),
+
+    # DIALOGUE_ANSWER — short responses, likely answering robot's question
     (re.compile(
         r"^[a-zàáâäèéêëìíîïòóôöùúûüA-Z0-9 '\-]{1,40}$",
         re.IGNORECASE,
-    ), "answer"),
+    ), "dialogue_answer"),
 ]
 
 
 # ---------------------------------------------------------------------------
-# Return type — matches the JSON structure exactly
+# Return type — matches the JSON contract exactly
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -248,21 +253,21 @@ class StubIntentClassifier:
     Falls back to hardcoded list if the file is not present.
 
     Intents (in priority order):
-        delete         — child wants robot to forget something
-        update_memory  — child corrects robot's stored knowledge (UM write)
-        update_dialogue— child corrects themselves mid-turn (no UM write)
-        inspect        — child asks what robot knows about them (UM read)
-        question       — child asks robot about itself or the world
-        social         — filler / emotional reaction / simple yes/no
-        add            — child provides new info about themselves (UM write)
-        answer         — child answering robot's question (short response)
-        none           — silence, gibberish, or nothing recognised
+        um_delete        — child wants robot to forget something           → DB delete
+        um_update        — child corrects robot's stored knowledge         → DB write
+        dialogue_update  — child corrects themselves mid-turn              → no DB
+        um_inspect       — child asks what robot knows about them          → DB read
+        dialogue_question— child asks robot about itself or the world      → no DB
+        dialogue_social  — filler / emotional reaction / simple yes/no     → no DB
+        um_add           — child provides new info about themselves        → DB write
+        dialogue_answer  — child answering robot's question (short)        → no DB
+        dialogue_none    — silence, gibberish, or nothing recognised       → no DB
 
     Usage
     -----
     clf = StubIntentClassifier()
     result = clf.classify("Mijn lievelingseten is pizza")
-    # IntentResult(intent='add', field='fav_food', value='pizza', confidence=1.0)
+    # IntentResult(intent='um_add', field='fav_food', value='pizza', confidence=1.0)
 
     Swap in real classifier
     -----------------------
@@ -271,7 +276,7 @@ class StubIntentClassifier:
     """
 
     _VALUE_RE = re.compile(
-        r"(?:is|ben|heet|zijn|wordt|worden|vind ik|doe ik|speel ik|lees ik|hou ik van|wil ik|heb ik)"
+        r"(?:is|ben|heet|zijn|wordt|vind ik|doe ik|speel ik|lees ik|hou ik van|heb ik)"
         r"\s+(?:een\s+)?([a-zàáâäèéêëìíîïòóôöùúûüA-Z0-9 '\-]{1,80}?)(?:[.,!?]|$)",
         re.IGNORECASE,
     )
@@ -293,7 +298,7 @@ class StubIntentClassifier:
         IntentResult with intent, field, value, confidence.
         """
         if not text or not text.strip():
-            return IntentResult(intent="none", field=None, value=None)
+            return IntentResult(intent="dialogue_none", field=None, value=None)
 
         text_clean = text.strip()
         intent = self._detect_intent(text_clean)
@@ -302,7 +307,7 @@ class StubIntentClassifier:
         # only extract value for intents that write or correct a value
         value = (
             self._extract_value(text_clean)
-            if intent in ("add", "update_memory", "update_dialogue", "answer")
+            if intent in ("um_add", "um_update", "dialogue_update", "dialogue_answer")
             else None
         )
 
@@ -312,7 +317,7 @@ class StubIntentClassifier:
         for pattern, intent in _INTENT_PATTERNS:
             if pattern.search(text):
                 return intent
-        return "none"
+        return "dialogue_none"
 
     def _detect_field(self, text: str) -> Optional[str]:
         text_lower = text.lower()
@@ -324,15 +329,31 @@ class StubIntentClassifier:
                     return field
         return None
 
+    # Secondary regex for "wil later X worden" / "wil X worden" patterns
+    _WORDEN_RE = re.compile(
+        r"(?:wil\s+(?:later\s+)?|word\s+later\s+)([a-zàáâäèéêëìíîïòóôöùúûüA-Z0-9\'\-][a-zàáâäèéêëìíîïòóôöùúûüA-Z0-9 \'\-]{0,40}?)\s+worden",
+        re.IGNORECASE,
+    )
+
     def _extract_value(self, text: str) -> Optional[str]:
+        # Try primary regex first
         match = self._VALUE_RE.search(text)
+        if match:
+            val = match.group(1).strip()
+            # Strip leading articles that slipped through
+            for prefix in ("het ", "de ", "een "):
+                if val.lower().startswith(prefix):
+                    val = val[len(prefix):]
+            return val if val else None
+        # Try "wil ... worden" pattern
+        match = self._WORDEN_RE.search(text)
         if match:
             return match.group(1).strip()
         return None
 
 
 # ---------------------------------------------------------------------------
-# DialogueManager — plug-in point for minimal_scripted.py
+# DialogueManager — plug-in point for CRI-BRANCH-BASIC.py
 # ---------------------------------------------------------------------------
 
 class DialogueManager:
@@ -342,8 +363,8 @@ class DialogueManager:
 
     Example
     -------
-    manager = DialogueManager()                        #stub
-    manager = DialogueManager(classifier=RealLLM())    #real
+    manager = DialogueManager()                        # stub
+    manager = DialogueManager(classifier=RealLLM())    # real
     response = manager.handle("Mijn lievelingseten is pizza")
     """
 
@@ -360,62 +381,62 @@ class DialogueManager:
         field  = result.field or "dat"
         value  = result.value or "het"
 
-        if intent == "add":
+        if intent == "um_add":
             return f"Oké, ik onthoud dat jouw {field} {value} is."
-        if intent == "update_memory":
+        if intent == "um_update":
             return f"Begrepen, ik pas jouw {field} aan naar {value}."
-        if intent == "update_dialogue":
+        if intent == "dialogue_update":
             return f"Oké, ik hoorde {value}. Klopt dat?"
-        if intent == "delete":
+        if intent == "um_delete":
             return f"Oké, ik vergeet jouw {field}."
-        if intent == "inspect":
+        if intent == "um_inspect":
             return f"Je vroeg me naar jouw {field}."
-        if intent == "question":
+        if intent == "dialogue_question":
             return "Dat is een goede vraag! Zal ik dat later uitleggen?"
-        if intent == "social":
+        if intent == "dialogue_social":
             return "Haha, ja! Oké, verder!"
-        if intent == "answer":
+        if intent == "dialogue_answer":
             return "Oké, dankjewel!"
         return "Ik begreep dat niet helemaal. Kun je het nog een keer zeggen?"
 
 
 # ---------------------------------------------------------------------------
-#test — python intent_classifier.py
+# Smoke test — python intent_classifier.py
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     clf = StubIntentClassifier()
     tests = [
-        # add
+        # um_add
         "Mijn lievelingseten is pizza",
         "Ik wil later dokter worden",
         "Ik heb een kat",
-        # update_memory
+        # um_update
         "Eigenlijk niet meer pizza, nu is het sushi",
         "Dat was fout, ik vind eigenlijk gym het leukst",
-        # update_dialogue
+        # dialogue_update
         "Pizza... nee wacht, ik bedoel sushi",
         "Nee toch, laat maar",
-        # delete
+        # um_delete
         "Vergeet wat ik zei over mijn huisdier",
-        # inspect
+        # um_inspect
         "Wat weet je over mijn lievelingshobby?",
         "Wat is mijn lievelingseten?",
-        # question
+        # dialogue_question
         "Waarom wil je dat weten?",
         "Ben jij echt een robot?",
-        # social
+        # dialogue_social
         "Haha dat is grappig",
         "Oké!",
-        # answer
+        # dialogue_answer
         "Pizza",
         "Voetbal",
-        # none
+        # dialogue_none
         "um eh ja nee",
         "",
     ]
-    print(f"{'Utterance':<50} {'intent':<16} {'field':<22} value")
-    print("-" * 110)
+    print(f"{'Utterance':<50} {'intent':<20} {'field':<22} value")
+    print("-" * 115)
     for t in tests:
         r = clf.classify(t)
-        print(f"{t!r:<50} {r.intent:<16}  {str(r.field):<20}  {r.value!r}")
+        print(f"{t!r:<50} {r.intent:<20}  {str(r.field):<20}  {r.value!r}")

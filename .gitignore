@@ -42,3 +42,4 @@ conf/google/*.json
 # Ignore local_test_sync_folder
 demos/desktop/local_test_sync_folder
 
+__pycache__/
