@@ -685,8 +685,8 @@ VALID_FIELDS: dict[str, dict] = {
         # Integer, range 6-13. Always visible. Asked in Qualtrics.
         "storage": "scalar",
         "type": "integer",
-        "min": 6,
-        "max": 13,
+        "min": 1,
+        "max": 14,
         "required": False,
         "sensitivity_tier": 1,
         "category": "sociaal",
