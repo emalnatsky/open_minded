@@ -44,10 +44,6 @@ MISTAKE PRIORITY:
   "decri" marks aspiration as the field specifically designed to demo the open-memory
   Delete/Update flow during the user study.
 
-NOTE ON GRADE:
-  Grade does not appear as a check-in question in UM v5.1.
-  If captured through a separate channel (e.g. teacher-provided data),
-  it is handled as an optional parameter at child creation, not as a UM field.
 """
 
 from typing import Literal, Optional
