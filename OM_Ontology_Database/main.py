@@ -65,6 +65,7 @@ class ChildCreate(BaseModel):
     age: Optional[int] = None
     grade: Optional[str] = None
     session_id: str = "initial"
+    name: Optional[str] = None
 
     model_config = {
         "json_schema_extra": {
