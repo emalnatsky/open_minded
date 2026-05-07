@@ -24,7 +24,7 @@ OLLAMA_MODEL = "mistral"          # or "llama3.1:8b" — change to what you have
 SKIP_LLM_VALIDATION = True
 
 # ── Ontology files (produced in Protégé, or hand-written) ────────────────────
-SHACL_SHAPES_PATH  = "ontology/um_shapes.ttl"
+SHACL_SHAPES_PATH  = "ontology/um_shapes_test.ttl"
 OWL_ONTOLOGY_PATH  = "ontology/um_schema.ttl"
 
 # ── API security ─────────────────────────────────────────────────────────────
