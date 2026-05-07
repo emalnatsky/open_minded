@@ -98,6 +98,27 @@ VALID_FIELDS: dict[str, dict] = {
         "stored_cleanly": True,
     },
 
+    "hobby_talk": {
+        # Q7 — Zou je het leuk vinden om met mij te kletsen over je hobby's?
+        # MC. Always visible (hobbies are always visible). Informs whether
+        # the robot should bring up hobbies as a conversation topic.
+        "storage": "scalar",
+        "type": "boolean",
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "hobby",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether child wants to talk to Leo about hobbies",
+        "gate_by": None,
+        "gate_condition": None,
+        "gate_value": None,
+        "declined_sentinel": None,
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
+
     # ══════════════════════════════════════════════════════════════
     # CLUSTER: SPORT  (Q03–Q06)
     # ══════════════════════════════════════════════════════════════
@@ -107,7 +128,7 @@ VALID_FIELDS: dict[str, dict] = {
         # MC. Unlocks Q04 and Q05 if answer ≠ "nee".
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee", "weet niet"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "sport",
@@ -147,7 +168,7 @@ VALID_FIELDS: dict[str, dict] = {
         # Visible if Q03 ≠ Nee. Gates Q06.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "sport",
@@ -188,6 +209,46 @@ VALID_FIELDS: dict[str, dict] = {
         "stored_cleanly": False,
     },
 
+    "sports_talk": {
+        # Q10 — Zou je het leuk vinden om met mij te kletsen over sport?
+        # MC. Visible if sports_enjoys ≠ nee.
+        "storage": "scalar",
+        "type": "boolean",
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "sport",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether child wants to talk to Leo about sports",
+        "gate_by": "sports_enjoys",
+        "gate_condition": "not_equals",
+        "gate_value": "nee",
+        "declined_sentinel": "nee",
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
+
+    "sports_play_talk": {
+        # Q13 — Zou je het leuk vinden om met mij te kletsen over welke sport jij speelt?
+        # MC. Visible only if sports_plays = ja.
+        "storage": "scalar",
+        "type": "boolean",
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "sport",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether child wants to talk to Leo about the sport they play",
+        "gate_by": "sports_plays",
+        "gate_condition": "equals",
+        "gate_value": "ja",
+        "declined_sentinel": "nee",
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
+
     # ══════════════════════════════════════════════════════════════
     # CLUSTER: MUZIEK  (Q07–Q10)
     # ══════════════════════════════════════════════════════════════
@@ -197,7 +258,7 @@ VALID_FIELDS: dict[str, dict] = {
         # MC. Unlocks Q08 and Q09 if ≠ Nee.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee", "weet niet"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "muziek",
@@ -219,7 +280,7 @@ VALID_FIELDS: dict[str, dict] = {
         # Stored as "ja"/"nee" — informs whether robot should bring up music.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "muziek",
@@ -238,7 +299,7 @@ VALID_FIELDS: dict[str, dict] = {
         # Q09 — Speel je een instrument? MC. Visible if Q07 ≠ Nee. Gates Q10.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "muziek",
@@ -287,7 +348,7 @@ VALID_FIELDS: dict[str, dict] = {
         # MC. Unlocks Q12 and Q13 if ≠ Nee.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee", "weet niet"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "boeken",
@@ -347,6 +408,26 @@ VALID_FIELDS: dict[str, dict] = {
         "stored_cleanly": False,
     },
 
+    "books_talk": {
+        # Q21 — Zou je het leuk vinden om met mij te kletsen over boeken en lezen?
+        # MC. Visible if books_enjoys ≠ nee.
+        "storage": "scalar",
+        "type": "boolean",
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "boeken",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether child wants to talk to Leo about books",
+        "gate_by": "books_enjoys",
+        "gate_condition": "not_equals",
+        "gate_value": "nee",
+        "declined_sentinel": "nee",
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
+
     # ══════════════════════════════════════════════════════════════
     # CLUSTER: VRIJE TIJD  (Q14)
     # ══════════════════════════════════════════════════════════════
@@ -376,11 +457,12 @@ VALID_FIELDS: dict[str, dict] = {
 
     "has_best_friend": {
         # Q15 — Heb je een beste vriend?
-        # MC. Always visible but skippable. No opt-in gate needed — just boolean.
-        # If "nee": robot knows child may prefer solo play → affects content selection.
+        # MC. Always visible but skippable. No opt-in gate needed.
+        # "Liever niet zeggen" is a sensitivity-aware opt-out.
+        # If chosen: robot knows not to push on social topics.
         "storage": "scalar",
-        "type": "boolean",
-        "allowed_values": ["ja", "nee"],
+        "type": "enum",
+        "allowed_values": ["ja", "nee", "liever niet zeggen"],
         "required": False,
         "sensitivity_tier": 2,       # social relationships are tier 2
         "category": "sociaal",
@@ -404,7 +486,7 @@ VALID_FIELDS: dict[str, dict] = {
         # MC. Unlocks Q17 and Q18 if ≠ Nee.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee", "weet niet"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "dieren",
@@ -450,7 +532,7 @@ VALID_FIELDS: dict[str, dict] = {
         # Same pattern as music_talk — consent/preference field.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "dieren",
@@ -469,7 +551,7 @@ VALID_FIELDS: dict[str, dict] = {
         # Q19 — Heb je een huisdier? MC. Always visible. Gates Q20 and Q21.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "dieren",
@@ -531,6 +613,26 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": False,
+    },
+
+    "pet_talk": {
+        # Q30 — Zou je het leuk vinden om met mij te kletsen over een huisdier?
+        # MC. Visible only if has_pet = ja.
+        "storage": "scalar",
+        "type": "boolean",
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "dieren",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether child wants to talk to Leo about their pet",
+        "gate_by": "has_pet",
+        "gate_condition": "equals",
+        "gate_value": "ja",
+        "declined_sentinel": "nee",
+        "mistake_priority": None,
+        "stored_cleanly": True,
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -632,8 +734,28 @@ VALID_FIELDS: dict[str, dict] = {
     },
 
     # ══════════════════════════════════════════════════════════════
-    # CLUSTER: ASPIRATIE  (Q26–Q27)
+    # CLUSTER: ASPIRATIE  (Q24–Q27)
     # ══════════════════════════════════════════════════════════════
+
+    "interest": {
+        # Q24 — Welke onderwerpen of dingen vind jij heel interessant?
+        # Free long text. Always visible, required, child-authored.
+        # Future: LLM could extract specific interests into node entities.
+        "storage": "scalar",
+        "type": "string",
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "aspiratie",
+        "llm_validate": True,
+        "xsd_type": "xsd:string",
+        "description": "What the child finds interesting (free text)",
+        "gate_by": None,
+        "gate_condition": None,
+        "gate_value": None,
+        "declined_sentinel": None,
+        "mistake_priority": None,
+        "stored_cleanly": False,
+    },
 
     "aspiration": {
         # Q26 — Wat wil jij later worden? Free text. Optional.
@@ -685,7 +807,7 @@ VALID_FIELDS: dict[str, dict] = {
         # Integer, range 6-13. Always visible. Asked in Qualtrics.
         "storage": "scalar",
         "type": "integer",
-        "min": 1,
+        "min": 6,
         "max": 14,
         "required": False,
         "sensitivity_tier": 1,
@@ -693,24 +815,6 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": False,
         "xsd_type": "xsd:integer",
         "description": "Child's age in years",
-        "gate_by": None,
-        "gate_condition": None,
-        "gate_value": None,
-        "declined_sentinel": None,
-        "mistake_priority": None,
-        "stored_cleanly": True,
-    },
-
-    "child_name": {
-        # Optional field if you want the name to be in the database
-        "storage": "scalar",
-        "type": "string",
-        "required": False,
-        "sensitivity_tier": 1,
-        "category": "sociaal",
-        "llm_validate": False,
-        "xsd_type": "xsd:string",
-        "description": "Child's name",
         "gate_by": None,
         "gate_condition": None,
         "gate_value": None,
@@ -812,31 +916,38 @@ PROBE_ORDER = [
 # Adjust Q-numbers to match your actual Qualtrics survey IDs.
 
 QUALTRICS_COLUMN_MAP: dict[str, str] = {
-    "Q01": "hobbies",
-    "Q02": "hobby_fav",
-    "Q03": "sports_enjoys",
-    "Q04": "sports_fav",
-    "Q05": "sports_plays",
-    "Q06": "sports_fav_play",
-    "Q07": "music_enjoys",
-    "Q08": "music_talk",
-    "Q09": "music_plays_instrument",
-    "Q10": "music_instrument",
-    "Q11": "books_enjoys",
-    "Q12": "books_fav_genre",
-    "Q13": "books_fav_title",
-    "Q14": "freetime_fav",
-    "Q15": "has_best_friend",
-    "Q16": "animals_enjoys",
-    "Q17": "animal_fav",
-    "Q18": "animal_talk",
-    "Q19": "has_pet",
-    "Q20": "pet_type",
-    "Q21": "pet_name",
-    "Q22": "fav_food",
-    "Q23": "fav_subject",
-    "Q24": "school_strength",
-    "Q25": "school_difficulty",
-    "Q26": "aspiration",
-    "Q27": "role_model",
+    # ── Simple 1:1 mappings ──────────────────────────────────────────────
+    # Key = exact CSV column header from Qualtrics export (May 2026)
+    "Q4_8":   "age",
+    "Q6":     "hobby_fav",
+    "Q7":     "hobby_talk",
+    "Q8":     "sports_enjoys",
+    "Q9_4":   "sports_fav",
+    "Q10":    "sports_talk",
+    "Q11":    "sports_plays",
+    "Q12_4":  "sports_fav_play",
+    "Q13":    "sports_play_talk",
+    "Q14":    "music_enjoys",
+    "Q15":    "music_plays_instrument",
+    "Q16_4":  "music_instrument",
+    "Q17":    "music_talk",
+    "Q18":    "books_enjoys",
+    "Q21":    "books_talk",
+    "Q23":    "has_best_friend",
+    "Q24":    "animals_enjoys",
+    "Q25_4":  "animal_fav",
+    "Q26":    "animal_talk",
+    "Q27":    "has_pet",
+    "Q30":    "pet_talk",
+    "Q31_4":  "fav_food",
+    "Q35_4":  "interest",
+    "Q36_4":  "aspiration",
+    "Q37":    "role_model",
+    # ── Multi-column and MC+Other fields are handled separately ──────────
+    # in load_qualtrics.py (HOBBIES_COLS, PET_NAME_COLS, MC_OTHER_MAP).
+    # See that file for: Q5_1..Q5_4 (hobbies), Q19+Q19_11_TEXT (books genre),
+    # Q20+Q20_1_TEXT (books title), Q22+Q22_15_TEXT (freetime),
+    # Q28+Q28_8_TEXT (pet type), Q29_1..Q29_8 (pet names),
+    # Q32+Q32_12_TEXT (fav subject), Q33+Q33_12_TEXT (school strength),
+    # Q195+Q195_12_TEXT (school difficulty).
 }

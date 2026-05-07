@@ -47,6 +47,10 @@ class TestSchemaChecks:
         r = validate_field("has_best_friend", "nee")
         assert r.passed
 
+    def test_boolean_field_valid_opt_out(self):
+        r = validate_field("has_best_friend", "liever niet zeggen")
+        assert r.passed
+
     def test_boolean_field_invalid_value(self):
         r = validate_field("has_best_friend", "maybe")
         assert not r.passed
