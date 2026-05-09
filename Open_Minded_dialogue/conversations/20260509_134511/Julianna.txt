@@ -1,0 +1,64 @@
+Session: 20260509_134511
+Script: CRI-BRANCH-BASIC4.0
+Child id: Julianna
+Child name: Julianna
+Started: 2026-05-09T13:45:11+02:00
+Ended: 2026-05-09T13:46:53+02:00
+
+UM snapshot at start:
+  age: 10
+  animal_fav: tropical fish
+  animal_talk: dat weet ik nog niet
+  animals_enjoys: dat weet ik nog niet
+  aspiration: find the secret of the ocean
+  books_enjoys: dat weet ik nog niet
+  books_fav_genre: dat weet ik nog niet
+  books_fav_title: dat weet ik nog niet
+  child_name: dat weet ik nog niet
+  fav_food: chocolate, sushi, pizza
+  freetime_fav: dat weet ik nog niet
+  has_pet: dat weet ik nog niet
+  hobbies: dat weet ik nog niet
+  hobby_fav: scuba diving
+  music_enjoys: dat weet ik nog niet
+  music_instrument: dat weet ik nog niet
+  music_plays_instrument: dat weet ik nog niet
+  music_talk: dat weet ik nog niet
+  name: dat weet ik nog niet
+  pet_name: Blubby
+  pet_type: dat weet ik nog niet
+  sports_enjoys: dat weet ik nog niet
+  sports_fav: dat weet ik nog niet
+  sports_fav_play: dat weet ik nog niet
+  sports_plays: dat weet ik nog niet
+
+Planned steps:
+  1. Greeting [L1]
+     Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.
+  2. Opening summary [L2]
+     Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.
+  3. First richer topic domain [L2+L3]
+     Ik denk dat scuba diving een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je graag iets doet met scuba diving en dat scuba diving bij jouw interesses hoort. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?
+  4. Deliberate memory mistake [L2]
+     Ik dacht dat ik ook had onthouden dat Fluffy iets te maken heeft met de naam van je huisdier. Kan je mij hier wat meer over vertellen?
+  5. Goodbye [L1]
+     Dankjewel. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!
+
+Conversation:
+
+[2026-05-09T13:45:47+02:00] STEP 1: Greeting [L1]
+[2026-05-09T13:45:47+02:00] LEO: Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.
+[2026-05-09T13:45:47+02:00] STEP 1 finished
+
+[2026-05-09T13:45:48+02:00] STEP 2: Opening summary [L2]
+[2026-05-09T13:45:48+02:00] LEO: Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.
+[2026-05-09T13:45:48+02:00] STEP 2 finished
+
+[2026-05-09T13:45:49+02:00] STEP 3: First richer topic domain [L2+L3]
+[2026-05-09T13:45:49+02:00] LEO: Ik denk dat scuba diving een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je graag iets doet met scuba diving en dat scuba diving bij jouw interesses hoort. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?
+[2026-05-09T13:46:18+02:00] CHILD: Nee, dat klopt niet.
+[2026-05-09T13:46:21+02:00] TRANSCRIPT accepted: Nee, dat klopt niet.
+[2026-05-09T13:46:24+02:00] INTERPRETATION (topic): {'response_type': 'no_change', 'leo_response': 'Oh, dat is jammer. Laat het me weten als er iets nieuws is!', 'change': {}, 'confidence': 1.0}
+[2026-05-09T13:46:24+02:00] LEO: Oh, dat is jammer. Laat het me weten als er iets nieuws is!
+[2026-05-09T13:46:24+02:00] STEP 3 finished
+[2026-05-09T13:46:53+02:00] TESTER: quit
