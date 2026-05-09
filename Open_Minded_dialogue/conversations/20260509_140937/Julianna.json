@@ -1,0 +1,529 @@
+{
+  "session_id": "20260509_140937",
+  "script_version": "CRI-BRANCH-BASIC4.0",
+  "child_id": "Julianna",
+  "child_name": "Julianna",
+  "started_at": "2026-05-09T14:09:37+02:00",
+  "ended_at": "2026-05-09T14:22:58+02:00",
+  "folder": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_140937",
+  "txt_path": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_140937\\Julianna.txt",
+  "json_path": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_140937\\Julianna.json",
+  "um_snapshot_start": {
+    "child_name": "dat weet ik nog niet",
+    "name": "dat weet ik nog niet",
+    "age": "10",
+    "hobbies": "dat weet ik nog niet",
+    "hobby_fav": "scuba diving",
+    "sports_enjoys": "dat weet ik nog niet",
+    "sports_fav": "dat weet ik nog niet",
+    "sports_plays": "dat weet ik nog niet",
+    "sports_fav_play": "dat weet ik nog niet",
+    "books_enjoys": "dat weet ik nog niet",
+    "books_fav_genre": "dat weet ik nog niet",
+    "books_fav_title": "dat weet ik nog niet",
+    "music_enjoys": "dat weet ik nog niet",
+    "music_talk": "dat weet ik nog niet",
+    "music_plays_instrument": "dat weet ik nog niet",
+    "music_instrument": "dat weet ik nog niet",
+    "animals_enjoys": "dat weet ik nog niet",
+    "animal_talk": "dat weet ik nog niet",
+    "animal_fav": "tropical fish",
+    "has_pet": "dat weet ik nog niet",
+    "pet_type": "dat weet ik nog niet",
+    "pet_name": "Blubby en Bluey",
+    "freetime_fav": "dat weet ik nog niet",
+    "fav_food": "chocolate, sushi, pizza",
+    "aspiration": "find the secret of the ocean"
+  },
+  "planned_steps": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "leo_text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "leo_text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten chocolate, sushi en pizza is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "expects_response": true,
+      "response_mode": "topic_interpretation",
+      "topic": {
+        "domain": "eten",
+        "label": "je lievelingseten",
+        "fields": [
+          "fav_food"
+        ],
+        "field_labels": {
+          "fav_food": "je lievelingseten"
+        },
+        "current_values": {
+          "fav_food": "chocolate, sushi, pizza"
+        },
+        "correct_values": [
+          "je lievelingseten chocolate, sushi en pizza is"
+        ],
+        "memory_link": "je lievelingseten chocolate, sushi en pizza is",
+        "options": [
+          "chocolate, sushi en pizza",
+          "iets anders dat je lekker vindt"
+        ],
+        "reground": "Ik weet zeker dat chocolate, sushi en pizza met jouw lievelingseten te maken heeft."
+      }
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "leo_text": "Ik dacht dat ik ook had onthouden dat de geheimen van de lucht vinden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?",
+      "expects_response": true,
+      "response_mode": "mistake_interpretation",
+      "mistake": {
+        "topic": {
+          "domain": "droom",
+          "label": "find the secret of the ocean",
+          "fields": [
+            "aspiration"
+          ],
+          "field_labels": {
+            "aspiration": "wat je later wilt doen of worden"
+          },
+          "current_values": {
+            "aspiration": "find the secret of the ocean"
+          },
+          "correct_values": [
+            "je later find the secret of the ocean wilt"
+          ],
+          "memory_link": "je later find the secret of the ocean wilt",
+          "options": [
+            "find the secret of the ocean",
+            "je dromen"
+          ],
+          "reground": "Ik onthoud dat find the secret of the ocean iets is waar je later iets mee wilt."
+        },
+        "field": "aspiration",
+        "actual": "find the secret of the ocean",
+        "wrong": "de geheimen van de lucht vinden"
+      }
+    },
+    {
+      "step": 5,
+      "name": "Goodbye",
+      "layer": "L1",
+      "leo_text": "Dankjewel. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!",
+      "expects_response": false,
+      "response_mode": null
+    }
+  ],
+  "turns": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "started_at": "2026-05-09T14:10:05+02:00",
+      "ended_at": "2026-05-09T14:10:05+02:00",
+      "leo_text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:10:05+02:00",
+          "type": "step_start",
+          "step": 1,
+          "name": "Greeting",
+          "layer": "L1"
+        },
+        {
+          "timestamp": "2026-05-09T14:10:05+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:05+02:00",
+          "type": "step_end",
+          "step": 1,
+          "name": "Greeting"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "started_at": "2026-05-09T14:10:06+02:00",
+      "ended_at": "2026-05-09T14:10:06+02:00",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:10:06+02:00",
+          "type": "step_start",
+          "step": 2,
+          "name": "Opening summary",
+          "layer": "L2"
+        },
+        {
+          "timestamp": "2026-05-09T14:10:06+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:06+02:00",
+          "type": "step_end",
+          "step": 2,
+          "name": "Opening summary"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "started_at": "2026-05-09T14:10:07+02:00",
+      "ended_at": "2026-05-09T14:10:56+02:00",
+      "leo_text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten chocolate, sushi en pizza is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:10:07+02:00",
+          "type": "step_start",
+          "step": 3,
+          "name": "First richer topic domain",
+          "layer": "L2+L3"
+        },
+        {
+          "timestamp": "2026-05-09T14:10:07+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten chocolate, sushi en pizza is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+        },
+        {
+          "timestamp": "2026-05-09T14:10:20+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ik hou helemaal niet van sushi. Ik hou van pasta."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:23+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ik hou helemaal niet van sushi. Ik hou van pasta."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:26+02:00",
+          "type": "interpretation",
+          "mode": "topic",
+          "result": {
+            "response_type": "possible_update",
+            "leo_response": "Oh, je houdt niet van sushi? Wat leuk dat je van pasta houdt! Wil je dat ik je lievelingseten aanpas?",
+            "change": {
+              "action": "update",
+              "field": "fav_food",
+              "field_label": "je lievelingseten",
+              "old_value": "chocolate, sushi, pizza",
+              "new_value": "chocolate, pasta, pizza",
+              "confidence": 0.9,
+              "reason": "De kind heeft sushi gecorrigeerd en pasta toegevoegd.",
+              "source_text": "Ik hou helemaal niet van sushi. Ik hou van pasta.",
+              "confirmation_question": "Mag ik je lievelingseten aanpassen naar chocolate, pasta en pizza?"
+            },
+            "confidence": 0.9
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:10:26+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Mag ik je lievelingseten aanpassen naar chocolate, pasta en pizza?"
+        },
+        {
+          "timestamp": "2026-05-09T14:10:50+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ja, alsjeblieft."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:52+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ja, alsjeblieft."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:56+02:00",
+          "type": "um_write",
+          "action": "update",
+          "field": "fav_food",
+          "old_value": "chocolate, sushi, pizza",
+          "new_value": "chocolate, pasta, pizza",
+          "success": true,
+          "status_code": 200
+        },
+        {
+          "timestamp": "2026-05-09T14:10:56+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Dankjewel, ik heb dat aangepast."
+        },
+        {
+          "timestamp": "2026-05-09T14:10:56+02:00",
+          "type": "step_end",
+          "step": 3,
+          "name": "First richer topic domain"
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "started_at": "2026-05-09T14:11:01+02:00",
+      "ended_at": "2026-05-09T14:11:23+02:00",
+      "leo_text": "Ik dacht dat ik ook had onthouden dat de geheimen van de lucht vinden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:11:01+02:00",
+          "type": "step_start",
+          "step": 4,
+          "name": "Deliberate memory mistake",
+          "layer": "L2"
+        },
+        {
+          "timestamp": "2026-05-09T14:11:01+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik dacht dat ik ook had onthouden dat de geheimen van de lucht vinden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?"
+        },
+        {
+          "timestamp": "2026-05-09T14:11:17+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Nee, dat klopt niet."
+        },
+        {
+          "timestamp": "2026-05-09T14:11:19+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Nee, dat klopt niet."
+        },
+        {
+          "timestamp": "2026-05-09T14:11:23+02:00",
+          "type": "interpretation",
+          "mode": "mistake",
+          "result": {
+            "response_type": "correction_unclear",
+            "leo_response": "Oh, dat was een foutje van mij! Wat moet ik over dit onderwerp onthouden?",
+            "change": {},
+            "confidence": 0.8,
+            "wrong_value_rejected": true
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:11:23+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Oh, dat was een foutje van mij! Wat moet ik over dit onderwerp onthouden?"
+        },
+        {
+          "timestamp": "2026-05-09T14:11:23+02:00",
+          "type": "step_end",
+          "step": 4,
+          "name": "Deliberate memory mistake"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "timestamp": "2026-05-09T14:10:05+02:00",
+      "type": "step_start",
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:05+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:05+02:00",
+      "type": "step_end",
+      "step": 1,
+      "name": "Greeting"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:06+02:00",
+      "type": "step_start",
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:06+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:06+02:00",
+      "type": "step_end",
+      "step": 2,
+      "name": "Opening summary"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:07+02:00",
+      "type": "step_start",
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:07+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten chocolate, sushi en pizza is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:20+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ik hou helemaal niet van sushi. Ik hou van pasta."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:23+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ik hou helemaal niet van sushi. Ik hou van pasta."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:26+02:00",
+      "type": "interpretation",
+      "mode": "topic",
+      "result": {
+        "response_type": "possible_update",
+        "leo_response": "Oh, je houdt niet van sushi? Wat leuk dat je van pasta houdt! Wil je dat ik je lievelingseten aanpas?",
+        "change": {
+          "action": "update",
+          "field": "fav_food",
+          "field_label": "je lievelingseten",
+          "old_value": "chocolate, sushi, pizza",
+          "new_value": "chocolate, pasta, pizza",
+          "confidence": 0.9,
+          "reason": "De kind heeft sushi gecorrigeerd en pasta toegevoegd.",
+          "source_text": "Ik hou helemaal niet van sushi. Ik hou van pasta.",
+          "confirmation_question": "Mag ik je lievelingseten aanpassen naar chocolate, pasta en pizza?"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:10:26+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Mag ik je lievelingseten aanpassen naar chocolate, pasta en pizza?"
+    },
+    {
+      "timestamp": "2026-05-09T14:10:50+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ja, alsjeblieft."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:52+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ja, alsjeblieft."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:56+02:00",
+      "type": "um_write",
+      "action": "update",
+      "field": "fav_food",
+      "old_value": "chocolate, sushi, pizza",
+      "new_value": "chocolate, pasta, pizza",
+      "success": true,
+      "status_code": 200
+    },
+    {
+      "timestamp": "2026-05-09T14:10:56+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Dankjewel, ik heb dat aangepast."
+    },
+    {
+      "timestamp": "2026-05-09T14:10:56+02:00",
+      "type": "step_end",
+      "step": 3,
+      "name": "First richer topic domain"
+    },
+    {
+      "timestamp": "2026-05-09T14:11:00+02:00",
+      "type": "tester_control",
+      "action": "continue"
+    },
+    {
+      "timestamp": "2026-05-09T14:11:01+02:00",
+      "type": "step_start",
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2"
+    },
+    {
+      "timestamp": "2026-05-09T14:11:01+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik dacht dat ik ook had onthouden dat de geheimen van de lucht vinden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?"
+    },
+    {
+      "timestamp": "2026-05-09T14:11:17+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Nee, dat klopt niet."
+    },
+    {
+      "timestamp": "2026-05-09T14:11:19+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Nee, dat klopt niet."
+    },
+    {
+      "timestamp": "2026-05-09T14:11:23+02:00",
+      "type": "interpretation",
+      "mode": "mistake",
+      "result": {
+        "response_type": "correction_unclear",
+        "leo_response": "Oh, dat was een foutje van mij! Wat moet ik over dit onderwerp onthouden?",
+        "change": {},
+        "confidence": 0.8,
+        "wrong_value_rejected": true
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:11:23+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Oh, dat was een foutje van mij! Wat moet ik over dit onderwerp onthouden?"
+    },
+    {
+      "timestamp": "2026-05-09T14:11:23+02:00",
+      "type": "step_end",
+      "step": 4,
+      "name": "Deliberate memory mistake"
+    },
+    {
+      "timestamp": "2026-05-09T14:22:58+02:00",
+      "type": "tester_control",
+      "action": "quit"
+    }
+  ]
+}

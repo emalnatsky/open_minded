@@ -1,0 +1,686 @@
+{
+  "session_id": "20260509_142325",
+  "script_version": "CRI-BRANCH-BASIC4.0",
+  "child_id": "Julianna",
+  "child_name": "Julianna",
+  "started_at": "2026-05-09T14:23:25+02:00",
+  "ended_at": null,
+  "folder": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_142325",
+  "txt_path": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_142325\\Julianna.txt",
+  "json_path": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_142325\\Julianna.json",
+  "um_snapshot_start": {
+    "child_name": "dat weet ik nog niet",
+    "name": "dat weet ik nog niet",
+    "age": "10",
+    "hobbies": "dat weet ik nog niet",
+    "hobby_fav": "scuba diving",
+    "sports_enjoys": "dat weet ik nog niet",
+    "sports_fav": "dat weet ik nog niet",
+    "sports_plays": "dat weet ik nog niet",
+    "sports_fav_play": "dat weet ik nog niet",
+    "books_enjoys": "dat weet ik nog niet",
+    "books_fav_genre": "dat weet ik nog niet",
+    "books_fav_title": "dat weet ik nog niet",
+    "music_enjoys": "dat weet ik nog niet",
+    "music_talk": "dat weet ik nog niet",
+    "music_plays_instrument": "dat weet ik nog niet",
+    "music_instrument": "dat weet ik nog niet",
+    "animals_enjoys": "dat weet ik nog niet",
+    "animal_talk": "dat weet ik nog niet",
+    "animal_fav": "tropical fish",
+    "has_pet": "dat weet ik nog niet",
+    "pet_type": "dat weet ik nog niet",
+    "pet_name": "Blubby en Bluey",
+    "freetime_fav": "dat weet ik nog niet",
+    "fav_food": "chocolate, pasta, pizza",
+    "aspiration": "find the secret of the ocean"
+  },
+  "planned_steps": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "leo_text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "leo_text": "Ik denk dat Blubby en Bluey een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby en Bluey bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "expects_response": true,
+      "response_mode": "topic_interpretation",
+      "topic": {
+        "domain": "huisdier",
+        "label": "Blubby en Bluey",
+        "fields": [
+          "pet_name",
+          "pet_type",
+          "animal_fav",
+          "has_pet"
+        ],
+        "field_labels": {
+          "pet_name": "de naam van je huisdier",
+          "pet_type": "het soort huisdier",
+          "animal_fav": "je lievelingsdier",
+          "has_pet": "of je een huisdier hebt"
+        },
+        "current_values": {
+          "pet_name": "Blubby en Bluey",
+          "animal_fav": "tropical fish"
+        },
+        "correct_values": [
+          "Blubby en Bluey bij jou hoort",
+          "je tropical fish leuk vindt"
+        ],
+        "memory_link": "Blubby en Bluey belangrijk voor je is",
+        "options": [
+          "Blubby en Bluey",
+          "tropical fish"
+        ],
+        "reground": "Wat ik zeker wil onthouden, is dat Blubby en Bluey belangrijk voor je is."
+      }
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "leo_text": "Ik dacht dat ik ook had onthouden dat gekookte schoenen iets te maken heeft met je lievelingseten. Kan je mij hier wat meer over vertellen?",
+      "expects_response": true,
+      "response_mode": "mistake_interpretation",
+      "mistake": {
+        "topic": {
+          "domain": "eten",
+          "label": "je lievelingseten",
+          "fields": [
+            "fav_food"
+          ],
+          "field_labels": {
+            "fav_food": "je lievelingseten"
+          },
+          "current_values": {
+            "fav_food": "chocolate, pasta, pizza"
+          },
+          "correct_values": [
+            "je lievelingseten chocolate, pasta en pizza is"
+          ],
+          "memory_link": "je lievelingseten chocolate, pasta en pizza is",
+          "options": [
+            "chocolate, pasta en pizza",
+            "iets anders dat je lekker vindt"
+          ],
+          "reground": "Ik weet zeker dat chocolate, pasta en pizza met jouw lievelingseten te maken heeft."
+        },
+        "field": "fav_food",
+        "actual": "chocolate, pasta, pizza",
+        "wrong": "gekookte schoenen"
+      }
+    },
+    {
+      "step": 5,
+      "name": "Goodbye",
+      "layer": "L1",
+      "leo_text": "Dankjewel. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!",
+      "expects_response": false,
+      "response_mode": null
+    }
+  ],
+  "turns": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "started_at": "2026-05-09T14:23:29+02:00",
+      "ended_at": "2026-05-09T14:23:29+02:00",
+      "leo_text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:23:29+02:00",
+          "type": "step_start",
+          "step": 1,
+          "name": "Greeting",
+          "layer": "L1"
+        },
+        {
+          "timestamp": "2026-05-09T14:23:29+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+        },
+        {
+          "timestamp": "2026-05-09T14:23:29+02:00",
+          "type": "step_end",
+          "step": 1,
+          "name": "Greeting"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "started_at": "2026-05-09T14:23:30+02:00",
+      "ended_at": "2026-05-09T14:23:30+02:00",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:23:30+02:00",
+          "type": "step_start",
+          "step": 2,
+          "name": "Opening summary",
+          "layer": "L2"
+        },
+        {
+          "timestamp": "2026-05-09T14:23:30+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+        },
+        {
+          "timestamp": "2026-05-09T14:23:30+02:00",
+          "type": "step_end",
+          "step": 2,
+          "name": "Opening summary"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "started_at": "2026-05-09T14:23:31+02:00",
+      "ended_at": "2026-05-09T14:24:46+02:00",
+      "leo_text": "Ik denk dat Blubby en Bluey een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby en Bluey bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:23:31+02:00",
+          "type": "step_start",
+          "step": 3,
+          "name": "First richer topic domain",
+          "layer": "L2+L3"
+        },
+        {
+          "timestamp": "2026-05-09T14:23:31+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik denk dat Blubby en Bluey een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby en Bluey bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+        },
+        {
+          "timestamp": "2026-05-09T14:24:03+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Nee, ik heb maar 1 vis en die heet Bluey."
+        },
+        {
+          "timestamp": "2026-05-09T14:24:06+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Nee, ik heb maar 1 vis en die heet Bluey."
+        },
+        {
+          "timestamp": "2026-05-09T14:24:10+02:00",
+          "type": "interpretation",
+          "mode": "topic",
+          "result": {
+            "response_type": "possible_update",
+            "leo_response": "Oh, je hebt maar 1 vis en die heet Bluey. Wil je dat ik de naam van je huisdier aanpas?",
+            "change": {
+              "action": "update",
+              "field": "pet_name",
+              "field_label": "de naam van je huisdier",
+              "old_value": "Blubby en Bluey",
+              "new_value": "Bluey",
+              "confidence": 0.9,
+              "reason": "De naam van het huisdier is veranderd.",
+              "source_text": "Nee, ik heb maar 1 vis en die heet Bluey.",
+              "confirmation_question": "Moet ik de naam van je huisdier veranderen naar Bluey?"
+            },
+            "confidence": 0.9
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:24:10+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Moet ik de naam van je huisdier veranderen naar Bluey?"
+        },
+        {
+          "timestamp": "2026-05-09T14:24:41+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ja, alsjeblieft."
+        },
+        {
+          "timestamp": "2026-05-09T14:24:42+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ja, alsjeblieft."
+        },
+        {
+          "timestamp": "2026-05-09T14:24:46+02:00",
+          "type": "um_write",
+          "action": "update",
+          "field": "pet_name",
+          "old_value": "Blubby en Bluey",
+          "new_value": "Bluey",
+          "success": true,
+          "status_code": 200
+        },
+        {
+          "timestamp": "2026-05-09T14:24:46+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Dankjewel, ik heb dat aangepast."
+        },
+        {
+          "timestamp": "2026-05-09T14:24:46+02:00",
+          "type": "step_end",
+          "step": 3,
+          "name": "First richer topic domain"
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "started_at": "2026-05-09T14:24:54+02:00",
+      "ended_at": null,
+      "leo_text": "Ik dacht dat ik ook had onthouden dat gekookte schoenen iets te maken heeft met je lievelingseten. Kan je mij hier wat meer over vertellen?",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:24:54+02:00",
+          "type": "step_start",
+          "step": 4,
+          "name": "Deliberate memory mistake",
+          "layer": "L2"
+        },
+        {
+          "timestamp": "2026-05-09T14:24:54+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik dacht dat ik ook had onthouden dat gekookte schoenen iets te maken heeft met je lievelingseten. Kan je mij hier wat meer over vertellen?"
+        },
+        {
+          "timestamp": "2026-05-09T14:25:10+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Gadverdamme, daar hou ik helemaal niet van."
+        },
+        {
+          "timestamp": "2026-05-09T14:25:13+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Gadverdamme, daar hou ik helemaal niet van."
+        },
+        {
+          "timestamp": "2026-05-09T14:25:17+02:00",
+          "type": "interpretation",
+          "mode": "mistake",
+          "result": {
+            "response_type": "correction_unclear",
+            "leo_response": "Oeps, dan had ik dat verkeerd. Wat moet ik over je lievelingseten onthouden?",
+            "change": {},
+            "confidence": 0.9,
+            "wrong_value_rejected": true,
+            "wrong_value_accepted": false
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:25:17+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Oeps, dan had ik dat verkeerd. Wat moet ik over je lievelingseten onthouden?"
+        },
+        {
+          "timestamp": "2026-05-09T14:25:31+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Mijn lievelings eten is pizza en pannenkoeken."
+        },
+        {
+          "timestamp": "2026-05-09T14:25:33+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Mijn lievelings eten is pizza en pannenkoeken."
+        },
+        {
+          "timestamp": "2026-05-09T14:25:37+02:00",
+          "type": "interpretation",
+          "mode": "mistake",
+          "result": {
+            "response_type": "possible_update",
+            "leo_response": "Oh, dat klinkt lekker! Dus je lievelingseten is pizza en pannenkoeken. Wil je dat ik dat onthoud?",
+            "change": {
+              "action": "update",
+              "field": "fav_food",
+              "field_label": "je lievelingseten",
+              "old_value": "chocolate, pasta, pizza",
+              "new_value": "pizza, pannenkoeken",
+              "confidence": 0.9,
+              "reason": "De kind heeft een correctie gegeven over hun lievelingseten.",
+              "source_text": "Mijn lievelings eten is pizza en pannenkoeken.",
+              "confirmation_question": "Wil je dat ik pizza en pannenkoeken onthoud als je lievelingseten?"
+            },
+            "confidence": 0.9,
+            "wrong_value_rejected": true,
+            "wrong_value_accepted": false
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:25:37+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Wil je dat ik pizza en pannenkoeken onthoud als je lievelingseten?"
+        },
+        {
+          "timestamp": "2026-05-09T14:26:33+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Doe dat maar."
+        },
+        {
+          "timestamp": "2026-05-09T14:26:37+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Doe dat maar."
+        },
+        {
+          "timestamp": "2026-05-09T14:26:39+02:00",
+          "type": "interpretation",
+          "mode": "confirmation",
+          "result": {
+            "decision": "unclear",
+            "confidence": 0.5,
+            "leo_response": "Ik ben niet zeker of je het echt wilt.",
+            "reason": "De uitspraak 'Doe dat maar.' is niet een duidelijke bevestiging van de exacte wijziging."
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:26:39+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik wil zeker weten dat ik niets verkeerd verander."
+        },
+        {
+          "timestamp": "2026-05-09T14:26:39+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Wil je dat ik je lievelingseten verander van chocolate, pasta, pizza naar pizza, pannenkoeken? Zeg ja of nee."
+        },
+        {
+          "timestamp": "2026-05-09T14:26:56+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "(nothing)"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "timestamp": "2026-05-09T14:23:29+02:00",
+      "type": "step_start",
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1"
+    },
+    {
+      "timestamp": "2026-05-09T14:23:29+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+    },
+    {
+      "timestamp": "2026-05-09T14:23:29+02:00",
+      "type": "step_end",
+      "step": 1,
+      "name": "Greeting"
+    },
+    {
+      "timestamp": "2026-05-09T14:23:30+02:00",
+      "type": "step_start",
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2"
+    },
+    {
+      "timestamp": "2026-05-09T14:23:30+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby en Bluey belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+    },
+    {
+      "timestamp": "2026-05-09T14:23:30+02:00",
+      "type": "step_end",
+      "step": 2,
+      "name": "Opening summary"
+    },
+    {
+      "timestamp": "2026-05-09T14:23:31+02:00",
+      "type": "step_start",
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3"
+    },
+    {
+      "timestamp": "2026-05-09T14:23:31+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik denk dat Blubby en Bluey een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby en Bluey bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+    },
+    {
+      "timestamp": "2026-05-09T14:24:03+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Nee, ik heb maar 1 vis en die heet Bluey."
+    },
+    {
+      "timestamp": "2026-05-09T14:24:06+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Nee, ik heb maar 1 vis en die heet Bluey."
+    },
+    {
+      "timestamp": "2026-05-09T14:24:10+02:00",
+      "type": "interpretation",
+      "mode": "topic",
+      "result": {
+        "response_type": "possible_update",
+        "leo_response": "Oh, je hebt maar 1 vis en die heet Bluey. Wil je dat ik de naam van je huisdier aanpas?",
+        "change": {
+          "action": "update",
+          "field": "pet_name",
+          "field_label": "de naam van je huisdier",
+          "old_value": "Blubby en Bluey",
+          "new_value": "Bluey",
+          "confidence": 0.9,
+          "reason": "De naam van het huisdier is veranderd.",
+          "source_text": "Nee, ik heb maar 1 vis en die heet Bluey.",
+          "confirmation_question": "Moet ik de naam van je huisdier veranderen naar Bluey?"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:24:10+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Moet ik de naam van je huisdier veranderen naar Bluey?"
+    },
+    {
+      "timestamp": "2026-05-09T14:24:41+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ja, alsjeblieft."
+    },
+    {
+      "timestamp": "2026-05-09T14:24:42+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ja, alsjeblieft."
+    },
+    {
+      "timestamp": "2026-05-09T14:24:46+02:00",
+      "type": "um_write",
+      "action": "update",
+      "field": "pet_name",
+      "old_value": "Blubby en Bluey",
+      "new_value": "Bluey",
+      "success": true,
+      "status_code": 200
+    },
+    {
+      "timestamp": "2026-05-09T14:24:46+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Dankjewel, ik heb dat aangepast."
+    },
+    {
+      "timestamp": "2026-05-09T14:24:46+02:00",
+      "type": "step_end",
+      "step": 3,
+      "name": "First richer topic domain"
+    },
+    {
+      "timestamp": "2026-05-09T14:24:53+02:00",
+      "type": "tester_control",
+      "action": "continue"
+    },
+    {
+      "timestamp": "2026-05-09T14:24:54+02:00",
+      "type": "step_start",
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2"
+    },
+    {
+      "timestamp": "2026-05-09T14:24:54+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik dacht dat ik ook had onthouden dat gekookte schoenen iets te maken heeft met je lievelingseten. Kan je mij hier wat meer over vertellen?"
+    },
+    {
+      "timestamp": "2026-05-09T14:25:10+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Gadverdamme, daar hou ik helemaal niet van."
+    },
+    {
+      "timestamp": "2026-05-09T14:25:13+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Gadverdamme, daar hou ik helemaal niet van."
+    },
+    {
+      "timestamp": "2026-05-09T14:25:17+02:00",
+      "type": "interpretation",
+      "mode": "mistake",
+      "result": {
+        "response_type": "correction_unclear",
+        "leo_response": "Oeps, dan had ik dat verkeerd. Wat moet ik over je lievelingseten onthouden?",
+        "change": {},
+        "confidence": 0.9,
+        "wrong_value_rejected": true,
+        "wrong_value_accepted": false
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:25:17+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Oeps, dan had ik dat verkeerd. Wat moet ik over je lievelingseten onthouden?"
+    },
+    {
+      "timestamp": "2026-05-09T14:25:31+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Mijn lievelings eten is pizza en pannenkoeken."
+    },
+    {
+      "timestamp": "2026-05-09T14:25:33+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Mijn lievelings eten is pizza en pannenkoeken."
+    },
+    {
+      "timestamp": "2026-05-09T14:25:37+02:00",
+      "type": "interpretation",
+      "mode": "mistake",
+      "result": {
+        "response_type": "possible_update",
+        "leo_response": "Oh, dat klinkt lekker! Dus je lievelingseten is pizza en pannenkoeken. Wil je dat ik dat onthoud?",
+        "change": {
+          "action": "update",
+          "field": "fav_food",
+          "field_label": "je lievelingseten",
+          "old_value": "chocolate, pasta, pizza",
+          "new_value": "pizza, pannenkoeken",
+          "confidence": 0.9,
+          "reason": "De kind heeft een correctie gegeven over hun lievelingseten.",
+          "source_text": "Mijn lievelings eten is pizza en pannenkoeken.",
+          "confirmation_question": "Wil je dat ik pizza en pannenkoeken onthoud als je lievelingseten?"
+        },
+        "confidence": 0.9,
+        "wrong_value_rejected": true,
+        "wrong_value_accepted": false
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:25:37+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Wil je dat ik pizza en pannenkoeken onthoud als je lievelingseten?"
+    },
+    {
+      "timestamp": "2026-05-09T14:26:33+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Doe dat maar."
+    },
+    {
+      "timestamp": "2026-05-09T14:26:37+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Doe dat maar."
+    },
+    {
+      "timestamp": "2026-05-09T14:26:39+02:00",
+      "type": "interpretation",
+      "mode": "confirmation",
+      "result": {
+        "decision": "unclear",
+        "confidence": 0.5,
+        "leo_response": "Ik ben niet zeker of je het echt wilt.",
+        "reason": "De uitspraak 'Doe dat maar.' is niet een duidelijke bevestiging van de exacte wijziging."
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:26:39+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik wil zeker weten dat ik niets verkeerd verander."
+    },
+    {
+      "timestamp": "2026-05-09T14:26:39+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Wil je dat ik je lievelingseten verander van chocolate, pasta, pizza naar pizza, pannenkoeken? Zeg ja of nee."
+    },
+    {
+      "timestamp": "2026-05-09T14:26:56+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "(nothing)"
+    }
+  ]
+}
