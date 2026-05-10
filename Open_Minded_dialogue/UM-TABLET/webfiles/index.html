@@ -3,49 +3,69 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Geheugenboom — Test</title>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>Geheugenboom — Leo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --green-dark:  #2d6a2d;
+      --green-mid:   #3d8b3d;
+      --green-light: #5cb85c;
+      --green-pale:  #e8f5e9;
+      --brown:       #6d4c41;
+      --brown-dark:  #4e342e;
+      --yellow:      #fdd835;
+      --orange:      #fb8c00;
+      --blue:        #1976d2;
+      --pink:        #e91e63;
+      --purple:      #7b1fa2;
+      --teal:        #00796b;
+      --red:         #c62828;
+      --white:       #ffffff;
+      --bg:          #f1f8e9;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: "Nunito", sans-serif;
-      background: #f0f7e6;
+      background: var(--bg);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px 16px 40px;
+      padding: 16px 12px 48px;
+      overflow-x: hidden;
     }
 
-    h1 {
-      font-family: "Fredoka One", cursive;
-      font-size: 2rem;
-      color: #3a8a2e;
+    /* ── Header ─────────────────────────────────────────────────── */
+    .header {
       text-align: center;
-      margin-top: 16px;
-      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+    .header h1 {
+      font-family: "Baloo 2", cursive;
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: var(--green-dark);
+      letter-spacing: 0.5px;
+      line-height: 1;
+    }
+    .header .sub {
+      font-size: 0.82rem;
+      color: #666;
+      margin-top: 4px;
     }
 
-    .subtitle {
-      font-size: 0.9rem;
-      color: #555;
-      text-align: center;
-      margin: 8px auto 0;
-      max-width: 280px;
-      line-height: 1.4;
-    }
-
-    /* ── Status bar ───────────────────────────────────────────────────── */
+    /* ── Status bar ─────────────────────────────────────────────── */
     .status-bar {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       background: white;
       border-radius: 20px;
-      padding: 8px 16px;
-      margin: 14px 0 0;
-      font-size: 0.8rem;
+      padding: 7px 14px;
+      margin: 8px 0 4px;
+      font-size: 0.78rem;
       color: #555;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
@@ -54,391 +74,483 @@
       border-radius: 50%;
       background: #f0a500;
       flex-shrink: 0;
+      transition: background 0.4s;
     }
-    .dot.connected { background: #3a8a2e; }
-    .dot.error     { background: #e03131; }
+    .dot.connected { background: #43a047; }
+    .dot.error     { background: #e53935; }
 
-    /* ── Tree container ───────────────────────────────────────────────── */
+    /* ── Tree ───────────────────────────────────────────────────── */
     .tree-wrap {
       position: relative;
       width: 340px;
-      margin-top: 10px;
-    }
-
-    .tree-img {
-      width: 100%;
-      display: block;
-      /* pixel-art tree via CSS — no external image needed */
-    }
-
-    /* SVG pixel tree */
-    .tree-svg {
-      width: 340px;
-      height: 420px;
-      display: block;
       margin: 0 auto;
     }
-
-    /* ── Category buttons on the tree ────────────────────────────────── */
-    .categories {
-      position: relative;
+    .tree-svg {
       width: 340px;
-      margin-top: -380px; /* overlap with tree */
+      height: 380px;
+      display: block;
     }
 
+    /* ── Category buttons on tree ───────────────────────────────── */
+    .cat-buttons {
+      position: absolute;
+      top: 0; left: 0;
+      width: 340px;
+      height: 380px;
+      pointer-events: none;
+    }
     .cat-btn {
       position: absolute;
-      background: linear-gradient(135deg, #5cb85c, #3a8a2e);
-      color: white;
-      font-family: "Fredoka One", cursive;
-      font-size: 0.85rem;
+      pointer-events: all;
       border: none;
-      border-radius: 20px;
-      padding: 7px 14px 7px 12px;
+      border-radius: 18px;
+      padding: 5px 11px 5px 9px;
+      font-family: "Baloo 2", cursive;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: white;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 6px;
-      box-shadow: 0 3px 8px rgba(0,0,0,0.2);
-      transition: transform 0.15s, box-shadow 0.15s;
+      gap: 5px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
       white-space: nowrap;
+      line-height: 1.2;
     }
-    .cat-btn:hover { transform: scale(1.05); box-shadow: 0 5px 14px rgba(0,0,0,0.25); }
-    .cat-btn:active { transform: scale(0.97); }
-    .cat-btn .arrow {
-      background: rgba(255,255,255,0.25);
-      border-radius: 50%;
-      width: 20px; height: 20px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.7rem;
+    .cat-btn:hover  { transform: scale(1.07); box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
+    .cat-btn:active { transform: scale(0.96); }
+    .cat-btn.active { outline: 3px solid white; }
+    .cat-btn .ico   { font-size: 0.9rem; }
+
+    /* 10 category positions — spread around the tree canopy */
+    .cat-hobby     { background: var(--green-mid);  top: 52px;  left: 14px;  }
+    .cat-sport     { background: var(--blue);        top: 100px; left: 8px;   }
+    .cat-muziek    { background: var(--purple);      top: 148px; left: 12px;  }
+    .cat-boeken    { background: var(--orange);      top: 196px; left: 8px;   }
+    .cat-vrije_tijd{ background: var(--teal);        top: 244px; left: 12px;  }
+    .cat-sociaal   { background: var(--pink);        top: 60px;  right: 8px;  }
+    .cat-dieren    { background: #558b2f;            top: 110px; right: 6px;  }
+    .cat-eten      { background: var(--red);         top: 160px; right: 8px;  }
+    .cat-school    { background: #37474f;            top: 210px; right: 6px;  }
+    .cat-aspiratie { background: #f57f17;            top: 258px; right: 8px;  }
+
+    /* ── Leaf panel (slides up from bottom) ─────────────────────── */
+    .leaf-panel {
+      width: 340px;
+      background: white;
+      border-radius: 20px;
+      padding: 14px 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.13);
+      margin-top: 8px;
+      min-height: 80px;
+      transition: all 0.3s ease;
     }
-
-    /* positions mimicking the screenshot */
-    .cat-eten     { left: 50px;  top: 210px; }
-    .cat-sporten  { left: 44px;  top: 270px; }
-    .cat-school   { left: 38px;  top: 330px; }
-    .cat-persoon  { left: 38px;  top: 388px; }
-
-    /* ── Leaf values that appear when category is clicked ────────────── */
-    .leaves {
-      position: absolute;
-      right: 10px;
-      top: 140px;
+    .leaf-panel .panel-title {
+      font-family: "Baloo 2", cursive;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--green-dark);
+      margin-bottom: 10px;
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 10px;
+      align-items: center;
+      gap: 6px;
+    }
+    .leaf-panel .empty-msg {
+      font-size: 0.82rem;
+      color: #aaa;
+      font-style: italic;
+      text-align: center;
+      padding: 8px 0;
     }
 
-    .leaf {
-      background: #4caf50;
-      color: white;
-      font-family: "Fredoka One", cursive;
-      font-size: 0.9rem;
-      padding: 8px 16px;
-      border-radius: 50% 40% 50% 40% / 40% 50% 40% 50%;
-      box-shadow: 0 3px 10px rgba(0,0,0,0.2);
-      animation: leafIn 0.35s ease-out both;
-      position: relative;
-      cursor: default;
+    /* ── Individual leaf items ──────────────────────────────────── */
+    .leaves-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
-    .leaf::before {
-      content: "";
-      position: absolute;
-      left: -18px; top: 50%;
-      transform: translateY(-50%);
-      width: 18px; height: 2px;
-      background: #5d4037;
+    .leaf {
+      padding: 6px 14px;
+      border-radius: 50px;
+      font-family: "Nunito", sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+      animation: leafPop 0.3s cubic-bezier(0.34,1.56,0.64,1) both;
+      display: flex;
+      align-items: center;
+      gap: 5px;
     }
     .leaf.updated {
-      animation: leafIn 0.35s ease-out both, flashLeaf 1.2s ease-out 0.35s;
+      animation: leafPop 0.3s cubic-bezier(0.34,1.56,0.64,1) both,
+                 flash 1.4s ease-out 0.3s;
+    }
+    @keyframes leafPop {
+      from { opacity:0; transform: scale(0.5) rotate(-8deg); }
+      to   { opacity:1; transform: scale(1)   rotate(0deg);  }
+    }
+    @keyframes flash {
+      0%   { box-shadow: 0 0 0 4px var(--yellow); }
+      100% { box-shadow: 0 2px 6px rgba(0,0,0,0.18); }
     }
 
-    @keyframes leafIn {
-      from { opacity: 0; transform: scale(0.6) rotate(-10deg); }
-      to   { opacity: 1; transform: scale(1) rotate(0deg); }
-    }
-    @keyframes flashLeaf {
-      0%   { background: #fff176; color: #333; }
-      100% { background: #4caf50; color: white; }
+    /* field label inside leaf */
+    .leaf-label {
+      font-size: 0.7rem;
+      opacity: 0.75;
+      font-weight: 400;
     }
 
-    /* ── Robot + speech bubble ────────────────────────────────────────── */
+    /* ── Robot row ──────────────────────────────────────────────── */
     .robot-row {
-      position: relative;
-      width: 340px;
-      margin-top: -10px;
       display: flex;
       align-items: flex-end;
-      gap: 12px;
-      padding-left: 10px;
-      z-index: 10;
+      gap: 10px;
+      width: 340px;
+      margin-top: 10px;
+      padding-left: 6px;
     }
-
+    .robot-emoji { font-size: 3rem; line-height: 1; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.2)); }
     .speech-bubble {
       background: #d4f0c0;
-      border: 2px solid #3a8a2e;
-      border-radius: 16px;
-      padding: 10px 14px;
-      font-size: 0.82rem;
+      border: 2px solid var(--green-mid);
+      border-radius: 14px;
+      padding: 9px 13px;
+      font-size: 0.8rem;
       color: #2d5a27;
       font-weight: 600;
-      max-width: 190px;
+      max-width: 200px;
       line-height: 1.35;
       position: relative;
+      transition: opacity 0.3s;
     }
     .speech-bubble::after {
       content: "";
       position: absolute;
-      bottom: 14px; right: -12px;
-      border: 6px solid transparent;
-      border-left-color: #3a8a2e;
+      bottom: 12px; right: -11px;
+      border: 5px solid transparent;
+      border-left-color: var(--green-mid);
     }
 
-    .robot-emoji {
-      font-size: 3.5rem;
-      line-height: 1;
-      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
-    }
-
-    /* ── Timestamp ────────────────────────────────────────────────────── */
+    /* ── Timestamp ──────────────────────────────────────────────── */
     .timestamp {
-      font-size: 0.72rem;
-      color: #aaa;
-      margin-top: 16px;
+      font-size: 0.7rem;
+      color: #bbb;
+      margin-top: 10px;
       text-align: center;
     }
 
-    /* ── Test controls (stub-only) ────────────────────────────────────── */
-    .test-panel {
-      background: #fffde7;
-      border: 2px dashed #f9a825;
-      border-radius: 14px;
-      padding: 14px 18px;
-      margin-top: 24px;
+    /* ── No-data notice ─────────────────────────────────────────── */
+    .no-data {
+      background: #fff8e1;
+      border: 1.5px dashed #fdd835;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      color: #795548;
+      text-align: center;
+      margin-top: 8px;
       width: 340px;
-      font-size: 0.82rem;
-      color: #555;
+      display: none;
     }
-    .test-panel h3 {
-      font-family: "Fredoka One", cursive;
-      color: #f57f17;
-      margin-bottom: 8px;
-      font-size: 1rem;
-    }
-    .test-btn {
-      background: #f9a825;
-      color: white;
-      border: none;
-      border-radius: 10px;
-      padding: 7px 14px;
-      font-family: "Fredoka One", cursive;
-      font-size: 0.85rem;
-      cursor: pointer;
-      margin: 4px 4px 0 0;
-      transition: background 0.2s;
-    }
-    .test-btn:hover { background: #f57f17; }
   </style>
 </head>
 <body>
 
-  <h1>Geheugenboom</h1>
-  <p class="subtitle">Laten we beginnen met wat ik weet over jou door te klikken op een van de categorieën.</p>
+  <div class="header">
+    <h1>🌳 Geheugenboom</h1>
+    <p class="sub">Klik op een categorie om te zien wat ik over jou onthoud</p>
+  </div>
 
   <div class="status-bar">
     <div class="dot" id="status-dot"></div>
     <span id="status-text">Verbinden met server…</span>
   </div>
 
-  <!-- Tree SVG (pixel-art style) -->
-  <div style="position:relative; width:340px; margin-top:10px;">
-    <svg class="tree-svg" viewBox="0 0 340 420" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tree + category buttons -->
+  <div class="tree-wrap">
+    <svg class="tree-svg" viewBox="0 0 340 380" xmlns="http://www.w3.org/2000/svg">
       <!-- trunk -->
-      <rect x="150" y="260" width="40" height="140" rx="8" fill="#6d4c41"/>
-      <rect x="160" y="260" width="10" height="140" fill="#5d4037" opacity="0.4"/>
-      <!-- main canopy -->
-      <ellipse cx="170" cy="190" rx="130" ry="120" fill="#388e3c"/>
-      <ellipse cx="170" cy="170" rx="110" ry="100" fill="#43a047"/>
-      <ellipse cx="130" cy="180" rx="80" ry="70"  fill="#4caf50"/>
-      <ellipse cx="210" cy="175" rx="75" ry="65"  fill="#4caf50"/>
-      <ellipse cx="170" cy="140" rx="90" ry="80"  fill="#66bb6a"/>
-      <!-- pixel texture dots -->
-      <circle cx="120" cy="130" r="12" fill="#81c784" opacity="0.6"/>
-      <circle cx="200" cy="120" r="10" fill="#81c784" opacity="0.5"/>
-      <circle cx="150" cy="100" r="14" fill="#a5d6a7" opacity="0.5"/>
-      <circle cx="230" cy="160" r="9"  fill="#81c784" opacity="0.5"/>
-      <circle cx="100" cy="170" r="11" fill="#66bb6a" opacity="0.6"/>
+      <rect x="152" y="240" width="36" height="130" rx="8" fill="#6d4c41"/>
+      <rect x="162" y="240" width="10" height="130" fill="#5d4037" opacity="0.35"/>
+      <!-- root bumps -->
+      <ellipse cx="138" cy="368" rx="22" ry="8" fill="#5d4037" opacity="0.5"/>
+      <ellipse cx="202" cy="368" rx="22" ry="8" fill="#5d4037" opacity="0.5"/>
+      <!-- canopy layers -->
+      <ellipse cx="170" cy="175" rx="130" ry="110" fill="#2e7d32"/>
+      <ellipse cx="170" cy="155" rx="115" ry="95"  fill="#388e3c"/>
+      <ellipse cx="135" cy="165" rx="85"  ry="72"  fill="#43a047"/>
+      <ellipse cx="205" cy="160" rx="80"  ry="68"  fill="#43a047"/>
+      <ellipse cx="170" cy="125" rx="95"  ry="82"  fill="#4caf50"/>
+      <ellipse cx="170" cy="100" rx="70"  ry="60"  fill="#66bb6a"/>
+      <!-- texture highlights -->
+      <circle cx="118" cy="110" r="13" fill="#81c784" opacity="0.5"/>
+      <circle cx="205" cy="105" r="11" fill="#81c784" opacity="0.45"/>
+      <circle cx="155" cy="82"  r="15" fill="#a5d6a7" opacity="0.45"/>
+      <circle cx="230" cy="150" r="10" fill="#81c784" opacity="0.4"/>
+      <circle cx="100" cy="155" r="12" fill="#66bb6a" opacity="0.5"/>
+      <circle cx="185" cy="65"  r="9"  fill="#c8e6c9" opacity="0.5"/>
       <!-- ground -->
-      <ellipse cx="170" cy="400" rx="120" ry="18" fill="#558b2f" opacity="0.4"/>
-      <ellipse cx="170" cy="398" rx="90"  ry="12" fill="#33691e" opacity="0.3"/>
-      <!-- small stones -->
-      <ellipse cx="80"  cy="402" rx="10" ry="6" fill="#90a4ae" opacity="0.5"/>
-      <ellipse cx="265" cy="404" rx="8"  ry="5" fill="#90a4ae" opacity="0.4"/>
+      <ellipse cx="170" cy="370" rx="115" ry="14" fill="#558b2f" opacity="0.35"/>
     </svg>
 
     <!-- Category buttons -->
-    <div class="categories" id="cat-container">
-      <button class="cat-btn cat-eten"    onclick="showCategory('eten')"   >Favoriete Eten    <span class="arrow">›</span></button>
-      <button class="cat-btn cat-sporten" onclick="showCategory('sporten')">Favoriete Sporten <span class="arrow">›</span></button>
-      <button class="cat-btn cat-school"  onclick="showCategory('school')" >Vakken die ik leuk vind <span class="arrow">›</span></button>
-      <button class="cat-btn cat-persoon" onclick="showCategory('persoon')">Persoonlijke informatie <span class="arrow">›</span></button>
+    <div class="cat-buttons" id="cat-container">
+      <button class="cat-btn cat-hobby"      id="btn-hobby"      onclick="showCategory('hobby')"      ><span class="ico">🎨</span>Hobby's</button>
+      <button class="cat-btn cat-sport"      id="btn-sport"      onclick="showCategory('sport')"      ><span class="ico">⚽</span>Sport</button>
+      <button class="cat-btn cat-muziek"     id="btn-muziek"     onclick="showCategory('muziek')"     ><span class="ico">🎵</span>Muziek</button>
+      <button class="cat-btn cat-boeken"     id="btn-boeken"     onclick="showCategory('boeken')"     ><span class="ico">📚</span>Boeken</button>
+      <button class="cat-btn cat-vrije_tijd" id="btn-vrije_tijd" onclick="showCategory('vrije_tijd')" ><span class="ico">🌤</span>Vrije Tijd</button>
+      <button class="cat-btn cat-sociaal"    id="btn-sociaal"    onclick="showCategory('sociaal')"    ><span class="ico">👫</span>Sociaal</button>
+      <button class="cat-btn cat-dieren"     id="btn-dieren"     onclick="showCategory('dieren')"     ><span class="ico">🐾</span>Dieren</button>
+      <button class="cat-btn cat-eten"       id="btn-eten"       onclick="showCategory('eten')"       ><span class="ico">🍕</span>Eten</button>
+      <button class="cat-btn cat-school"     id="btn-school"     onclick="showCategory('school')"     ><span class="ico">📖</span>School</button>
+      <button class="cat-btn cat-aspiratie"  id="btn-aspiratie"  onclick="showCategory('aspiratie')"  ><span class="ico">⭐</span>Dromen</button>
     </div>
+  </div>
 
-    <!-- Leaf values -->
-    <div class="leaves" id="leaves"></div>
+  <!-- Leaf panel -->
+  <div class="leaf-panel" id="leaf-panel">
+    <div class="empty-msg">Klik op een categorie hierboven ↑</div>
+  </div>
+
+  <div class="no-data" id="no-data-notice">
+    Geen data beschikbaar — is Eunike's API actief?
   </div>
 
   <!-- Robot -->
   <div class="robot-row">
-    <div class="speech-bubble" id="speech">Welkom bij mijn Geheugenboom</div>
+    <div class="speech-bubble" id="speech">Welkom bij mijn Geheugenboom!</div>
     <div class="robot-emoji">🤖</div>
   </div>
 
   <div class="timestamp" id="timestamp"></div>
 
-  <!-- Stub test panel -->
-  <div class="test-panel">
-    <h3>🧪 Stub — test controls</h3>
-    <p style="margin-bottom:8px">Simuleer een UM update die normaal via Socket.IO binnenkomt.</p>
-    <button class="test-btn" onclick="simulateUpdate()">📡 Simuleer update</button>
-    <button class="test-btn" onclick="clearLeaves()">🗑 Wis bladeren</button>
-  </div>
-
   <!-- Socket.IO -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
   <script>
 
-    // ── Stub UM data — matches what Eunike's API returns ──────────────────────
-    const STUB_UM = {
-      eten:    { fav_food: "Pizza", fav_food_2: "Sushi" },
-      sporten: { sports_fav: "Voetbal", sports_fav_play: "Zwemmen" },
-      school:  { fav_subject: "Gym", school_strength: "Tekenen" },
-      persoon: { age: "9", has_best_friend: "Ja" },
+    // ── Category config ───────────────────────────────────────────────────────
+    // Keys match Eunike's CATEGORY_LABELS dict exactly.
+    // Dutch label + emoji colour used for leaf pill colour.
+    const CATEGORIES = {
+      hobby:      { label: "Hobby's",        icon: "🎨", color: "#3d8b3d" },
+      sport:      { label: "Sport",           icon: "⚽", color: "#1976d2" },
+      muziek:     { label: "Muziek",          icon: "🎵", color: "#7b1fa2" },
+      boeken:     { label: "Boeken",          icon: "📚", color: "#fb8c00" },
+      vrije_tijd: { label: "Vrije Tijd",      icon: "🌤", color: "#00796b" },
+      sociaal:    { label: "Sociaal",         icon: "👫", color: "#e91e63" },
+      dieren:     { label: "Dieren",          icon: "🐾", color: "#558b2f" },
+      eten:       { label: "Eten",            icon: "🍕", color: "#c62828" },
+      school:     { label: "School",          icon: "📖", color: "#37474f" },
+      aspiratie:  { label: "Dromen & Idolen", icon: "⭐", color: "#f57f17" },
     };
 
-    const STUB_UM_UPDATED = {
-      eten:    { fav_food: "Sushi 🍣", fav_food_2: "Pizza" },
-      sporten: { sports_fav: "Tennis", sports_fav_play: "Zwemmen" },
-      school:  { fav_subject: "Gym", school_strength: "Rekenen" },
-      persoon: { age: "9", has_best_friend: "Ja" },
-    };
-
+    // ── Live UM store — populated via Socket.IO from um_tablet_server.py ─────
+    // Structure: { category_key: { field_name: { value, prev_value } } }
+    window.liveUM = {};
+    let liveUM = window.liveUM;
     let currentCategory = null;
-    let lastUM = STUB_UM;
-    let updated = false;
 
-    // ── Leaf rendering ────────────────────────────────────────────────────────
-    function showCategory(cat) {
-      currentCategory = cat;
-      const data  = updated ? STUB_UM_UPDATED[cat] : STUB_UM[cat];
-      const prev  = STUB_UM[cat];
-      renderLeaves(data, prev);
-      setSpeech(catLabel(cat));
+    // ── Category mapping — maps Eunike's API category label to our key ───────
+    // Eunike's CATEGORY_LABELS values → our category keys
+    const CAT_LABEL_TO_KEY = {
+      "hobby's":        "hobby",
+      "hobbies":        "hobby",
+      "sport":          "sport",
+      "muziek":         "muziek",
+      "music":          "muziek",
+      "boeken":         "boeken",
+      "books":          "boeken",
+      "vrije tijd":     "vrije_tijd",
+      "vrije_tijd":     "vrije_tijd",
+      "free time":      "vrije_tijd",
+      "sociaal":        "sociaal",
+      "social":         "sociaal",
+      "dieren":         "dieren",
+      "animals":        "dieren",
+      "eten":           "eten",
+      "food":           "eten",
+      "school":         "school",
+      "dromen & idolen":"aspiratie",
+      "aspiratie":      "aspiratie",
+      "aspiration":     "aspiratie",
+      "dromen":         "aspiratie",
+    };
+
+    function mapCategory(rawLabel) {
+      if (!rawLabel) return "overig";
+      const lower = rawLabel.toLowerCase().trim();
+      // exact match first
+      if (CAT_LABEL_TO_KEY[lower]) return CAT_LABEL_TO_KEY[lower];
+      // partial match fallback
+      for (const [key, val] of Object.entries(CAT_LABEL_TO_KEY)) {
+        if (lower.includes(key) || key.includes(lower)) return val;
+      }
+      return "overig";
     }
 
-    function renderLeaves(data, prev) {
-      const container = document.getElementById("leaves");
-      container.innerHTML = "";
-      Object.entries(data).forEach(([key, val], i) => {
-        const leaf = document.createElement("div");
-        leaf.className = "leaf" + (prev && prev[key] !== val ? " updated" : "");
-        leaf.textContent = val;
-        leaf.style.animationDelay = (i * 0.08) + "s";
-        container.appendChild(leaf);
-      });
+    // ── Field name → readable Dutch label ────────────────────────────────────
+    const FIELD_LABELS = {
+      hobby_fav:           "Lievelingshobby",
+      hobbies:             "Hobbies",
+      sports_enjoys:       "Houdt van sport",
+      sports_fav:          "Lievelingssport",
+      sports_plays:        "Doet zelf",
+      sports_fav_play:     "Speelt het liefst",
+      music_enjoys:        "Houdt van muziek",
+      music_plays_instrument: "Speelt instrument",
+      music_instrument:    "Instrument",
+      books_enjoys:        "Houdt van boeken",
+      books_fav_genre:     "Favoriete genre",
+      books_fav_title:     "Lievelingsboek",
+      freetime_fav:        "Liefste bezigheid",
+      has_best_friend:     "Heeft beste vriend",
+      animals_enjoys:      "Houdt van dieren",
+      animal_fav:          "Lievelingsdier",
+      has_pet:             "Heeft huisdier",
+      pet_type:            "Soort huisdier",
+      pet_name:            "Naam huisdier",
+      fav_food:            "Lievelingseten",
+      fav_subject:         "Lievelingsvak",
+      school_strength:     "Goed in",
+      school_difficulty:   "Lastig vak",
+      interest:            "Interesses",
+      aspiration:          "Wil later worden",
+      role_model:          "Voorbeeld",
+      age:                 "Leeftijd",
+      name:                "Naam",
+    };
+
+    function fieldLabel(key) {
+      return FIELD_LABELS[key] || key.replace(/_/g, " ");
     }
 
-    function clearLeaves() {
-      document.getElementById("leaves").innerHTML = "";
-      currentCategory = null;
-      setSpeech("Klik op een categorie!");
-    }
+    // ── Render leaves for selected category ───────────────────────────────────
+    function showCategory(catKey) {
+      currentCategory = catKey;
 
-    function catLabel(cat) {
-      return {
-        eten:    "Dit weet ik over jouw eten!",
-        sporten: "Dit weet ik over jouw sport!",
-        school:  "Dit weet ik over jouw school!",
-        persoon: "Dit weet ik over jou!",
-      }[cat] || "Welkom bij mijn Geheugenboom";
+      // highlight active button
+      document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("active"));
+      const activeBtn = document.getElementById("btn-" + catKey);
+      if (activeBtn) activeBtn.classList.add("active");
+
+      const cat = CATEGORIES[catKey];
+      const panel = document.getElementById("leaf-panel");
+      const data = liveUM[catKey] || {};
+      const entries = Object.entries(data).filter(([k, v]) => v && v.value);
+
+      if (entries.length === 0) {
+        panel.innerHTML = `
+          <div class="panel-title">${cat ? cat.icon + " " + cat.label : catKey}</div>
+          <div class="empty-msg">Nog geen informatie in deze categorie</div>
+        `;
+        setSpeech("Ik weet hier nog niets over!");
+        return;
+      }
+
+      const color = cat ? cat.color : "#4caf50";
+      const leavesHTML = entries.map(([field, meta], i) => {
+        const isUpdated = meta.updated ? " updated" : "";
+        const delay = (i * 0.06).toFixed(2);
+        return `
+          <div class="leaf${isUpdated}" style="background:${color}; animation-delay:${delay}s">
+            <span class="leaf-label">${fieldLabel(field)}</span>
+            &nbsp;${meta.value}
+          </div>`;
+      }).join("");
+
+      panel.innerHTML = `
+        <div class="panel-title">${cat ? cat.icon + " " + cat.label : catKey}</div>
+        <div class="leaves-grid">${leavesHTML}</div>
+      `;
+
+      if (cat) setSpeech(`Dit weet ik over jouw ${cat.label.toLowerCase()}!`);
     }
 
     function setSpeech(text) {
       document.getElementById("speech").textContent = text;
     }
 
-    // ── Simulate Socket.IO update ─────────────────────────────────────────────
-    function simulateUpdate() {
-      updated = true;
-      setStatus("connected", "Update ontvangen! ✓");
+    // ── Socket.IO — real updates from um_tablet_server.py ────────────────────
+    // um_tablet_server.py broadcasts: { child_id, fields: { field: { value, category, changes } }, timestamp }
+    function handleUMUpdate(data) {
+      console.log("handleUMUpdate called with", Object.keys(data.fields || {}).length, "fields");
+      const fields    = data.fields    || {};
+      const timestamp = data.timestamp || "";
+
+      // Group by category key — map Eunike's category label to our keys
+      const grouped = {};
+      Object.entries(fields).forEach(([field, meta]) => {
+        const rawCat = meta.category || "";
+        const catKey = mapCategory(rawCat);
+        if (!grouped[catKey]) grouped[catKey] = {};
+
+        const prevValue = (liveUM[catKey] && liveUM[catKey][field])
+          ? liveUM[catKey][field].value : null;
+        const newValue = meta.value;
+
+        grouped[catKey][field] = {
+          value:   newValue || "—",
+          updated: prevValue !== null && prevValue !== newValue,
+        };
+      });
+
+      // Merge into liveUM
+      Object.assign(liveUM, grouped);
+
+      // Update timestamp
       document.getElementById("timestamp").textContent =
-        "Bijgewerkt: " + new Date().toLocaleTimeString("nl-NL");
-      if (currentCategory) {
+        timestamp ? "Bijgewerkt: " + timestamp : "";
+
+      // Re-render if a category is open
+      if (currentCategory && liveUM[currentCategory]) {
         showCategory(currentCategory);
-      } else {
-        setSpeech("Ik heb nieuwe informatie ontvangen!");
       }
+
+      // Show/hide no-data notice
+      const hasData = Object.values(liveUM).some(cat =>
+        Object.values(cat).some(f => f.value && f.value !== "—")
+      );
+      document.getElementById("no-data-notice").style.display = hasData ? "none" : "block";
+
+      setSpeech(currentCategory ? null : "Ik heb nieuwe informatie ontvangen!");
+      setStatus("connected", "Live data ontvangen ✓");
     }
 
     // ── Status helpers ────────────────────────────────────────────────────────
     function setStatus(state, text) {
-      const dot  = document.getElementById("status-dot");
-      const span = document.getElementById("status-text");
-      dot.className  = "dot " + state;
-      span.textContent = text;
+      document.getElementById("status-dot").className  = "dot " + state;
+      document.getElementById("status-text").textContent = text;
     }
 
-    // ── Real Socket.IO connection ─────────────────────────────────────────────
-    // When running under the SIC webserver, this connects automatically.
-    // If the server isn't running, it fails gracefully — stub controls still work.
+    // ── Socket.IO connection ──────────────────────────────────────────────────
     try {
-      const socket = io({ transports: ["websocket", "polling"] });
+      window.socket = io({ transports: ["websocket", "polling"] });
 
-      socket.on("connect", () => {
+      window.socket.on("connect", () => {
         setStatus("connected", "Verbonden met server ✓");
       });
-
-      socket.on("disconnect", () => {
+      window.socket.on("disconnect", () => {
         setStatus("error", "Verbinding verbroken");
       });
-
-      socket.on("connect_error", () => {
-        setStatus("error", "Server niet bereikbaar — gebruik stub controls");
+      window.socket.on("connect_error", () => {
+        setStatus("error", "Server niet bereikbaar");
       });
-
-      // Real UM update from um_tablet_server.py
-      socket.on("um_update", (data) => {
-        const fields    = data.fields || {};
-        const timestamp = data.timestamp || "";
-        setStatus("connected", "Live update ontvangen ✓");
-        document.getElementById("timestamp").textContent = "Bijgewerkt: " + timestamp;
-
-        // Flatten the nested {value, category, changes} structure into
-        // category buckets so the tree can display them
-        const grouped = {};
-        Object.entries(fields).forEach(([field, meta]) => {
-          const cat = (meta.category || "overig").toLowerCase();
-          if (!grouped[cat]) grouped[cat] = {};
-          grouped[cat][field] = meta.value || "—";
-        });
-
-        // Rebuild STUB_UM from live data so category buttons show real values
-        Object.assign(lastUM, grouped);
-
-        if (currentCategory && grouped[currentCategory]) {
-          renderLeaves(grouped[currentCategory], {});
+      window.socket.on("sic/webinfo", (data) => {
+        if (data.label === "um_update") {
+          handleUMUpdate(data.message);
         }
-        setSpeech("Ik heb nieuwe informatie ontvangen!");
       });
 
     } catch (e) {
-      setStatus("error", "Socket.IO niet beschikbaar — gebruik stub controls");
+      setStatus("error", "Socket.IO niet beschikbaar");
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
     setStatus("connecting", "Verbinden met server…");
-
   </script>
 </body>
 </html>
