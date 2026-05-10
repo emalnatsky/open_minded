@@ -101,7 +101,7 @@ else:
 # ---------------------------------------------------------------VERIFY: read hobby_fav again and confirm it changed -----------------------------------------------------------------
 sep("VERIFY: read hobby_fav again")
 
-time.sleep(0.5)  # small wait for GraphDB to commit
+time.sleep(0.5)  
 
 r = requests.get(f"{BASE_URL}/api/um/{CHILD_ID}/field/{FIELD}", timeout=5)
 
@@ -139,7 +139,7 @@ else:
 sep("RESTORE: reset hobby_fav back to snorkelen")
 
 print("  Waiting 20 seconds so you can see the tablet update...")
-time.sleep(20)  # ← add this line
+time.sleep(20)  # change it if you feel like its too much i just needed to clearly see the tablet change without refresh
 
 r = requests.post(
     f"{BASE_URL}/api/um/{CHILD_ID}/fields",
