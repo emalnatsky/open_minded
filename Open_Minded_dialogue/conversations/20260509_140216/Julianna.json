@@ -1,0 +1,564 @@
+{
+  "session_id": "20260509_140216",
+  "script_version": "CRI-BRANCH-BASIC4.0",
+  "child_id": "Julianna",
+  "child_name": "Julianna",
+  "started_at": "2026-05-09T14:02:16+02:00",
+  "ended_at": "2026-05-09T14:04:41+02:00",
+  "folder": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_140216",
+  "txt_path": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_140216\\Julianna.txt",
+  "json_path": "C:\\Users\\Sander\\dev\\open_minded\\conversations\\20260509_140216\\Julianna.json",
+  "um_snapshot_start": {
+    "child_name": "dat weet ik nog niet",
+    "name": "dat weet ik nog niet",
+    "age": "10",
+    "hobbies": "dat weet ik nog niet",
+    "hobby_fav": "scuba diving",
+    "sports_enjoys": "dat weet ik nog niet",
+    "sports_fav": "dat weet ik nog niet",
+    "sports_plays": "dat weet ik nog niet",
+    "sports_fav_play": "dat weet ik nog niet",
+    "books_enjoys": "dat weet ik nog niet",
+    "books_fav_genre": "dat weet ik nog niet",
+    "books_fav_title": "dat weet ik nog niet",
+    "music_enjoys": "dat weet ik nog niet",
+    "music_talk": "dat weet ik nog niet",
+    "music_plays_instrument": "dat weet ik nog niet",
+    "music_instrument": "dat weet ik nog niet",
+    "animals_enjoys": "dat weet ik nog niet",
+    "animal_talk": "dat weet ik nog niet",
+    "animal_fav": "tropical fish",
+    "has_pet": "dat weet ik nog niet",
+    "pet_type": "dat weet ik nog niet",
+    "pet_name": "Blubby",
+    "freetime_fav": "dat weet ik nog niet",
+    "fav_food": "chocolate, sushi, pizza",
+    "aspiration": "find the secret of the ocean"
+  },
+  "planned_steps": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "leo_text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "leo_text": "Ik denk dat Blubby een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "expects_response": true,
+      "response_mode": "topic_interpretation",
+      "topic": {
+        "domain": "huisdier",
+        "label": "Blubby",
+        "fields": [
+          "pet_name",
+          "pet_type",
+          "animal_fav",
+          "has_pet"
+        ],
+        "field_labels": {
+          "pet_name": "de naam van je huisdier",
+          "pet_type": "het soort huisdier",
+          "animal_fav": "je lievelingsdier",
+          "has_pet": "of je een huisdier hebt"
+        },
+        "current_values": {
+          "pet_name": "Blubby",
+          "animal_fav": "tropical fish"
+        },
+        "correct_values": [
+          "Blubby bij jou hoort",
+          "je tropical fish leuk vindt"
+        ],
+        "memory_link": "Blubby belangrijk voor je is",
+        "options": [
+          "Blubby",
+          "tropical fish"
+        ],
+        "reground": "Wat ik zeker wil onthouden, is dat Blubby belangrijk voor je is."
+      }
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "leo_text": "Ik dacht dat ik ook had onthouden dat sneeuwpop maken iets te maken heeft met je favoriete hobby. Kan je mij hier wat meer over vertellen?",
+      "expects_response": true,
+      "response_mode": "mistake_interpretation",
+      "mistake": {
+        "topic": {
+          "domain": "hobby",
+          "label": "scuba diving",
+          "fields": [
+            "hobby_fav",
+            "hobbies",
+            "freetime_fav"
+          ],
+          "field_labels": {
+            "hobby_fav": "je favoriete hobby",
+            "hobbies": "je hobby's",
+            "freetime_fav": "wat je graag in je vrije tijd doet"
+          },
+          "current_values": {
+            "hobby_fav": "scuba diving"
+          },
+          "correct_values": [
+            "je graag iets doet met scuba diving",
+            "scuba diving bij jouw interesses hoort"
+          ],
+          "memory_link": "scuba diving bij jouw interesses hoort",
+          "options": [
+            "scuba diving",
+            "je hobby's"
+          ],
+          "reground": "Ik weet zeker dat scuba diving bij jouw interesses hoort."
+        },
+        "field": "hobby_fav",
+        "actual": "scuba diving",
+        "wrong": "sneeuwpop maken"
+      }
+    },
+    {
+      "step": 5,
+      "name": "Goodbye",
+      "layer": "L1",
+      "leo_text": "Dankjewel. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!",
+      "expects_response": false,
+      "response_mode": null
+    }
+  ],
+  "turns": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "started_at": "2026-05-09T14:02:40+02:00",
+      "ended_at": "2026-05-09T14:02:40+02:00",
+      "leo_text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:02:40+02:00",
+          "type": "step_start",
+          "step": 1,
+          "name": "Greeting",
+          "layer": "L1"
+        },
+        {
+          "timestamp": "2026-05-09T14:02:40+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+        },
+        {
+          "timestamp": "2026-05-09T14:02:40+02:00",
+          "type": "step_end",
+          "step": 1,
+          "name": "Greeting"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "started_at": "2026-05-09T14:02:41+02:00",
+      "ended_at": "2026-05-09T14:02:41+02:00",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:02:41+02:00",
+          "type": "step_start",
+          "step": 2,
+          "name": "Opening summary",
+          "layer": "L2"
+        },
+        {
+          "timestamp": "2026-05-09T14:02:41+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+        },
+        {
+          "timestamp": "2026-05-09T14:02:41+02:00",
+          "type": "step_end",
+          "step": 2,
+          "name": "Opening summary"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "started_at": "2026-05-09T14:02:42+02:00",
+      "ended_at": "2026-05-09T14:03:46+02:00",
+      "leo_text": "Ik denk dat Blubby een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:02:42+02:00",
+          "type": "step_start",
+          "step": 3,
+          "name": "First richer topic domain",
+          "layer": "L2+L3"
+        },
+        {
+          "timestamp": "2026-05-09T14:02:42+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik denk dat Blubby een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+        },
+        {
+          "timestamp": "2026-05-09T14:03:03+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Nee, mijn feestheid bloei."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:09+02:00",
+          "type": "transcript_review",
+          "action": "retry_requested",
+          "transcript": "Nee, mijn feestheid bloei."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:21+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Nee, mijn vis heet Bluey."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:24+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Nee, mijn vis heet Bluey."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:28+02:00",
+          "type": "interpretation",
+          "mode": "topic",
+          "result": {
+            "response_type": "possible_update",
+            "leo_response": "Oh, je vis heet Bluey! Wil je dat ik de naam van je huisdier verander naar Bluey?",
+            "change": {
+              "action": "update",
+              "field": "pet_name",
+              "field_label": "de naam van je huisdier",
+              "old_value": "Blubby",
+              "new_value": "Bluey",
+              "confidence": 0.9,
+              "reason": "De naam van het huisdier is veranderd.",
+              "source_text": "Nee, mijn vis heet Bluey.",
+              "confirmation_question": "Wil je dat ik de naam van je huisdier verander naar Bluey?"
+            },
+            "confidence": 0.9
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:03:28+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Wil je dat ik de naam van je huisdier verander naar Bluey?"
+        },
+        {
+          "timestamp": "2026-05-09T14:03:39+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ja, dat mag."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:42+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ja, dat mag."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:46+02:00",
+          "type": "um_write",
+          "action": "update",
+          "field": "pet_name",
+          "old_value": "Blubby",
+          "new_value": "Bluey",
+          "success": true,
+          "status_code": 200
+        },
+        {
+          "timestamp": "2026-05-09T14:03:46+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Dankjewel, ik heb dat aangepast."
+        },
+        {
+          "timestamp": "2026-05-09T14:03:46+02:00",
+          "type": "step_end",
+          "step": 3,
+          "name": "First richer topic domain"
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "started_at": "2026-05-09T14:03:55+02:00",
+      "ended_at": "2026-05-09T14:04:17+02:00",
+      "leo_text": "Ik dacht dat ik ook had onthouden dat sneeuwpop maken iets te maken heeft met je favoriete hobby. Kan je mij hier wat meer over vertellen?",
+      "events": [
+        {
+          "timestamp": "2026-05-09T14:03:55+02:00",
+          "type": "step_start",
+          "step": 4,
+          "name": "Deliberate memory mistake",
+          "layer": "L2"
+        },
+        {
+          "timestamp": "2026-05-09T14:03:55+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik dacht dat ik ook had onthouden dat sneeuwpop maken iets te maken heeft met je favoriete hobby. Kan je mij hier wat meer over vertellen?"
+        },
+        {
+          "timestamp": "2026-05-09T14:04:10+02:00",
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ik heb nooit gezegd dat ik van sneeuwpop maken houd."
+        },
+        {
+          "timestamp": "2026-05-09T14:04:14+02:00",
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ik heb nooit gezegd dat ik van sneeuwpop maken houd."
+        },
+        {
+          "timestamp": "2026-05-09T14:04:17+02:00",
+          "type": "interpretation",
+          "mode": "mistake",
+          "result": {
+            "response_type": "no_change",
+            "leo_response": "Oké, dan is er niets nieuws over scuba diving. Dan onthoud ik wat ik al wist.",
+            "change": {},
+            "confidence": 1.0
+          }
+        },
+        {
+          "timestamp": "2026-05-09T14:04:17+02:00",
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Oké, dan is er niets nieuws over scuba diving. Dan onthoud ik wat ik al wist."
+        },
+        {
+          "timestamp": "2026-05-09T14:04:17+02:00",
+          "type": "step_end",
+          "step": 4,
+          "name": "Deliberate memory mistake"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "timestamp": "2026-05-09T14:02:40+02:00",
+      "type": "step_start",
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1"
+    },
+    {
+      "timestamp": "2026-05-09T14:02:40+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Hoi, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+    },
+    {
+      "timestamp": "2026-05-09T14:02:40+02:00",
+      "type": "step_end",
+      "step": 1,
+      "name": "Greeting"
+    },
+    {
+      "timestamp": "2026-05-09T14:02:41+02:00",
+      "type": "step_start",
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2"
+    },
+    {
+      "timestamp": "2026-05-09T14:02:41+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik weet nog een paar dingen over jou. Je bent 10 jaar, je houdt van scuba diving, en je hebt eerder verteld over dieren en hobby's. Ik weet ook nog dat Blubby belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+    },
+    {
+      "timestamp": "2026-05-09T14:02:41+02:00",
+      "type": "step_end",
+      "step": 2,
+      "name": "Opening summary"
+    },
+    {
+      "timestamp": "2026-05-09T14:02:42+02:00",
+      "type": "step_start",
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3"
+    },
+    {
+      "timestamp": "2026-05-09T14:02:42+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik denk dat Blubby een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat Blubby bij jou hoort en dat je tropical fish leuk vindt. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+    },
+    {
+      "timestamp": "2026-05-09T14:03:03+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Nee, mijn feestheid bloei."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:09+02:00",
+      "type": "transcript_review",
+      "action": "retry_requested",
+      "transcript": "Nee, mijn feestheid bloei."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:21+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Nee, mijn vis heet Bluey."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:24+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Nee, mijn vis heet Bluey."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:28+02:00",
+      "type": "interpretation",
+      "mode": "topic",
+      "result": {
+        "response_type": "possible_update",
+        "leo_response": "Oh, je vis heet Bluey! Wil je dat ik de naam van je huisdier verander naar Bluey?",
+        "change": {
+          "action": "update",
+          "field": "pet_name",
+          "field_label": "de naam van je huisdier",
+          "old_value": "Blubby",
+          "new_value": "Bluey",
+          "confidence": 0.9,
+          "reason": "De naam van het huisdier is veranderd.",
+          "source_text": "Nee, mijn vis heet Bluey.",
+          "confirmation_question": "Wil je dat ik de naam van je huisdier verander naar Bluey?"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:03:28+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Wil je dat ik de naam van je huisdier verander naar Bluey?"
+    },
+    {
+      "timestamp": "2026-05-09T14:03:39+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ja, dat mag."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:42+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ja, dat mag."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:46+02:00",
+      "type": "um_write",
+      "action": "update",
+      "field": "pet_name",
+      "old_value": "Blubby",
+      "new_value": "Bluey",
+      "success": true,
+      "status_code": 200
+    },
+    {
+      "timestamp": "2026-05-09T14:03:46+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Dankjewel, ik heb dat aangepast."
+    },
+    {
+      "timestamp": "2026-05-09T14:03:46+02:00",
+      "type": "step_end",
+      "step": 3,
+      "name": "First richer topic domain"
+    },
+    {
+      "timestamp": "2026-05-09T14:03:54+02:00",
+      "type": "tester_control",
+      "action": "continue"
+    },
+    {
+      "timestamp": "2026-05-09T14:03:55+02:00",
+      "type": "step_start",
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2"
+    },
+    {
+      "timestamp": "2026-05-09T14:03:55+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik dacht dat ik ook had onthouden dat sneeuwpop maken iets te maken heeft met je favoriete hobby. Kan je mij hier wat meer over vertellen?"
+    },
+    {
+      "timestamp": "2026-05-09T14:04:10+02:00",
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ik heb nooit gezegd dat ik van sneeuwpop maken houd."
+    },
+    {
+      "timestamp": "2026-05-09T14:04:14+02:00",
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ik heb nooit gezegd dat ik van sneeuwpop maken houd."
+    },
+    {
+      "timestamp": "2026-05-09T14:04:17+02:00",
+      "type": "interpretation",
+      "mode": "mistake",
+      "result": {
+        "response_type": "no_change",
+        "leo_response": "Oké, dan is er niets nieuws over scuba diving. Dan onthoud ik wat ik al wist.",
+        "change": {},
+        "confidence": 1.0
+      }
+    },
+    {
+      "timestamp": "2026-05-09T14:04:17+02:00",
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Oké, dan is er niets nieuws over scuba diving. Dan onthoud ik wat ik al wist."
+    },
+    {
+      "timestamp": "2026-05-09T14:04:17+02:00",
+      "type": "step_end",
+      "step": 4,
+      "name": "Deliberate memory mistake"
+    },
+    {
+      "timestamp": "2026-05-09T14:04:41+02:00",
+      "type": "tester_control",
+      "action": "quit"
+    }
+  ]
+}
