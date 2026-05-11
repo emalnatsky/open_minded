@@ -111,7 +111,11 @@ def _sanitize_for_uri(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^a-z0-9_\-]", "_", text)
     text = re.sub(r"_+", "_", text)   # collapse multiple underscores
-    return text[:60]                   # cap length for readable URIs
+    if len(text) > 60:
+        import hashlib
+        short_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+        return text[:50] + "_" + short_hash
+    return text                # cap length for readable URIs
 
 
 def _now_iso() -> str:
@@ -123,10 +127,12 @@ def _child_uri(child_id: str) -> str:
     return f"{UM_PREFIX}child/{_sanitize_for_uri(child_id)}"
 
 
-def _node_uri(target_class: str, child_id: str, value: str) -> str:
+def _node_uri(target_class: str, child_id: str, value: str, field_name: str = "") -> str:
+    field_part = f"{_sanitize_for_uri(field_name)}/" if field_name else ""
     return (
         f"{UM_PREFIX}node/"
         f"{target_class}/"
+        f"{field_part}"
         f"{_sanitize_for_uri(child_id)}/"
         f"{_sanitize_for_uri(value)}"
     )
@@ -539,7 +545,7 @@ def _write_node(
     cast_val, _   = _normalize_value(value, field_def)
     str_val       = str(cast_val)
     child_uri_str = _child_uri(child_id)
-    new_node_uri  = _node_uri(target_class, child_id, str_val)
+    new_node_uri = _node_uri(target_class, child_id, str_val, field_name)
     now           = _now_iso()
     safe_src      = _escape_sparql_string(source)
     safe_sess     = _escape_sparql_string(session_id)
@@ -547,11 +553,13 @@ def _write_node(
 
     # Check if this exact node already exists and is active — if so, it's
     # a reaffirmation, not a new write. Log it lightly and skip overwrite.
-    existing_check = sparql_query(f"""
-    {_PREFIXES}
-    ASK {{ <{new_node_uri}> um:active "true"^^xsd:string }}
-    """)
-    if existing_check.get("boolean", False):
+    if sparql_ask(f"""
+        {_PREFIXES}
+        ASK {{
+            <{child_uri_str}> um:{rel} <{new_node_uri}> .
+            <{new_node_uri}> um:active "true"^^xsd:string
+        }}
+        """):
         _log_reaffirmed(child_id, field_name, str_val, source, session_id)
         return
 
@@ -568,14 +576,16 @@ def _write_node(
             )
             # Mark old node as superseded and remove the relationship
             sparql_update(f"""
-            {_PREFIXES}
-            DELETE {{ <{child_uri_str}> um:{rel} <{old_node_uri}> }}
-            WHERE  {{ <{child_uri_str}> um:{rel} <{old_node_uri}> }};
-            INSERT DATA {{
-                <{old_node_uri}> um:active "false"^^xsd:string .
-                <{old_node_uri}> um:SUPERSEDED_BY <{new_node_uri}> .
-            }}
-            """)
+                        {_PREFIXES}
+                        DELETE {{ <{child_uri_str}> um:{rel} <{old_node_uri}> }}
+                        WHERE  {{ <{child_uri_str}> um:{rel} <{old_node_uri}> }};
+                        DELETE {{ <{old_node_uri}> um:active ?oldActive }}
+                        WHERE  {{ <{old_node_uri}> um:active ?oldActive }};
+                        INSERT DATA {{
+                            <{old_node_uri}> um:active "false"^^xsd:string .
+                            <{old_node_uri}> um:SUPERSEDED_BY <{new_node_uri}> .
+                        }}
+                        """)
 
     # Build extra property triples for the new node
     extra_triples = ""
@@ -721,7 +731,7 @@ def delete_node_field_value(child_id: str, field_name: str, value: str) -> None:
     rel           = field_def["relationship"]
     target_class  = field_def["target_class"]
     child_uri_str = _child_uri(child_id)
-    node_uri      = _node_uri(target_class, child_id, value)
+    node_uri = _node_uri(target_class, child_id, value, field_name)
 
     old_val = _get_node_prop_value(node_uri, field_def["node_property"])
     if old_val is not None:
@@ -734,11 +744,13 @@ def delete_node_field_value(child_id: str, field_name: str, value: str) -> None:
         )
 
     sparql_update(f"""
-    {_PREFIXES}
-    DELETE {{ <{child_uri_str}> um:{rel} <{node_uri}> }}
-    WHERE  {{ <{child_uri_str}> um:{rel} <{node_uri}> }};
-    INSERT DATA {{ <{node_uri}> um:active "false"^^xsd:string . }}
-    """)
+        {_PREFIXES}
+        DELETE {{ <{child_uri_str}> um:{rel} <{node_uri}> }}
+        WHERE  {{ <{child_uri_str}> um:{rel} <{node_uri}> }};
+        DELETE {{ <{node_uri}> um:active ?oldActive }}
+        WHERE  {{ <{node_uri}> um:active ?oldActive }};
+        INSERT DATA {{ <{node_uri}> um:active "false"^^xsd:string . }}
+        """)
 
 
 def delete_child(child_id: str) -> None:
@@ -812,6 +824,6 @@ def get_history(child_id: str, field_name: Optional[str] = None) -> list[dict]:
             "changed_at":  b["changedAt"]["value"],
             "changed_by":  b["changedBy"]["value"],
             "session_id":  b.get("sessionId", {}).get("value", "unknown"),
-            "change_type": b.get("changeType", {}).get("value", "replaced"),
+            "change_type": b.get("changeType", {}).get("value", "updated"),
         })
     return rows
