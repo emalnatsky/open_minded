@@ -99,7 +99,6 @@ VALID_FIELDS: dict[str, dict] = {
     },
 
     "hobby_talk": {
-        # Q7 — Zou je het leuk vinden om met mij te kletsen over je hobby's?
         # MC. Always visible (hobbies are always visible). Informs whether
         # the robot should bring up hobbies as a conversation topic.
         "storage": "scalar",

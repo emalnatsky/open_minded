@@ -396,6 +396,41 @@ def _log_history(
     """)
 
 
+def _log_reaffirmed(
+    child_id: str,
+    field_name: str,
+    value: str,
+    source: str,
+    session_id: str,
+) -> None:
+    """
+    Log that a field value was submitted again with the same value.
+    Lighter than a full HistoryEntry — uses um:changeType "reaffirmed"
+    so it's easy to filter in queries.
+
+    The main value + provenance on the Child node is NOT overwritten.
+    """
+    child_uri_str = _child_uri(child_id)
+    h_uri         = _history_uri(child_id, field_name)
+    now           = _now_iso()
+
+    sparql_update(f"""
+    {_PREFIXES}
+    INSERT DATA {{
+        <{h_uri}> rdf:type um:HistoryEntry ;
+                  um:forChild "{_escape_sparql_string(child_id)}" ;
+                  um:field "{_escape_sparql_string(field_name)}" ;
+                  um:previousValue "{_escape_sparql_string(value)}" ;
+                  um:newValue "{_escape_sparql_string(value)}" ;
+                  um:changeType "reaffirmed" ;
+                  um:changedAt "{now}"^^xsd:dateTime ;
+                  um:changedBy "{_escape_sparql_string(source)}" ;
+                  um:sessionId "{_escape_sparql_string(session_id)}" .
+        <{child_uri_str}> um:hasHistory <{h_uri}> .
+    }}
+    """)
+
+
 # ── Write scalar field ────────────────────────────────────────────────────────
 
 def _write_scalar(
@@ -423,6 +458,12 @@ def _write_scalar(
 
     # Read current value for history
     old_val = _read_scalar_raw(child_id, field_name)
+
+    # If value is unchanged: keep original provenance, log reaffirmation only
+    if old_val is not None and str(old_val) == str(cast_val):
+        _log_reaffirmed(child_id, field_name, str(cast_val), source, session_id)
+        return
+
     _log_history(child_id, field_name, old_val, str(cast_val), source, session_id)
 
     # Format the literal correctly for SPARQL
@@ -503,6 +544,16 @@ def _write_node(
     safe_src      = _escape_sparql_string(source)
     safe_sess     = _escape_sparql_string(session_id)
     safe_val      = _escape_sparql_string(str_val)
+
+    # Check if this exact node already exists and is active — if so, it's
+    # a reaffirmation, not a new write. Log it lightly and skip overwrite.
+    existing_check = sparql_query(f"""
+    {_PREFIXES}
+    ASK {{ <{new_node_uri}> um:active "true"^^xsd:string }}
+    """)
+    if existing_check.get("boolean", False):
+        _log_reaffirmed(child_id, field_name, str_val, source, session_id)
+        return
 
     # For single-value: mark existing node as superseded
     if not multi_value:
@@ -739,7 +790,7 @@ def get_history(child_id: str, field_name: Optional[str] = None) -> list[dict]:
     )
     r = sparql_query(f"""
     {_PREFIXES}
-    SELECT ?field ?oldVal ?newVal ?changedAt ?changedBy ?sessionId WHERE {{
+    SELECT ?field ?oldVal ?newVal ?changedAt ?changedBy ?sessionId ?changeType WHERE {{
         <{uri}> um:hasHistory ?h .
         ?h um:field ?field ;
            um:previousValue ?oldVal ;
@@ -747,6 +798,7 @@ def get_history(child_id: str, field_name: Optional[str] = None) -> list[dict]:
            um:changedAt ?changedAt ;
            um:changedBy ?changedBy .
         OPTIONAL {{ ?h um:sessionId ?sessionId }}
+        OPTIONAL {{ ?h um:changeType ?changeType }}
         {filter_clause}
     }}
     ORDER BY DESC(?changedAt)
@@ -760,5 +812,6 @@ def get_history(child_id: str, field_name: Optional[str] = None) -> list[dict]:
             "changed_at":  b["changedAt"]["value"],
             "changed_by":  b["changedBy"]["value"],
             "session_id":  b.get("sessionId", {}).get("value", "unknown"),
+            "change_type": b.get("changeType", {}).get("value", "replaced"),
         })
     return rows

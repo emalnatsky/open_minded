@@ -33,7 +33,7 @@ app = FastAPI(
     description=(
         "Knowledge-graph-based User Model service for child-robot interaction. "
         "DECRI (Define, Create, Read, Inspect, Update, Delete) endpoints. "
-        "Test test 2 version."
+        "Test test version 3"
     ),
     version="0.2.0",
     docs_url="/docs",
@@ -65,7 +65,6 @@ class ChildCreate(BaseModel):
     age: Optional[int] = None
     grade: Optional[str] = None
     session_id: str = "initial"
-    name: Optional[str] = None
 
     model_config = {
         "json_schema_extra": {
@@ -337,14 +336,40 @@ def update_fields(child_id: str, update: FieldUpdate):
                 elif extra_key in update.extra_props:
                     relevant_extra[extra_key] = update.extra_props[extra_key]
 
-            db.write_field(
-                child_id=child_id,
-                field_name=field_name,
-                value=value,
-                source=update.source,
-                session_id=session,
-                extra_props=relevant_extra,
-            )
+            # Multi-value node fields: split comma-separated values into
+            # individual nodes. e.g. "padel, voetbal, surfen" becomes
+            # three separate Sport nodes, not one blob.
+            if (field_def.get("multi_value", False)
+                    and field_def["storage"] == "node"
+                    and isinstance(value, str) and "," in value):
+                individual_values = [v.strip() for v in value.split(",") if v.strip()]
+                for single_val in individual_values:
+                    # Validate each individual value
+                    single_res = validate_field(field_name, single_val)
+                    if single_res.passed:
+                        db.write_field(
+                            child_id=child_id,
+                            field_name=field_name,
+                            value=single_val,
+                            source=update.source,
+                            session_id=session,
+                            extra_props=relevant_extra,
+                        )
+                    else:
+                        results["warnings"].append({
+                            "field": field_name,
+                            "value": single_val,
+                            "warnings": [f"Individual value skipped: {single_res.errors}"],
+                        })
+            else:
+                db.write_field(
+                    child_id=child_id,
+                    field_name=field_name,
+                    value=value,
+                    source=update.source,
+                    session_id=session,
+                    extra_props=relevant_extra,
+                )
 
         results["written"].append({"field": field_name, "value": str(value)})
 
