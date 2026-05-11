@@ -210,6 +210,18 @@ def load_csv(filepath: str):
         if pet_names:
             fields["pet_name"] = ", ".join(pet_names)
 
+        if "hobby_fav" in fields:
+            import re
+            m = re.match(r"Hobby\s+(\d+)", str(fields["hobby_fav"]), re.IGNORECASE)
+            if m:
+                idx = int(m.group(1)) - 1   # "Hobby 1" → index 0
+                if 0 <= idx < len(HOBBIES_COLS):
+                    actual = _clean(row.get(HOBBIES_COLS[idx]))
+                    if actual:
+                        fields["hobby_fav"] = actual
+                    else:
+                        del fields["hobby_fav"]
+
         # ── Write fields through API ──────────────────────────────────────
         if fields:
             update_resp = requests.post(
