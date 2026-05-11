@@ -1,0 +1,666 @@
+{
+  "session_id": "Noor_1001_2026-05-11_16-49-56",
+  "script_version": "CRI-BRANCH-BASIC4.0",
+  "child_id": "1001",
+  "child_name": "Noor",
+  "started_at": 0.015,
+  "started_wall_time": "2026-05-11T16:49:56+02:00",
+  "ended_at": 129.281,
+  "timestamp_unit": "seconds_from_interaction_start",
+  "folder": "C:\\Users\\Sander\\dev\\open_minded\\Open_Minded_dialogue\\conversations\\Noor_1001_2026-05-11_16-49-56",
+  "txt_path": "C:\\Users\\Sander\\dev\\open_minded\\Open_Minded_dialogue\\conversations\\Noor_1001_2026-05-11_16-49-56\\Noor.txt",
+  "json_path": "C:\\Users\\Sander\\dev\\open_minded\\Open_Minded_dialogue\\conversations\\Noor_1001_2026-05-11_16-49-56\\Noor.json",
+  "um_snapshot_start": {
+    "child_name": "Noor",
+    "name": "Noor",
+    "exposure": "returning",
+    "age": "9",
+    "hobbies": "tekenen, buiten spelen, knutselen",
+    "hobby_fav": "tekenen",
+    "sports_enjoys": "ja",
+    "sports_fav": "zwemmen",
+    "sports_plays": "ja",
+    "sports_fav_play": "zwemmen",
+    "books_enjoys": "ja",
+    "books_fav_genre": "avonturenboeken",
+    "books_fav_title": "De Gorgels",
+    "music_enjoys": "ja",
+    "music_talk": "popmuziek en vrolijke liedjes",
+    "music_plays_instrument": "ja",
+    "music_instrument": "keyboard",
+    "animals_enjoys": "ja",
+    "animal_talk": "katten en dolfijnen",
+    "animal_fav": "dolfijn",
+    "has_pet": "ja",
+    "pet_type": "kat",
+    "pet_name": "Momo",
+    "freetime_fav": "tekenen en met Momo spelen",
+    "fav_food": "pannenkoeken",
+    "aspiration": "dierenarts worden"
+  },
+  "planned_steps": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "leo_text": "Hoi Noor, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 9 jaar, je houdt van tekenen en buiten spelen, en je hebt eerder verteld over sport, boeken en muziek. Ik weet ook nog dat Momo belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "expects_response": false,
+      "response_mode": null
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "leo_text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten pannenkoeken is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "expects_response": true,
+      "response_mode": "topic_interpretation",
+      "topic": {
+        "domain": "eten",
+        "label": "je lievelingseten",
+        "fields": [
+          "fav_food"
+        ],
+        "field_labels": {
+          "fav_food": "je lievelingseten"
+        },
+        "current_values": {
+          "fav_food": "pannenkoeken"
+        },
+        "correct_values": [
+          "je lievelingseten pannenkoeken is"
+        ],
+        "memory_link": "je lievelingseten pannenkoeken is",
+        "options": [
+          "pannenkoeken",
+          "iets anders dat je lekker vindt"
+        ],
+        "reground": "Ik weet zeker dat pannenkoeken met jouw lievelingseten te maken heeft."
+      }
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "leo_text": "Ik dacht dat ik ook had onthouden dat een astronaut worden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?",
+      "expects_response": true,
+      "response_mode": "mistake_interpretation",
+      "mistake": {
+        "topic": {
+          "domain": "droom",
+          "label": "dierenarts worden",
+          "fields": [
+            "aspiration"
+          ],
+          "field_labels": {
+            "aspiration": "wat je later wilt doen of worden"
+          },
+          "current_values": {
+            "aspiration": "dierenarts worden"
+          },
+          "correct_values": [
+            "je later dierenarts worden wilt"
+          ],
+          "memory_link": "je later dierenarts worden wilt",
+          "options": [
+            "dierenarts worden",
+            "je dromen"
+          ],
+          "reground": "Ik onthoud dat dierenarts worden iets is waar je later iets mee wilt."
+        },
+        "field": "aspiration",
+        "actual": "dierenarts worden",
+        "wrong": "een astronaut worden"
+      }
+    },
+    {
+      "step": 5,
+      "name": "Goodbye",
+      "layer": "L1",
+      "leo_text": "Dankjewel, Noor. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!",
+      "expects_response": false,
+      "response_mode": null
+    }
+  ],
+  "turns": [
+    {
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1",
+      "started_at": 1.828,
+      "ended_at": 1.844,
+      "leo_text": "Hoi Noor, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.",
+      "events": [
+        {
+          "timestamp": 1.828,
+          "type": "step_start",
+          "step": 1,
+          "name": "Greeting",
+          "layer": "L1"
+        },
+        {
+          "timestamp": 1.844,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Hoi Noor, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+        },
+        {
+          "timestamp": 1.844,
+          "type": "step_end",
+          "step": 1,
+          "name": "Greeting"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2",
+      "started_at": 2.859,
+      "ended_at": 2.875,
+      "leo_text": "Ik weet nog een paar dingen over jou. Je bent 9 jaar, je houdt van tekenen en buiten spelen, en je hebt eerder verteld over sport, boeken en muziek. Ik weet ook nog dat Momo belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.",
+      "events": [
+        {
+          "timestamp": 2.859,
+          "type": "step_start",
+          "step": 2,
+          "name": "Opening summary",
+          "layer": "L2"
+        },
+        {
+          "timestamp": 2.859,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik weet nog een paar dingen over jou. Je bent 9 jaar, je houdt van tekenen en buiten spelen, en je hebt eerder verteld over sport, boeken en muziek. Ik weet ook nog dat Momo belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+        },
+        {
+          "timestamp": 2.875,
+          "type": "step_end",
+          "step": 2,
+          "name": "Opening summary"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3",
+      "started_at": 3.89,
+      "ended_at": 27.203,
+      "leo_text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten pannenkoeken is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?",
+      "events": [
+        {
+          "timestamp": 3.89,
+          "type": "step_start",
+          "step": 3,
+          "name": "First richer topic domain",
+          "layer": "L2+L3"
+        },
+        {
+          "timestamp": 3.89,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten pannenkoeken is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+        },
+        {
+          "timestamp": 6.703,
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!",
+          "simulated": true
+        },
+        {
+          "timestamp": 23.765,
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!"
+        },
+        {
+          "timestamp": 27.187,
+          "type": "llm_decision",
+          "mode": "topic",
+          "transcript": "Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!",
+          "decision": "no_change",
+          "confidence": 1.0,
+          "leo_response": "Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!",
+          "change": {},
+          "proposes_change": false,
+          "wrong_value_rejected": null,
+          "wrong_value_accepted": null,
+          "context": {
+            "step": 3,
+            "topic_domain": "eten",
+            "topic_label": "je lievelingseten",
+            "allowed_fields": [
+              "fav_food"
+            ]
+          },
+          "result": {
+            "response_type": "no_change",
+            "leo_response": "Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!",
+            "change": {},
+            "confidence": 1.0
+          }
+        },
+        {
+          "timestamp": 27.187,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!"
+        },
+        {
+          "timestamp": 27.203,
+          "type": "step_end",
+          "step": 3,
+          "name": "First richer topic domain"
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2",
+      "started_at": 42.219,
+      "ended_at": 73.078,
+      "leo_text": "Ik dacht dat ik ook had onthouden dat een astronaut worden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?",
+      "events": [
+        {
+          "timestamp": 42.219,
+          "type": "step_start",
+          "step": 4,
+          "name": "Deliberate memory mistake",
+          "layer": "L2"
+        },
+        {
+          "timestamp": 42.219,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Ik dacht dat ik ook had onthouden dat een astronaut worden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?"
+        },
+        {
+          "timestamp": 43.469,
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Nee, ik wil later dierenarts worden, geen astronaut.",
+          "simulated": true
+        },
+        {
+          "timestamp": 56.937,
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Nee, ik wil later dierenarts worden, geen astronaut."
+        },
+        {
+          "timestamp": 62.094,
+          "type": "llm_decision",
+          "mode": "mistake",
+          "transcript": "Nee, ik wil later dierenarts worden, geen astronaut.",
+          "decision": "correction_unclear",
+          "confidence": 0.9,
+          "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+          "change": {},
+          "proposes_change": false,
+          "wrong_value_rejected": true,
+          "wrong_value_accepted": false,
+          "context": {
+            "step": 4,
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "een astronaut worden",
+            "topic_domain": "droom"
+          },
+          "result": {
+            "response_type": "correction_unclear",
+            "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+            "change": {},
+            "confidence": 0.9,
+            "wrong_value_rejected": true,
+            "wrong_value_accepted": false
+          }
+        },
+        {
+          "timestamp": 62.109,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?"
+        },
+        {
+          "timestamp": 64.672,
+          "type": "utterance",
+          "speaker": "CHILD",
+          "text": "Ik wil later dierenarts worden!",
+          "simulated": true
+        },
+        {
+          "timestamp": 67.765,
+          "type": "transcript_review",
+          "action": "accepted",
+          "transcript": "Ik wil later dierenarts worden!"
+        },
+        {
+          "timestamp": 73.062,
+          "type": "llm_decision",
+          "mode": "mistake",
+          "transcript": "Ik wil later dierenarts worden!",
+          "decision": "correction_unclear",
+          "confidence": 1.0,
+          "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+          "change": {},
+          "proposes_change": false,
+          "wrong_value_rejected": true,
+          "wrong_value_accepted": false,
+          "context": {
+            "step": 4,
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "een astronaut worden",
+            "topic_domain": "droom"
+          },
+          "result": {
+            "response_type": "correction_unclear",
+            "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+            "change": {},
+            "confidence": 1.0,
+            "wrong_value_rejected": true,
+            "wrong_value_accepted": false
+          }
+        },
+        {
+          "timestamp": 73.078,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Dankjewel. Ik weet het nog niet zeker, dus ik verander nu niets."
+        },
+        {
+          "timestamp": 73.078,
+          "type": "step_end",
+          "step": 4,
+          "name": "Deliberate memory mistake"
+        }
+      ]
+    },
+    {
+      "step": 5,
+      "name": "Goodbye",
+      "layer": "L1",
+      "started_at": 129.25,
+      "ended_at": 129.265,
+      "leo_text": "Dankjewel, Noor. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!",
+      "events": [
+        {
+          "timestamp": 129.25,
+          "type": "step_start",
+          "step": 5,
+          "name": "Goodbye",
+          "layer": "L1"
+        },
+        {
+          "timestamp": 129.265,
+          "type": "utterance",
+          "speaker": "LEO",
+          "text": "Dankjewel, Noor. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!"
+        },
+        {
+          "timestamp": 129.265,
+          "type": "step_end",
+          "step": 5,
+          "name": "Goodbye"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "timestamp": 1.828,
+      "type": "step_start",
+      "step": 1,
+      "name": "Greeting",
+      "layer": "L1"
+    },
+    {
+      "timestamp": 1.844,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Hoi Noor, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten."
+    },
+    {
+      "timestamp": 1.844,
+      "type": "step_end",
+      "step": 1,
+      "name": "Greeting"
+    },
+    {
+      "timestamp": 2.859,
+      "type": "step_start",
+      "step": 2,
+      "name": "Opening summary",
+      "layer": "L2"
+    },
+    {
+      "timestamp": 2.859,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik weet nog een paar dingen over jou. Je bent 9 jaar, je houdt van tekenen en buiten spelen, en je hebt eerder verteld over sport, boeken en muziek. Ik weet ook nog dat Momo belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt."
+    },
+    {
+      "timestamp": 2.875,
+      "type": "step_end",
+      "step": 2,
+      "name": "Opening summary"
+    },
+    {
+      "timestamp": 3.89,
+      "type": "step_start",
+      "step": 3,
+      "name": "First richer topic domain",
+      "layer": "L2+L3"
+    },
+    {
+      "timestamp": 3.89,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten pannenkoeken is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?"
+    },
+    {
+      "timestamp": 6.703,
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!",
+      "simulated": true
+    },
+    {
+      "timestamp": 23.765,
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!"
+    },
+    {
+      "timestamp": 27.187,
+      "type": "llm_decision",
+      "mode": "topic",
+      "transcript": "Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!",
+      "decision": "no_change",
+      "confidence": 1.0,
+      "leo_response": "Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!",
+      "change": {},
+      "proposes_change": false,
+      "wrong_value_rejected": null,
+      "wrong_value_accepted": null,
+      "context": {
+        "step": 3,
+        "topic_domain": "eten",
+        "topic_label": "je lievelingseten",
+        "allowed_fields": [
+          "fav_food"
+        ]
+      },
+      "result": {
+        "response_type": "no_change",
+        "leo_response": "Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!",
+        "change": {},
+        "confidence": 1.0
+      }
+    },
+    {
+      "timestamp": 27.187,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!"
+    },
+    {
+      "timestamp": 27.203,
+      "type": "step_end",
+      "step": 3,
+      "name": "First richer topic domain"
+    },
+    {
+      "timestamp": 41.203,
+      "type": "tester_control",
+      "action": "continue"
+    },
+    {
+      "timestamp": 42.219,
+      "type": "step_start",
+      "step": 4,
+      "name": "Deliberate memory mistake",
+      "layer": "L2"
+    },
+    {
+      "timestamp": 42.219,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Ik dacht dat ik ook had onthouden dat een astronaut worden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?"
+    },
+    {
+      "timestamp": 43.469,
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Nee, ik wil later dierenarts worden, geen astronaut.",
+      "simulated": true
+    },
+    {
+      "timestamp": 56.937,
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Nee, ik wil later dierenarts worden, geen astronaut."
+    },
+    {
+      "timestamp": 62.094,
+      "type": "llm_decision",
+      "mode": "mistake",
+      "transcript": "Nee, ik wil later dierenarts worden, geen astronaut.",
+      "decision": "correction_unclear",
+      "confidence": 0.9,
+      "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+      "change": {},
+      "proposes_change": false,
+      "wrong_value_rejected": true,
+      "wrong_value_accepted": false,
+      "context": {
+        "step": 4,
+        "mistake_field": "aspiration",
+        "mistake_actual": "dierenarts worden",
+        "mistake_wrong": "een astronaut worden",
+        "topic_domain": "droom"
+      },
+      "result": {
+        "response_type": "correction_unclear",
+        "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+        "change": {},
+        "confidence": 0.9,
+        "wrong_value_rejected": true,
+        "wrong_value_accepted": false
+      }
+    },
+    {
+      "timestamp": 62.109,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?"
+    },
+    {
+      "timestamp": 64.672,
+      "type": "utterance",
+      "speaker": "CHILD",
+      "text": "Ik wil later dierenarts worden!",
+      "simulated": true
+    },
+    {
+      "timestamp": 67.765,
+      "type": "transcript_review",
+      "action": "accepted",
+      "transcript": "Ik wil later dierenarts worden!"
+    },
+    {
+      "timestamp": 73.062,
+      "type": "llm_decision",
+      "mode": "mistake",
+      "transcript": "Ik wil later dierenarts worden!",
+      "decision": "correction_unclear",
+      "confidence": 1.0,
+      "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+      "change": {},
+      "proposes_change": false,
+      "wrong_value_rejected": true,
+      "wrong_value_accepted": false,
+      "context": {
+        "step": 4,
+        "mistake_field": "aspiration",
+        "mistake_actual": "dierenarts worden",
+        "mistake_wrong": "een astronaut worden",
+        "topic_domain": "droom"
+      },
+      "result": {
+        "response_type": "correction_unclear",
+        "leo_response": "Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?",
+        "change": {},
+        "confidence": 1.0,
+        "wrong_value_rejected": true,
+        "wrong_value_accepted": false
+      }
+    },
+    {
+      "timestamp": 73.078,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Dankjewel. Ik weet het nog niet zeker, dus ik verander nu niets."
+    },
+    {
+      "timestamp": 73.078,
+      "type": "step_end",
+      "step": 4,
+      "name": "Deliberate memory mistake"
+    },
+    {
+      "timestamp": 128.234,
+      "type": "tester_control",
+      "action": "continue"
+    },
+    {
+      "timestamp": 129.25,
+      "type": "step_start",
+      "step": 5,
+      "name": "Goodbye",
+      "layer": "L1"
+    },
+    {
+      "timestamp": 129.265,
+      "type": "utterance",
+      "speaker": "LEO",
+      "text": "Dankjewel, Noor. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!"
+    },
+    {
+      "timestamp": 129.265,
+      "type": "step_end",
+      "step": 5,
+      "name": "Goodbye"
+    }
+  ]
+}
