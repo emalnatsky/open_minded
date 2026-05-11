@@ -10,7 +10,7 @@ Rules enforced here:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Header, Depends
@@ -568,7 +568,7 @@ def export_session(child_id: str):
 
     return {
         "export_version": "1.0",
-        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
         "child_id": child_id,
         "summary": {
             "total_fields_populated": len(flat_current),
