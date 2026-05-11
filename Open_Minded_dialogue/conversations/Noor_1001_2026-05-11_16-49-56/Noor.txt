@@ -1,0 +1,83 @@
+Session: Noor_1001_2026-05-11_16-49-56
+Script: CRI-BRANCH-BASIC4.0
+Child id: 1001
+Child name: Noor
+Started: 0.015s
+Ended: 129.281s
+Wall start: 2026-05-11T16:49:56+02:00
+
+UM snapshot at start:
+  age: 9
+  animal_fav: dolfijn
+  animal_talk: katten en dolfijnen
+  animals_enjoys: ja
+  aspiration: dierenarts worden
+  books_enjoys: ja
+  books_fav_genre: avonturenboeken
+  books_fav_title: De Gorgels
+  child_name: Noor
+  exposure: returning
+  fav_food: pannenkoeken
+  freetime_fav: tekenen en met Momo spelen
+  has_pet: ja
+  hobbies: tekenen, buiten spelen, knutselen
+  hobby_fav: tekenen
+  music_enjoys: ja
+  music_instrument: keyboard
+  music_plays_instrument: ja
+  music_talk: popmuziek en vrolijke liedjes
+  name: Noor
+  pet_name: Momo
+  pet_type: kat
+  sports_enjoys: ja
+  sports_fav: zwemmen
+  sports_fav_play: zwemmen
+  sports_plays: ja
+
+Planned steps:
+  1. Greeting [L1]
+     Hoi Noor, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.
+  2. Opening summary [L2]
+     Ik weet nog een paar dingen over jou. Je bent 9 jaar, je houdt van tekenen en buiten spelen, en je hebt eerder verteld over sport, boeken en muziek. Ik weet ook nog dat Momo belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.
+  3. First richer topic domain [L2+L3]
+     Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten pannenkoeken is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?
+  4. Deliberate memory mistake [L2]
+     Ik dacht dat ik ook had onthouden dat een astronaut worden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?
+  5. Goodbye [L1]
+     Dankjewel, Noor. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!
+
+Conversation:
+
+[1.828s] STEP 1: Greeting [L1]
+[1.844s] LEO: Hoi Noor, leuk je weer te zien. Leo hier. Ik probeer dingen over jou te onthouden, zoals wat je leuk vindt, waar je graag over praat en wat je eerder hebt verteld. Soms onthoud ik iets verkeerd. Dan mag je me gewoon verbeteren. Je kunt ook altijd zeggen: Dat klopt niet, Ik wil iets anders vertellen, of Laten we over iets anders praten.
+[1.844s] STEP 1 finished
+
+[2.859s] STEP 2: Opening summary [L2]
+[2.859s] LEO: Ik weet nog een paar dingen over jou. Je bent 9 jaar, je houdt van tekenen en buiten spelen, en je hebt eerder verteld over sport, boeken en muziek. Ik weet ook nog dat Momo belangrijk voor je is. Vandaag kunnen we praten over iets wat jij kiest, of ik kan beginnen met iets waarvan ik denk dat je het leuk vindt.
+[2.875s] STEP 2 finished
+
+[3.890s] STEP 3: First richer topic domain [L2+L3]
+[3.890s] LEO: Ik denk dat je lievelingseten een goed onderwerp is om mee te beginnen, want daar heb je eerder best veel over verteld. Bijvoorbeeld: je zei dat je lievelingseten pannenkoeken is. Dat vond ik leuk om te onthouden, omdat het iets zegt over wat jij belangrijk of grappig vindt. Ik ben benieuwd: is daar sinds de vorige keer nog iets nieuws over gebeurd?
+[6.703s] CHILD: Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!
+[23.765s] TRANSCRIPT accepted: Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker!
+[27.187s] LLM DECISION (topic): transcript=Ja, ik heb laatst pannenkoeken gegeten met chocolade! Ze waren zo lekker! decision=no_change confidence=1.0 leo_response=Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk! change={}
+[27.187s] LEO: Wat leuk dat je pannenkoeken met chocolade hebt gegeten! Ze klinken heerlijk!
+[27.203s] STEP 3 finished
+[41.203s] TESTER: continue
+
+[42.219s] STEP 4: Deliberate memory mistake [L2]
+[42.219s] LEO: Ik dacht dat ik ook had onthouden dat een astronaut worden iets te maken heeft met wat je later wilt doen of worden. Kan je mij hier wat meer over vertellen?
+[43.469s] CHILD: Nee, ik wil later dierenarts worden, geen astronaut.
+[56.937s] TRANSCRIPT accepted: Nee, ik wil later dierenarts worden, geen astronaut.
+[62.094s] LLM DECISION (mistake): transcript=Nee, ik wil later dierenarts worden, geen astronaut. decision=correction_unclear confidence=0.9 leo_response=Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden? change={}
+[62.109s] LEO: Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden?
+[64.672s] CHILD: Ik wil later dierenarts worden!
+[67.765s] TRANSCRIPT accepted: Ik wil later dierenarts worden!
+[73.062s] LLM DECISION (mistake): transcript=Ik wil later dierenarts worden! decision=correction_unclear confidence=1.0 leo_response=Oeps, dan had ik dat verkeerd. Wat wil je later doen of worden? change={}
+[73.078s] LEO: Dankjewel. Ik weet het nog niet zeker, dus ik verander nu niets.
+[73.078s] STEP 4 finished
+[128.234s] TESTER: continue
+
+[129.250s] STEP 5: Goodbye [L1]
+[129.265s] LEO: Dankjewel, Noor. Ik vond het heel fijn om met je te praten. Ik vind het leuk dat ik je weer een beetje beter heb leren kennen. Tot de volgende keer!
+[129.265s] STEP 5 finished
