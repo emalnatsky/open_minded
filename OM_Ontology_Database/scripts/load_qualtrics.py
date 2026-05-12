@@ -107,8 +107,6 @@ MC_OTHER_MAP: list[tuple[str, str, str]] = [
     ("Q195",         "Q195_12_TEXT",   "school_difficulty"),
 ]
 
-# So that it doesn't catch 'Titel van het boek:' instead of the actual title
-MC_TEXT_PRIORITY = {"books_fav_title"}
 
 # Multi-column fields: multiple CSV columns merge into one UM field
 HOBBIES_COLS = ["Q5_1", "Q5_2", "Q5_3", "Q5_4"]
@@ -186,15 +184,7 @@ def load_csv(filepath: str):
 
                 # 2) MC + Other text merges
                 for choice_col, text_col, um_field in MC_OTHER_MAP:
-                    # For some fields, the choice column contains a Qualtrics piped
-                    # label (e.g. "Titel van het boek:") not a real answer.
-                    # The TEXT column always has the actual value for these.
-                    if um_field in MC_TEXT_PRIORITY:
-                        val = _clean(row.get(text_col))
-                        if not val:
-                            val = _resolve_mc_other(row, choice_col, text_col)
-                    else:
-                        val = _resolve_mc_other(row, choice_col, text_col)
+                    val = _resolve_mc_other(row, choice_col, text_col)
                     if val:
                         fields[um_field] = val
 
@@ -315,7 +305,7 @@ def _resolve_mc_other(row: dict, choice_col: str, text_col: str) -> str | None:
     real_choices = []
     has_other = False
     for part in parts:
-        if any(kw in part.lower() for kw in ("anders", "namelijk", "other")):
+        if any(kw in part.lower() for kw in ("anders", "namelijk", "other", "titel van het boek")):
             has_other = True
         else:
             real_choices.append(part)
