@@ -99,7 +99,6 @@ VALID_FIELDS: dict[str, dict] = {
     },
 
     "hobby_talk": {
-        # Q7 — Zou je het leuk vinden om met mij te kletsen over je hobby's?
         # MC. Always visible (hobbies are always visible). Informs whether
         # the robot should bring up hobbies as a conversation topic.
         "storage": "scalar",
@@ -155,7 +154,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "Child's favourite sport to watch or do",
-        "gate_by": "sports_enjoys",
+        "gate_by": None, #"sports_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
@@ -175,7 +174,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": False,
         "xsd_type": "xsd:string",
         "description": "Whether the child actively plays a sport",
-        "gate_by": "sports_enjoys",
+        "gate_by": None, #"sports_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
@@ -201,7 +200,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "Sport(s) the child actively plays",
-        "gate_by": "sports_plays",
+        "gate_by": None, #"sports_plays",
         "gate_condition": "equals",
         "gate_value": "ja",
         "declined_sentinel": None,
@@ -277,7 +276,6 @@ VALID_FIELDS: dict[str, dict] = {
         # Q08 — Zou je het leuk vinden om daar later met Leo over te praten?
         # MC. Opt-in gate for music as conversation topic. Visible if Q07 ≠ Nee.
         # This is a consent/preference field, not a factual one.
-        # Stored as "ja"/"nee" — informs whether robot should bring up music.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -306,7 +304,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": False,
         "xsd_type": "xsd:string",
         "description": "Whether child plays a musical instrument",
-        "gate_by": "music_enjoys",
+        "gate_by": None, #"music_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
@@ -331,7 +329,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "Instrument(s) the child plays",
-        "gate_by": "music_plays_instrument",
+        "gate_by": None, #"music_plays_instrument",
         "gate_condition": "equals",
         "gate_value": "ja",
         "declined_sentinel": None,
@@ -374,7 +372,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": False,
         "xsd_type": "xsd:string",
         "description": "Child's favourite book genre",
-        "gate_by": "books_enjoys",
+        "gate_by": None, #"books_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
@@ -400,9 +398,9 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "Child's favourite book title",
-        "gate_by": "books_enjoys",
-        "gate_condition": "not_equals",
-        "gate_value": "nee",
+        "gate_by": None,
+        "gate_condition": None,
+        "gate_value": None,
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": False,
@@ -462,7 +460,7 @@ VALID_FIELDS: dict[str, dict] = {
         # If chosen: robot knows not to push on social topics.
         "storage": "scalar",
         "type": "enum",
-        "allowed_values": ["ja", "nee", "liever niet zeggen"],
+        "allowed_values": ["ja", "nee", "wil ik liever niet zeggen", "liever niet zeggen"],
         "required": False,
         "sensitivity_tier": 2,       # social relationships are tier 2
         "category": "sociaal",
@@ -518,7 +516,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "Child's favourite animal",
-        "gate_by": "animals_enjoys",
+        "gate_by": None, #"animals_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
@@ -582,7 +580,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "Type(s) of pet the child has",
-        "gate_by": "has_pet",
+        "gate_by": None, #"has_pet",
         "gate_condition": "equals",
         "gate_value": "ja",
         "declined_sentinel": None,
@@ -607,7 +605,7 @@ VALID_FIELDS: dict[str, dict] = {
         "llm_validate": False,       # names: do not LLM-validate, would over-flag
         "xsd_type": "xsd:string",
         "description": "Name(s) of child's pet(s)",
-        "gate_by": "has_pet",
+        "gate_by": None, #"has_pet",
         "gate_condition": "equals",
         "gate_value": "ja",
         "declined_sentinel": None,
@@ -620,7 +618,7 @@ VALID_FIELDS: dict[str, dict] = {
         # MC. Visible only if has_pet = ja.
         "storage": "scalar",
         "type": "boolean",
-        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
+        "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet", "Geen huisdier"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "dieren",
@@ -630,7 +628,7 @@ VALID_FIELDS: dict[str, dict] = {
         "gate_by": "has_pet",
         "gate_condition": "equals",
         "gate_value": "ja",
-        "declined_sentinel": "nee",
+        "declined_sentinel": "Geen huisdier",
         "mistake_priority": None,
         "stored_cleanly": True,
     },

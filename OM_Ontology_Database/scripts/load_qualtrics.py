@@ -39,8 +39,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 API_URL = "http://localhost:8000"
-SOURCE  = "qualtrics_import"
-
+SOURCE  = "qualtrics_check-in_May7"
+CHILD_ID_COLUMN = "ExternalReference"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COLUMN MAPPING — matches the actual Qualtrics export headers (May 2026)
@@ -176,19 +176,17 @@ def load_csv(filepath: str):
         for csv_col, um_field in SIMPLE_MAP.items():
             raw = _clean(row.get(csv_col))
             if raw:
-                # Age needs to stay as int
+                # Age is already written by create_child above — skip here
+                # to avoid a redundant write that creates a false "reaffirmed"
                 if um_field == "age":
-                    val = _parse_int(raw)
-                    if val is not None:
-                        fields[um_field] = val
-                else:
-                    fields[um_field] = raw
+                    continue
+                fields[um_field] = raw
 
-        # 2) MC + Other text merges
-        for choice_col, text_col, um_field in MC_OTHER_MAP:
-            val = _resolve_mc_other(row, choice_col, text_col)
-            if val:
-                fields[um_field] = val
+                # 2) MC + Other text merges
+                for choice_col, text_col, um_field in MC_OTHER_MAP:
+                    val = _resolve_mc_other(row, choice_col, text_col)
+                    if val:
+                        fields[um_field] = val
 
         # 3) Hobbies — merge up to 4 columns into comma-separated string
         hobbies = []
@@ -209,6 +207,18 @@ def load_csv(filepath: str):
                 pet_names.append(name)
         if pet_names:
             fields["pet_name"] = ", ".join(pet_names)
+
+        if "hobby_fav" in fields:
+            import re
+            m = re.match(r"Hobby\s+(\d+)", str(fields["hobby_fav"]), re.IGNORECASE)
+            if m:
+                idx = int(m.group(1)) - 1   # "Hobby 1" → index 0
+                if 0 <= idx < len(HOBBIES_COLS):
+                    actual = _clean(row.get(HOBBIES_COLS[idx]))
+                    if actual:
+                        fields["hobby_fav"] = actual
+                    else:
+                        del fields["hobby_fav"]
 
         # ── Write fields through API ──────────────────────────────────────
         if fields:
@@ -247,8 +257,14 @@ def load_csv(filepath: str):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _get_child_id(row: dict) -> str | None:
-    """Use ResponseId as the anonymous child identifier."""
-    rid = row.get("ResponseId", "").strip()
+    """Use assigned childID as the anonymous child identifier."""
+    rid = row.get(CHILD_ID_COLUMN, "").strip()
+    if not rid:
+        # Fall back to ResponseId so the row isn't silently lost
+        fallback = row.get("ResponseId", "").strip()
+        if fallback:
+            logger.warning("No Provided ChildID Number for %s — using ResponseId as fallback", fallback)
+            return fallback
     return rid if rid else None
 
 
@@ -273,22 +289,35 @@ def _parse_int(val) -> int | None:
 def _resolve_mc_other(row: dict, choice_col: str, text_col: str) -> str | None:
     """
     Resolve a Qualtrics MC question with an "Other" option.
-
-    If the selected choice looks like the "Other" placeholder
-    (contains "Anders" or "namelijk"), use the text column instead.
-    Otherwise use the selected choice value directly.
+    Handles multi-select: child may pick "Gym,Anders, namelijk:"
+    In that case, keep "Gym" AND append the custom text.
     """
     choice = _clean(row.get(choice_col))
     text   = _clean(row.get(text_col))
 
     if not choice:
-        return text   # no choice selected, but maybe free text was entered
+        return text
 
-    # If the choice is the "Other" bucket, prefer the typed text
-    if any(kw in choice.lower() for kw in ("anders", "namelijk", "other")):
-        return text if text else choice
+    # Split multi-select values (Qualtrics joins them with commas)
+    parts = [p.strip() for p in choice.split(",") if p.strip()]
 
-    return choice
+    # Separate real choices from the "Anders" placeholder
+    real_choices = []
+    has_other = False
+    for part in parts:
+        if any(kw in part.lower() for kw in ("anders", "namelijk", "other", "titel van het boek")):
+            has_other = True
+        else:
+            real_choices.append(part)
+
+    # Append the custom text if "Anders" was selected
+    if has_other and text:
+        real_choices.append(text)
+
+    if not real_choices:
+        return text  # only "Anders" was selected, use the text
+
+    return ",".join(real_choices)
 
 
 if __name__ == "__main__":
