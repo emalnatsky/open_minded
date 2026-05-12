@@ -54,7 +54,7 @@ class CRI_ScriptedDialogue(SICApplication):
     CHILD_ID = "Julianna"
     UNKNOWN_VALUE = "dat weet ik nog niet"
     UM_FIELDS = (
-        "child_name", "name", "age", "hobbies", "hobby_fav",
+        "child_name", "name", "exposure", "age", "hobbies", "hobby_fav",
         "sports_enjoys", "sports_fav", "sports_plays", "sports_fav_play",
         "books_enjoys", "books_fav_genre", "books_fav_title",
         "music_enjoys", "music_talk", "music_plays_instrument", "music_instrument",
@@ -99,6 +99,11 @@ class CRI_ScriptedDialogue(SICApplication):
 
     # Desktop mic flag
     USE_DESKTOP_MIC = False
+    ASK_RUN_MODE_AT_START = True
+    SIMULATION_MODE = False
+    SIMULATED_PERSONA_DIR = os.path.abspath(os.path.join(_HERE, "fake_personas"))
+    SIMULATED_PERSONA_PATH = os.path.join(SIMULATED_PERSONA_DIR, "noor_1001.json")
+    SIMULATION_WRITE_PERSONA_FILE = False
     WAIT_FOR_PREVIEW_CONFIRMATION = True
     REVIEW_TRANSCRIPTS = True
     POST_STEP_TEST_CONTROLS = True
@@ -124,10 +129,40 @@ class CRI_ScriptedDialogue(SICApplication):
         self.pending_change = None
         self.conversation_log = None
         self.current_turn_log = None
+        self.conversation_log_started_monotonic = None
+        self.simulation_mode = bool(self.SIMULATION_MODE)
+        self.simulated_persona = {}
+        self.simulated_persona_path = self.SIMULATED_PERSONA_PATH
+        self.simulated_history = []
+        self.last_leo_utterance = ""
+        self.current_turn_context = None
         self.set_log_level(sic_logging.INFO)
+        self.configure_run_mode()
         self.setup()
 
     # Setup
+
+    def configure_run_mode(self):
+        """Ask at startup whether this run should use real input or a fake LLM child."""
+        if not self.ASK_RUN_MODE_AT_START:
+            return
+
+        env_choice = os.environ.get("CRI_SIMULATION_MODE", "").strip().lower()
+        if env_choice in ("1", "true", "yes", "y", "sim", "simulation"):
+            self.simulation_mode = True
+            return
+        if env_choice in ("0", "false", "no", "n", "real", "normal"):
+            self.simulation_mode = False
+            return
+
+        print("\n" + "=" * 72)
+        print("CRI 4.0 RUN MODE")
+        print("Press Enter for normal microphone/NAO mode.")
+        print("Type S + Enter for LLM fake-child simulation mode.")
+        choice = input("Run mode: ").strip().lower()
+        print("=" * 72)
+        if choice in ("s", "sim", "simulation"):
+            self.simulation_mode = True
 
     def setup(self):
         self.logger.info("Setting up CRI pipeline...")
@@ -139,6 +174,21 @@ class CRI_ScriptedDialogue(SICApplication):
             raise RuntimeError("OPENAI_API_KEY not found.")
 
         self.openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+        if self.simulation_mode:
+            self.load_simulated_persona()
+            self.CHILD_ID = str(self.simulated_persona.get("child_id", self.CHILD_ID))
+            self.USE_DESKTOP_MIC = True
+            self.clf = StubIntentClassifier(
+                schema_path=os.path.join(_INTENT, "um_field_schema.json")
+            )
+            self.logger.info(
+                "Simulation mode enabled with fake persona %s (child=%s).",
+                self.simulated_persona_path,
+                self.CHILD_ID,
+            )
+            self.logger.info("Setup complete.")
+            return
 
         # Intent classifier: GPT with stub fallback
         try:
@@ -189,6 +239,28 @@ class CRI_ScriptedDialogue(SICApplication):
 
     # UM pulling
 
+    def load_simulated_persona(self):
+        """Load the fake child profile used by LLM simulation mode."""
+        path = self.simulated_persona_path
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Simulated persona file not found: {path}")
+        with open(path, "r", encoding="utf-8") as persona_file:
+            persona = json.load(persona_file)
+        self.simulated_persona = dict(persona)
+
+    def simulated_um_profile(self) -> dict:
+        """Return UM fields from the fake persona JSON instead of GraphDB."""
+        if not self.simulated_persona:
+            self.load_simulated_persona()
+
+        um = {}
+        for field in self.UM_FIELDS:
+            value = self.simulated_persona.get(field, self.UNKNOWN_VALUE)
+            if isinstance(value, list):
+                value = self.format_dutch_list(value)
+            um[field] = str(value) if self.is_known(value) else self.UNKNOWN_VALUE
+        return um
+
     def get_field(self, field: str) -> str:
         """
         Pull a single UM field from Eunike's API.
@@ -199,6 +271,8 @@ class CRI_ScriptedDialogue(SICApplication):
         """
         if not field:
             return self.UNKNOWN_VALUE
+        if self.simulation_mode:
+            return self.simulated_um_profile().get(field, self.UNKNOWN_VALUE)
 
         url = f"{self.UM_API_BASE}/api/um/{self.CHILD_ID}/field/{field}"
         try:
@@ -273,6 +347,16 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def pull_um(self) -> dict:
         """Fetch all UM fields used by the 4.0 early interaction flow."""
+        if self.simulation_mode:
+            um = self.simulated_um_profile()
+            known_count = sum(1 for value in um.values() if self.is_known(value))
+            self.logger.info("Simulated UM profile loaded: %d/%d fields set.", known_count, len(self.UM_FIELDS))
+            for field, value in um.items():
+                if self.is_known(value):
+                    self.logger.info("SIM UM[%s] = %s", field, value)
+            self.last_um_preview = um
+            return um
+
         try:
             um = self.pull_um_bulk()
         except Exception as e:
@@ -892,6 +976,11 @@ class CRI_ScriptedDialogue(SICApplication):
 
         print("\n" + "=" * 72)
         print("CRI 4.0 PRE-START CHECK")
+        if self.simulation_mode:
+            print("Mode:     LLM fake-child simulation")
+            print(f"Persona:  {self.simulated_persona_path}")
+        else:
+            print("Mode:     real microphone/NAO stack")
         print(f"Child id: {self.CHILD_ID}")
         print(f"UM API:   {self.UM_API_BASE}")
         print("\nPulled UM fields:")
@@ -1010,8 +1099,17 @@ class CRI_ScriptedDialogue(SICApplication):
 
     # Conversation logging
 
-    def log_timestamp(self) -> str:
-        return datetime.now().astimezone().isoformat(timespec="seconds")
+    def log_timestamp(self) -> float:
+        start = getattr(self, "conversation_log_started_monotonic", None)
+        if start is None:
+            return 0.0
+        return round(max(0.0, time.monotonic() - start), 3)
+
+    def format_log_timestamp(self, timestamp) -> str:
+        try:
+            return f"{float(timestamp):.3f}s"
+        except (TypeError, ValueError):
+            return "0.000s"
 
     def safe_filename_part(self, value: str) -> str:
         clean = str(value or "").strip()
@@ -1027,6 +1125,12 @@ class CRI_ScriptedDialogue(SICApplication):
             or self.known(self.last_um_preview, "name")
             or self.CHILD_ID
         )
+
+    def conversation_session_id(self, child_name: str, started: datetime) -> str:
+        child_part = self.safe_filename_part(child_name)
+        child_id_part = self.safe_filename_part(self.CHILD_ID)
+        readable_time = started.strftime("%Y-%m-%d_%H-%M-%S")
+        return f"{child_part}_{child_id_part}_{readable_time}"
 
     def planned_turn_log(self, turn: dict) -> dict:
         entry = {
@@ -1053,14 +1157,15 @@ class CRI_ScriptedDialogue(SICApplication):
             return
 
         started = datetime.now().astimezone()
-        session_id = started.strftime("%Y%m%d_%H%M%S")
+        self.conversation_log_started_monotonic = time.monotonic()
+        child_name = self.conversation_child_name()
+        session_id = self.conversation_session_id(child_name, started)
         session_dir = os.path.join(self.CONVERSATION_LOG_ROOT, session_id)
         counter = 2
         while os.path.exists(session_dir):
             session_dir = os.path.join(self.CONVERSATION_LOG_ROOT, f"{session_id}_{counter}")
             counter += 1
 
-        child_name = self.conversation_child_name()
         file_base = self.safe_filename_part(child_name)
         os.makedirs(session_dir, exist_ok=True)
 
@@ -1069,8 +1174,10 @@ class CRI_ScriptedDialogue(SICApplication):
             "script_version": self.SCRIPT_VERSION,
             "child_id": self.CHILD_ID,
             "child_name": child_name,
-            "started_at": started.isoformat(timespec="seconds"),
+            "started_at": self.log_timestamp(),
+            "started_wall_time": started.isoformat(timespec="seconds"),
             "ended_at": None,
+            "timestamp_unit": "seconds_from_interaction_start",
             "folder": session_dir,
             "txt_path": os.path.join(session_dir, f"{file_base}.txt"),
             "json_path": os.path.join(session_dir, f"{file_base}.json"),
@@ -1141,8 +1248,9 @@ class CRI_ScriptedDialogue(SICApplication):
             f"Script: {log.get('script_version', '')}",
             f"Child id: {log.get('child_id', '')}",
             f"Child name: {log.get('child_name', '')}",
-            f"Started: {log.get('started_at', '')}",
-            f"Ended: {log.get('ended_at') or ''}",
+            f"Started: {self.format_log_timestamp(log.get('started_at', 0.0))}",
+            f"Ended: {self.format_log_timestamp(log.get('ended_at')) if log.get('ended_at') is not None else ''}",
+            f"Wall start: {log.get('started_wall_time', '')}",
             "",
             "UM snapshot at start:",
         ]
@@ -1157,7 +1265,7 @@ class CRI_ScriptedDialogue(SICApplication):
 
         lines.extend(["", "Conversation:"])
         for event in log.get("events", []):
-            timestamp = event.get("timestamp", "")
+            timestamp = self.format_log_timestamp(event.get("timestamp", 0.0))
             event_type = event.get("type")
             if event_type == "step_start":
                 lines.append("")
@@ -1171,7 +1279,19 @@ class CRI_ScriptedDialogue(SICApplication):
                     f"[{timestamp}] TRANSCRIPT {event.get('action')}: {event.get('transcript')}"
                 )
             elif event_type == "intent":
-                lines.append(f"[{timestamp}] INTENT: {event.get('result')}")
+                lines.append(
+                    f"[{timestamp}] INTENT: transcript={event.get('transcript')} "
+                    f"result={event.get('result')}"
+                )
+            elif event_type == "llm_decision":
+                lines.append(
+                    f"[{timestamp}] LLM DECISION ({event.get('mode')}): "
+                    f"transcript={event.get('transcript')} "
+                    f"decision={event.get('decision')} "
+                    f"confidence={event.get('confidence')} "
+                    f"leo_response={event.get('leo_response')} "
+                    f"change={event.get('change')}"
+                )
             elif event_type == "interpretation":
                 lines.append(
                     f"[{timestamp}] INTERPRETATION ({event.get('mode')}): {event.get('result')}"
@@ -1202,6 +1322,94 @@ class CRI_ScriptedDialogue(SICApplication):
         except Exception as e:
             self.logger.error("Could not write conversation log: %s", e)
 
+    def log_llm_decision(self, mode: str, transcript: str, result: dict, context: dict = None):
+        """Log the context-aware LLM choice that decides Leo's next action."""
+        if not getattr(self, "conversation_log", None):
+            return
+
+        change = result.get("change") if isinstance(result.get("change"), dict) else {}
+        decision = result.get("response_type") or result.get("decision") or "unknown"
+        self.log_conversation_event(
+            "llm_decision",
+            mode=mode,
+            transcript=transcript or "(nothing)",
+            decision=decision,
+            confidence=result.get("confidence"),
+            leo_response=result.get("leo_response"),
+            change=change,
+            proposes_change=bool(change),
+            wrong_value_rejected=result.get("wrong_value_rejected"),
+            wrong_value_accepted=result.get("wrong_value_accepted"),
+            context=context or {},
+            result=result,
+        )
+
+    def simulated_turn_summary(self) -> dict:
+        turn = self.current_turn_context or {}
+        summary = {
+            "step": turn.get("step"),
+            "name": turn.get("name"),
+            "response_mode": turn.get("response_mode"),
+            "leo_text": self.last_leo_utterance,
+        }
+        if turn.get("topic"):
+            summary["topic"] = turn.get("topic")
+        if turn.get("mistake_id"):
+            summary["mistake"] = {
+                "field": turn.get("mistake_field"),
+                "actual_value": turn.get("mistake_actual"),
+                "wrong_value_leo_said": turn.get("mistake_wrong"),
+                "topic": turn.get("mistake_topic"),
+            }
+        if self.pending_change:
+            summary["pending_confirmation"] = self.pending_change
+        return summary
+
+    def generate_simulated_child_response(self) -> str:
+        """Use the LLM to play the fake child instead of listening to a microphone."""
+        persona = self.simulated_um_profile()
+        prompt = {
+            "task": (
+                "Speel een Nederlands kind voor een test van een robotgesprek. "
+                "Antwoord alleen als het kind, kort en natuurlijk."
+            ),
+            "persona": persona,
+            "turn": self.simulated_turn_summary(),
+            "recent_history": self.simulated_history[-8:],
+            "rules": [
+                "Antwoord in het Nederlands als kind van ongeveer 8 tot 11 jaar.",
+                "Geef alleen de letterlijke uitspraak van het kind, geen uitleg en geen aanhalingstekens.",
+                "Als Leo een herinnering noemt die klopt met de persona, reageer natuurlijk of vertel kort iets nieuws.",
+                "Als Leo een waarde noemt die niet klopt met de persona, verbeter Leo en noem de correcte waarde uit de persona.",
+                "Als Leo vraagt of hij een verandering moet onthouden, bevestig alleen als de voorgestelde waarde klopt met wat jij als kind bedoelt.",
+                "Als de voorgestelde verandering niet klopt, wijs die af en geef de juiste waarde.",
+                "Hou het antwoord meestal op een tot twee zinnen.",
+            ],
+        }
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You simulate a Dutch child for testing a child-robot interaction. "
+                    "Return only the child utterance in Dutch."
+                ),
+            },
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ]
+        try:
+            response = self.openai_client.chat.completions.create(
+                model=self.TOPIC_CHANGE_MODEL,
+                messages=messages,
+                max_tokens=120,
+                temperature=0.7,
+            )
+            transcript = response.choices[0].message.content.strip()
+            transcript = transcript.strip('"').strip()
+            return transcript or ""
+        except Exception as e:
+            self.logger.error("Simulated child response error: %s", e)
+            return ""
+
     # Helpers
 
     def say(self, text: str):
@@ -1209,8 +1417,11 @@ class CRI_ScriptedDialogue(SICApplication):
         if not text or not text.strip():
             return
         self.logger.info("LEO: %s", text)
+        self.last_leo_utterance = text
+        if self.simulation_mode:
+            self.simulated_history.append({"speaker": "LEO", "text": text})
         self.log_conversation_event("utterance", speaker="LEO", text=text)
-        if self.USE_DESKTOP_MIC:
+        if self.simulation_mode or self.USE_DESKTOP_MIC:
             print(f"\n[LEO]: {text}\n")
         else:
             self.nao.tts.request(NaoqiTextToSpeechRequest(text))
@@ -1221,6 +1432,19 @@ class CRI_ScriptedDialogue(SICApplication):
             time.sleep(speaking_time)
 
     def listen(self) -> str:
+        if self.simulation_mode:
+            self.logger.info("Simulating child response...")
+            transcript = self.generate_simulated_child_response()
+            self.logger.info("Simulated child: %s", transcript or "(nothing)")
+            self.simulated_history.append({"speaker": "CHILD", "text": transcript or "(nothing)"})
+            self.log_conversation_event(
+                "utterance",
+                speaker="CHILD",
+                text=transcript or "(nothing)",
+                simulated=True,
+            )
+            return transcript
+
         self.logger.info("Listening...")
         try:
             result = self.whisper.request(
@@ -1276,13 +1500,11 @@ class CRI_ScriptedDialogue(SICApplication):
         result = self.clf.classify(transcript)
         if result.intent == REPEAT_SENTINEL:
             self.logger.info("Low confidence - asking to repeat.")
-            self.log_conversation_event("intent", result=result.to_dict(), retry_requested=True)
             self.say("Kun je dat nog een keer zeggen?")
             time.sleep(0.8)
             transcript = self.listen_with_review()
             result = self.clf.classify_retry(transcript)
         self.logger.info("Intent: %s", result.to_dict())
-        self.log_conversation_event("intent", result=result.to_dict(), retry_requested=False)
         return result
 
     def llm_response(self, child_input: str) -> str:
@@ -1467,7 +1689,17 @@ class CRI_ScriptedDialogue(SICApplication):
             "confidence": float(parsed.get("confidence") or 0.0),
         }
         self.logger.info("Topic response interpretation: %s", interpretation)
-        self.log_conversation_event("interpretation", mode="topic", result=interpretation)
+        self.log_llm_decision(
+            "topic",
+            transcript,
+            interpretation,
+            context={
+                "step": 3,
+                "topic_domain": topic.get("domain"),
+                "topic_label": topic.get("label"),
+                "allowed_fields": topic.get("fields", []),
+            },
+        )
         return interpretation
 
     def interpret_mistake_response(self, transcript: str, turn: dict) -> dict:
@@ -1604,7 +1836,18 @@ class CRI_ScriptedDialogue(SICApplication):
             "wrong_value_accepted": wrong_value_accepted,
         }
         self.logger.info("Mistake response interpretation: %s", interpretation)
-        self.log_conversation_event("interpretation", mode="mistake", result=interpretation)
+        self.log_llm_decision(
+            "mistake",
+            transcript,
+            interpretation,
+            context={
+                "step": 4,
+                "mistake_field": turn.get("mistake_field"),
+                "mistake_actual": turn.get("mistake_actual"),
+                "mistake_wrong": turn.get("mistake_wrong"),
+                "topic_domain": topic.get("domain"),
+            },
+        )
         return interpretation
 
     def clean_confirmation_question(self, question: str, change: dict) -> str:
@@ -1719,11 +1962,59 @@ class CRI_ScriptedDialogue(SICApplication):
             "reason": parsed.get("reason", ""),
         }
         self.logger.info("Confirmation interpretation: %s", result)
-        self.log_conversation_event("interpretation", mode="confirmation", result=result)
+        self.log_llm_decision(
+            "confirmation",
+            transcript,
+            result,
+            context={
+                "field": change.get("field"),
+                "action": change.get("action"),
+                "new_value": change.get("new_value"),
+            },
+        )
         return result
 
     def write_um_change(self, change: dict) -> bool:
         field = change["field"]
+        if self.simulation_mode:
+            try:
+                if change["action"] == "delete":
+                    self.simulated_persona[field] = self.UNKNOWN_VALUE
+                    self.last_um_preview[field] = self.UNKNOWN_VALUE
+                    new_value = None
+                else:
+                    new_value = change["new_value"]
+                    self.simulated_persona[field] = new_value
+                    self.last_um_preview[field] = new_value
+
+                if self.SIMULATION_WRITE_PERSONA_FILE:
+                    with open(self.simulated_persona_path, "w", encoding="utf-8") as persona_file:
+                        json.dump(self.simulated_persona, persona_file, ensure_ascii=False, indent=2)
+
+                self.log_conversation_event(
+                    "um_write",
+                    action=change.get("action"),
+                    field=field,
+                    old_value=change.get("old_value"),
+                    new_value=new_value,
+                    success=True,
+                    status_code="simulation",
+                )
+                return True
+            except Exception as e:
+                self.logger.error("Could not apply simulated UM change: %s", e)
+                self.log_conversation_event(
+                    "um_write",
+                    action=change.get("action"),
+                    field=field,
+                    old_value=change.get("old_value"),
+                    new_value=change.get("new_value"),
+                    success=False,
+                    status_code="simulation",
+                    error=str(e),
+                )
+                return False
+
         try:
             if change["action"] == "delete":
                 url = f"{self.UM_API_BASE}/api/um/{self.CHILD_ID}/field/{field}"
@@ -1917,6 +2208,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.handle_interpreted_response(interpretation, turn, mode)
 
     def run_turn(self, turn: dict, step_index: int, total_steps: int):
+        self.current_turn_context = turn
         self.start_turn_log(turn)
         try:
             self.logger.info(
@@ -1984,6 +2276,7 @@ class CRI_ScriptedDialogue(SICApplication):
                     self.say(turn["follow_up"])
         finally:
             self.finish_turn_log()
+            self.current_turn_context = None
 
     # Main loop
 
@@ -1996,7 +2289,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.print_prestart_preview(script)
 
         try:
-            if not self.USE_DESKTOP_MIC:
+            if not self.simulation_mode and not self.USE_DESKTOP_MIC:
                 self.nao.autonomous.request(NaoWakeUpRequest())
 
             i = 0
@@ -2032,7 +2325,7 @@ class CRI_ScriptedDialogue(SICApplication):
             self.logger.error("Error: %s", e)
         finally:
             try:
-                if not self.USE_DESKTOP_MIC:
+                if not self.simulation_mode and not self.USE_DESKTOP_MIC:
                     self.nao.autonomous.request(NaoRestRequest())
             except Exception:
                 pass

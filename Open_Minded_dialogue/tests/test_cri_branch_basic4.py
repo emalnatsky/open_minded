@@ -65,10 +65,17 @@ def make_app(openai_payloads=None):
     app.openai_client = FakeOpenAIClient(openai_payloads or [])
     app.conversation_log = None
     app.current_turn_log = None
+    app.conversation_log_started_monotonic = None
     app.last_um_preview = {}
     app.pending_change = None
     app.corrections_seen = 0
     app.mistakes_mentioned = 0
+    app.simulation_mode = False
+    app.simulated_persona = {}
+    app.simulated_persona_path = str(DIALOGUE_DIR / "fake_personas" / "noor_1001.json")
+    app.simulated_history = []
+    app.last_leo_utterance = ""
+    app.current_turn_context = None
     return app
 
 
@@ -359,6 +366,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="cri_log_test_")
         self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
         app.CONVERSATION_LOG_ROOT = temp_dir
+        app.CHILD_ID = "1001"
         app.last_um_preview = {"child_name": "Julianna", "age": "10"}
         script = [
             {
@@ -377,11 +385,147 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         app.finish_conversation_log()
 
         folder = Path(app.conversation_log["folder"])
-        self.assertTrue(folder.name.startswith("20"))
+        self.assertRegex(
+            folder.name,
+            r"^Julianna_1001_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$",
+        )
+        self.assertEqual(app.conversation_log["session_id"], folder.name)
+        self.assertEqual(app.conversation_log["timestamp_unit"], "seconds_from_interaction_start")
+        self.assertIsInstance(app.conversation_log["started_at"], float)
+        self.assertIsInstance(app.conversation_log["ended_at"], float)
         self.assertEqual(Path(app.conversation_log["txt_path"]).name, "Julianna.txt")
         self.assertEqual(Path(app.conversation_log["json_path"]).name, "Julianna.json")
         self.assertTrue(Path(app.conversation_log["txt_path"]).exists())
         self.assertTrue(Path(app.conversation_log["json_path"]).exists())
+
+        timestamps = [event["timestamp"] for event in app.conversation_log["events"]]
+        self.assertTrue(all(isinstance(timestamp, float) for timestamp in timestamps))
+        self.assertEqual(timestamps, sorted(timestamps))
+
+    def test_step_three_llm_decision_is_logged_with_change_choice(self):
+        app = make_app([
+            {
+                "response_type": "possible_update",
+                "leo_response": "Ik check dat even.",
+                "confidence": 0.88,
+                "change": {
+                    "action": "update",
+                    "field": "pet_name",
+                    "old_value": "Blubby",
+                    "new_value": "Bluey",
+                    "confidence": 0.91,
+                    "reason": "Het kind corrigeert de naam van het huisdier.",
+                    "confirmation_question": "Moet ik onthouden dat je huisdier Bluey heet?",
+                },
+            }
+        ])
+        temp_dir = tempfile.mkdtemp(prefix="cri_log_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        app.CONVERSATION_LOG_ROOT = temp_dir
+        app.last_um_preview = {"child_name": "Julianna"}
+        script = [
+            {
+                "step": 3,
+                "name": "First richer topic domain",
+                "layer": "L2+L3",
+                "leo_text": "Ik denk dat Blubby een goed onderwerp is.",
+                "expects_response": True,
+            }
+        ]
+        topic = {
+            "domain": "huisdier",
+            "label": "Blubby",
+            "fields": ["pet_name", "pet_type", "animal_fav"],
+            "field_labels": {"pet_name": "de naam van je huisdier"},
+            "current_values": {"pet_name": "Blubby"},
+            "correct_values": ["Blubby hoort bij jou"],
+            "memory_link": "Blubby belangrijk voor je is",
+        }
+
+        app.start_conversation_log(script)
+        result = app.interpret_topic_response("Nee, mijn vis heet Bluey.", topic)
+
+        self.assertEqual(result["response_type"], "possible_update")
+
+        decision_events = [
+            event for event in app.conversation_log["events"]
+            if event["type"] == "llm_decision"
+        ]
+        self.assertEqual(len(decision_events), 1)
+        self.assertEqual(decision_events[0]["mode"], "topic")
+        self.assertEqual(decision_events[0]["transcript"], "Nee, mijn vis heet Bluey.")
+        self.assertEqual(decision_events[0]["decision"], "possible_update")
+        self.assertEqual(decision_events[0]["confidence"], 0.88)
+        self.assertEqual(decision_events[0]["change"]["field"], "pet_name")
+        self.assertEqual(decision_events[0]["change"]["new_value"], "Bluey")
+        self.assertTrue(decision_events[0]["proposes_change"])
+
+    def test_simulated_persona_loads_numeric_child_id_and_all_um_fields(self):
+        app = make_app()
+        app.simulation_mode = True
+        app.simulated_persona_path = str(DIALOGUE_DIR / "fake_personas" / "noor_1001.json")
+
+        app.load_simulated_persona()
+        profile = app.simulated_um_profile()
+
+        self.assertEqual(app.simulated_persona["child_id"], 1001)
+        self.assertEqual(profile["child_name"], "Noor")
+        self.assertEqual(profile["exposure"], "returning")
+        self.assertEqual(set(app.UM_FIELDS), set(profile.keys()))
+        self.assertTrue(all(profile[field] for field in app.UM_FIELDS))
+
+    def test_simulation_um_write_updates_fake_persona_without_graphdb(self):
+        app = make_app()
+        temp_dir = tempfile.mkdtemp(prefix="cri_log_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        app.CONVERSATION_LOG_ROOT = temp_dir
+        app.simulation_mode = True
+        app.simulated_persona = {"child_id": 1001, "fav_food": "pannenkoeken"}
+        app.last_um_preview = {"child_name": "Noor", "fav_food": "pannenkoeken"}
+        app.start_conversation_log([])
+
+        ok = app.write_um_change(
+            {
+                "action": "update",
+                "field": "fav_food",
+                "old_value": "pannenkoeken",
+                "new_value": "pizza",
+            }
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(app.simulated_persona["fav_food"], "pizza")
+        self.assertEqual(app.last_um_preview["fav_food"], "pizza")
+
+        write_events = [
+            event for event in app.conversation_log["events"]
+            if event["type"] == "um_write"
+        ]
+        self.assertEqual(len(write_events), 1)
+        self.assertEqual(write_events[0]["status_code"], "simulation")
+
+    def test_simulation_listen_uses_llm_fake_child_response(self):
+        app = make_app(["Nee, mijn kat heet Momo."])
+        temp_dir = tempfile.mkdtemp(prefix="cri_log_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        app.CONVERSATION_LOG_ROOT = temp_dir
+        app.simulation_mode = True
+        app.simulated_persona = sample_um()
+        app.simulated_persona["child_id"] = 1001
+        app.last_um_preview = {"child_name": "Noor"}
+        app.current_turn_context = {"step": 4, "name": "Deliberate memory mistake"}
+        app.last_leo_utterance = "Ik dacht dat je huisdier Fluffy heet."
+        app.start_conversation_log([])
+
+        transcript = app.listen()
+
+        self.assertEqual(transcript, "Nee, mijn kat heet Momo.")
+        child_events = [
+            event for event in app.conversation_log["events"]
+            if event["type"] == "utterance" and event.get("speaker") == "CHILD"
+        ]
+        self.assertEqual(len(child_events), 1)
+        self.assertTrue(child_events[0]["simulated"])
 
 
 if __name__ == "__main__":
