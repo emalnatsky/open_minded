@@ -437,7 +437,7 @@ VALID_FIELDS: dict[str, dict] = {
         "type": "string",
         "required": False,
         "sensitivity_tier": 1,
-        "category": "vrije_tijd",
+        "category": "sociaal",
         "llm_validate": False,
         "xsd_type": "xsd:string",
         "description": "What child most likes to do in free time (MC options)",
@@ -840,17 +840,17 @@ VALID_FIELDS: dict[str, dict] = {
         "stored_cleanly": True,
     },
 
-    "device": {
-        # For tagging whether the tablet or...
+    "condition": {
+        # For tagging whether using the tablet or not
         "storage": "scalar",
         "type": "enum",
-        "allowed_values": ["tablet", "robot"],
+        "allowed_values": ["condition_1", "condition_2"],
         "required": False,
         "sensitivity_tier": 1,
         "category": "sociaal",
         "llm_validate": False,
         "xsd_type": "xsd:string",
-        "description": "Whether the child is using the tablet or robot during CRI",
+        "description": "Whether the child is using the tablet or verbal to correct during CRI",
         "gate_by": None,
         "gate_condition": None,
         "gate_value": None,
@@ -910,12 +910,11 @@ CATEGORY_LABELS: dict[str, str] = {
     "sport":      "Sport",
     "muziek":     "Muziek",
     "boeken":     "Boeken",
-    "vrije_tijd": "Vrije Tijd",
     "sociaal":    "Sociaal",
     "dieren":     "Dieren",
     "eten":       "Eten",
     "school":     "School",
-    "aspiratie":  "Dromen & Idolen",
+    "aspiratie":  "Dromen",
 }
 
 # ── Sensitivity tier descriptions ─────────────────────────────────────────────
