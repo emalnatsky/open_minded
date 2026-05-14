@@ -820,6 +820,45 @@ VALID_FIELDS: dict[str, dict] = {
         "mistake_priority": None,
         "stored_cleanly": True,
     },
+
+    "exposure": {
+        # Set during import — "new" or "returning"
+        "storage": "scalar",
+        "type": "enum",
+        "allowed_values": ["new", "returning"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "sociaal",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether the child is new to the project or returning from a previous year",
+        "gate_by": None,
+        "gate_condition": None,
+        "gate_value": None,
+        "declined_sentinel": None,
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
+
+    "device": {
+        # For tagging whether the tablet or...
+        "storage": "scalar",
+        "type": "enum",
+        "allowed_values": ["tablet", "robot"],
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "sociaal",
+        "llm_validate": False,
+        "xsd_type": "xsd:string",
+        "description": "Whether the child is using the tablet or robot during CRI",
+        "gate_by": None,
+        "gate_condition": None,
+        "gate_value": None,
+        "declined_sentinel": None,
+        "mistake_priority": None,
+        "stored_cleanly": True,
+    },
+
 }
 
 
