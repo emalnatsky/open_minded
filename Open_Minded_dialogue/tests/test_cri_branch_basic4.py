@@ -73,7 +73,6 @@ def make_app(openai_payloads=None):
     app.resume_source_log = {}
     app.local_child_name = ""
     app.researcher_name = ""
-    app.session_number = 1
     app.local_condition = ""
     app.start_phase_index = 0
     app.last_um_preview = {}
@@ -106,23 +105,13 @@ def sample_um():
         "hobbies": "scuba diving, tekenen",
         "hobby_fav": "scuba diving",
         "sports_enjoys": unknown,
-        "sports_talk": unknown,
-        "sports_fav": unknown,
-        "sports_plays": unknown,
         "sports_fav_play": unknown,
         "books_enjoys": unknown,
-        "books_talk": unknown,
-        "books_fav_genre": unknown,
         "books_fav_title": "Dog Man",
         "music_enjoys": unknown,
-        "music_talk": unknown,
-        "music_plays_instrument": unknown,
-        "music_instrument": unknown,
         "animals_enjoys": unknown,
-        "animal_talk": unknown,
         "animal_fav": "tropical fish",
         "has_pet": unknown,
-        "pet_talk": unknown,
         "pet_type": unknown,
         "pet_name": "Blubby en Bluey",
         "freetime_fav": unknown,
@@ -141,6 +130,7 @@ def sample_um():
 class CRIBranchBasic4Tests(unittest.TestCase):
     def test_build_script_uses_walkthrough_sequence_and_two_mistakes(self):
         app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
 
         script = app.build_script()
@@ -171,6 +161,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
 
     def test_part1_phases_have_explicit_content_layers_and_runtime_branches(self):
         app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
 
         script = app.build_script()
@@ -182,6 +173,31 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertTrue(script[4]["segments"])
         self.assertTrue(app.requires_runtime_llm(script[4]))
         self.assertTrue(script[5]["segments"][1]["skip_if_phase_confirmed_change"])
+
+    def test_sport_topic_uses_general_do_sport_phrase(self):
+        app = make_app()
+        topic = app.topic_candidate(
+            domain="sport",
+            label="zwemmen",
+            fields=["sports_fav_play"],
+            field_labels={"sports_fav_play": "de sport die je graag doet"},
+            current_values={"sports_fav_play": "zwemmen"},
+            correct_values=["je iets met zwemmen hebt"],
+            memory_link="zwemmen iets is waar jij iets mee hebt",
+            options=["zwemmen", "sport"],
+            reground="Ik houd goed vast dat zwemmen iets is waar jij iets mee hebt.",
+        )
+
+        text = app.turn_text(app.topic1_phase_segments(topic)[0])
+        followup = app.turn_text(app.topic1_phase_segments(topic)[1])
+        choice_followup = app.turn_text(app.topic1_phase_segments(topic)[3])
+
+        self.assertIn("jij aan zwemmen doet", text)
+        self.assertNotIn("zwemmen speelt", text)
+        self.assertEqual(followup, "Waarom zit je op zwemmen?")
+        self.assertNotIn("positie", followup.lower())
+        self.assertIn("bezig zijn, beter worden", choice_followup)
+        self.assertNotIn("goed overspelen", choice_followup)
 
     def test_content_plan_renders_slot_and_pregenerated_utterance(self):
         app = make_app()
@@ -228,6 +244,8 @@ class CRIBranchBasic4Tests(unittest.TestCase):
 
         new_script_app = make_app()
         returning_script_app = make_app()
+        new_script_app.USE_FAKE_PERSONA_UM = False
+        returning_script_app.USE_FAKE_PERSONA_UM = False
         new_script_app.pull_um = lambda: new_child
         returning_script_app.pull_um = lambda: returning_child
         self.assertEqual(
@@ -259,14 +277,13 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         um["condition"] = "C1"
         self.assertEqual(app.tutorial_condition(um), "C1")
 
-    def test_local_session_config_sets_child_name_condition_and_start_phase(self):
+    def test_local_session_config_sets_child_name_and_condition_fallback(self):
         app = make_app()
 
         app.apply_session_config({
             "child_id": "1002",
             "child_name": "Mila",
             "researcher_name": "Sander",
-            "session_number": 3,
             "condition": "2",
             "start_phase_index": 4,
         })
@@ -274,9 +291,15 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertEqual(app.CHILD_ID, "1002")
         self.assertEqual(app.child_display_name(sample_um()), "Mila")
         self.assertEqual(app.researcher_name, "Sander")
-        self.assertEqual(app.session_number, 3)
-        self.assertEqual(app.tutorial_condition(sample_um()), "C2")
         self.assertEqual(app.start_phase_index, 4)
+        self.assertEqual(app.local_condition, "C2")
+
+        um_condition_wins = sample_um()
+        um_condition_wins["condition"] = "C1"
+        local_fallback = sample_um()
+        local_fallback["condition"] = CRI.UNKNOWN_VALUE
+        self.assertEqual(app.tutorial_condition(um_condition_wins), "C1")
+        self.assertEqual(app.tutorial_condition(local_fallback), "C2")
 
     def test_new_session_interface_saves_local_config_without_teacher_name(self):
         app = make_app()
@@ -284,9 +307,19 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
         config_path = Path(temp_dir) / "session_config.local.json"
         app.SESSION_CONFIG_PATH = str(config_path)
+        app.SIMULATED_PERSONA_DIR = temp_dir
         app.check_child_in_um_api = lambda child_id: None
+        Path(temp_dir, "mila_1005.json").write_text(
+            json.dumps({
+                "child_id": 1005,
+                "name": "Mila",
+                "exposure": "new",
+                "condition": "C2",
+            }),
+            encoding="utf-8",
+        )
 
-        answers = iter(["1005", "Mila", "Sander", "2", "C2", "5", ""])
+        answers = iter(["1005", "Mila", "Sander", ""])
         with patch("builtins.input", lambda prompt="": next(answers)), patch("builtins.print"):
             app.run_new_session_interface()
 
@@ -294,14 +327,15 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertEqual(saved["child_id"], "1005")
         self.assertEqual(saved["child_name"], "Mila")
         self.assertEqual(saved["researcher_name"], "Sander")
-        self.assertEqual(saved["session_number"], 2)
-        self.assertEqual(saved["condition"], "C2")
-        self.assertEqual(saved["start_phase_index"], 4)
+        self.assertEqual(saved["start_phase_index"], 0)
+        self.assertTrue(saved["fake_persona_path"].endswith("mila_1005.json"))
         self.assertNotIn("teacher_name", saved)
+        self.assertNotIn("session_number", saved)
+        self.assertNotIn("condition", saved)
         self.assertEqual(app.CHILD_ID, "1005")
-        self.assertEqual(app.start_phase_index, 4)
+        self.assertEqual(app.start_phase_index, 0)
 
-    def test_condition_mismatch_alerts_but_local_condition_still_wins(self):
+    def test_condition_mismatch_alerts_but_um_condition_wins(self):
         app = make_app()
         app.apply_session_config({"condition": "C2"})
         um = sample_um()
@@ -312,7 +346,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
 
         printed_text = "\n".join(str(call.args[0]) for call in printed.call_args_list if call.args)
         self.assertIn("CONDITION MISMATCH", printed_text)
-        self.assertEqual(app.tutorial_condition(um), "C2")
+        self.assertEqual(app.tutorial_condition(um), "C1")
 
     def test_resume_log_restarts_active_phase_and_restores_memory_access_state(self):
         app = make_app()
@@ -329,32 +363,69 @@ class CRIBranchBasic4Tests(unittest.TestCase):
                     "child_id": "1001",
                     "child_name": "Noor",
                     "researcher_name": "Sander",
-                    "session_number": 2,
                     "condition": "C2",
                 },
                 "mistakes_mentioned": 1,
                 "corrections_seen": 0,
                 "mistake_states": {"M1": {"wrong_value_rejected": True}},
                 "phases_with_confirmed_change": [3],
-                "memory_fields_mentioned_so_far": ["hobby_fav", "pet_name"],
-                "events": [{"type": "phase_start", "phase": 6}],
+                "memory_fields_mentioned_so_far": ["hobby_fav", "pet_name", "sports_fav_play"],
+                "events": [
+                    {"timestamp": 0.0, "type": "phase_start", "phase": 1, "name": "Greeting"},
+                    {"timestamp": 0.5, "type": "utterance", "speaker": "LEO", "text": "Hoi Noor."},
+                    {"timestamp": 1.2, "type": "utterance", "speaker": "CHILD", "text": "Ja."},
+                    {"timestamp": 2.0, "type": "phase_end", "phase": 1},
+                    {"timestamp": 3.0, "type": "phase_start", "phase": 6, "name": "Mistake 1"},
+                ],
             }),
             encoding="utf-8",
         )
 
-        with patch("builtins.input", return_value=""), patch("builtins.print"):
-            app.run_resume_session_interface(str(log_path))
+        with patch("builtins.input", return_value=""), patch("builtins.print") as printed:
+            app.run_resume_session_interface(f'"{log_path}"')
 
         self.assertEqual(app.CHILD_ID, "1001")
+        self.assertEqual(app.resume_from_log_path, str(log_path))
         self.assertEqual(app.local_child_name, "Noor")
         self.assertEqual(app.researcher_name, "Sander")
-        self.assertEqual(app.session_number, 2)
         self.assertEqual(app.local_condition, "C2")
         self.assertEqual(app.start_phase_index, 5)
         self.assertEqual(app.mistakes_mentioned, 1)
         self.assertEqual(app.mistake_states["M1"]["wrong_value_rejected"], True)
         self.assertEqual(app.phases_with_confirmed_change, {3})
-        self.assertEqual(app.memory_fields_mentioned_so_far, {"hobby_fav", "pet_name"})
+        self.assertEqual(app.memory_fields_mentioned_so_far, {"hobby_fav", "pet_name", "sports_fav_play"})
+        printed_text = "\n".join(str(call.args[0]) for call in printed.call_args_list if call.args)
+        self.assertNotIn("PREVIOUS CONVERSATION FROM LOG", printed_text)
+
+        with patch("builtins.print") as replay_printed:
+            app.print_resume_context_before_interaction()
+
+        replay_text = "\n".join(str(call.args[0]) for call in replay_printed.call_args_list if call.args)
+        self.assertIn("PREVIOUS CONVERSATION FROM LOG", replay_text)
+        self.assertIn("LEO: Hoi Noor.", replay_text)
+        self.assertIn("CHILD: Ja.", replay_text)
+
+    def test_clean_pasted_path_accepts_common_quoted_windows_paths(self):
+        app = make_app()
+        path = r"C:\Users\Sander\dev\open_minded\Open_Minded_dialogue\conversations\Noor.json"
+
+        self.assertEqual(app.clean_pasted_path(f'"{path}"'), path)
+        self.assertEqual(app.clean_pasted_path(f"'{path}'"), path)
+        self.assertEqual(app.clean_pasted_path(f"“{path}”"), path)
+        self.assertEqual(app.clean_pasted_path(f"<{path}>"), path)
+
+    def test_session_mode_accepts_pasted_resume_json_path_directly(self):
+        app = make_app()
+        app.ASK_SESSION_INTERFACE_AT_START = True
+        app.run_new_session_interface = lambda: self.fail("Should resume instead of starting a new session")
+        called = []
+        resume_path = r"C:\Users\Sander\dev\open_minded\Open_Minded_dialogue\conversations\Noor.json"
+        app.run_resume_session_interface = lambda path="": called.append(path)
+
+        with patch.dict("os.environ", {}, clear=True), patch("builtins.input", return_value=f'"{resume_path}"'), patch("builtins.print"):
+            app.configure_session_interface()
+
+        self.assertEqual(called, [f'"{resume_path}"'])
 
     def test_resume_phase_moves_to_next_after_completed_phase(self):
         app = make_app()
@@ -369,6 +440,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
 
     def test_script_memory_table_marks_used_fields_and_mistakes(self):
         app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
         script = app.build_script()
 
@@ -380,10 +452,43 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertEqual(rows["hobby_fav"]["true_value"], "scuba diving")
         self.assertIn("tekenen", rows["hobby_fav"]["script_value"])
         self.assertEqual(rows["hobby_fav"]["mistake"], "M1 related-but-wrong")
-        self.assertEqual(rows["hobby_fav"]["used"], "yes")
+        self.assertNotIn("spt", rows["hobby_fav"])
+        self.assertNotIn("used", rows["hobby_fav"])
         self.assertEqual(rows["fav_food"]["true_value"], "chocolate, pasta, pizza")
         self.assertIn("pizza", rows["fav_food"]["script_value"])
         self.assertEqual(rows["fav_food"]["mistake"], "M2 completely-wrong")
+
+    def test_fake_persona_script_plan_drives_mistakes_and_start_table(self):
+        app = make_app()
+
+        script = app.build_script()
+        rows = {
+            row["field"]: row
+            for row in app.script_memory_table(script, app.last_um_preview)
+        }
+
+        self.assertEqual(script[5]["mistake_wrong"], "tuinieren")
+        self.assertEqual(script[7]["mistake_wrong"], "pizza")
+        self.assertEqual(rows["hobby_fav"]["true_value"], "tekenen")
+        self.assertEqual(rows["hobby_fav"]["script_value"], "tuinieren")
+        self.assertEqual(rows["hobby_fav"]["mistake"], "M1 related-but-wrong")
+        self.assertEqual(rows["fav_food"]["script_value"], "pizza")
+        self.assertEqual(rows["fav_food"]["mistake"], "M2 completely-wrong")
+        self.assertIn("books_fav_title", rows)
+        self.assertEqual(rows["books_fav_title"]["true_value"], "De Gorgels")
+        self.assertEqual(rows["books_fav_title"]["script_value"], "-")
+        self.assertEqual(rows["books_fav_title"]["mistake"], "-")
+
+    def test_related_wrong_hobby_value_never_reuses_true_favorite(self):
+        app = make_app()
+        um = sample_um()
+        um["hobby_fav"] = "tekenen"
+        um["hobbies"] = "tekenen, tuinieren, lego bouwen"
+
+        wrong = app.related_wrong_hobby_value(um)
+
+        self.assertNotEqual(wrong.lower(), "tekenen")
+        self.assertNotIn("tekenen", wrong.lower())
 
     def test_should_skip_conditional_correction_space_after_confirmed_change(self):
         app = make_app()
@@ -406,7 +511,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         app.corrections_seen = 1
         self.assertTrue(app.should_skip_phase(turn))
 
-    def test_second_mistake_nudge_names_wrong_value_explicitly(self):
+    def test_mistake_acceptance_continues_to_wrong_value_followup_without_speaking(self):
         app = make_app()
         spoken = []
         app.say = spoken.append
@@ -425,24 +530,17 @@ class CRIBranchBasic4Tests(unittest.TestCase):
             },
         }
 
-        first = app.action_handler(
+        result = app.action_handler(
             IntentResult("dialogue_answer", None, "oké", 0.8),
             "Oké.",
             turn,
         )
-        second = app.action_handler(
-            IntentResult("dialogue_none", None, None, 1.0),
-            "",
-            turn,
-        )
 
-        self.assertEqual(first["action"], "gentle_mistake_nudge")
-        self.assertEqual(second["action"], "explicit_mistake_nudge")
-        self.assertEqual(second["nudge_level"], 2)
-        self.assertIn("bakken", spoken[-1])
-        self.assertIn("je favoriete hobby", spoken[-1])
+        self.assertEqual(result["action"], "continue_wrong_value_followup")
+        self.assertFalse(result["follow_up_needed"])
+        self.assertEqual(spoken, [])
 
-    def test_final_nudge_phase_uses_action_handler_when_no_memory_access_intent(self):
+    def test_final_nudge_phase_does_not_create_second_explicit_nudge(self):
         app = make_app()
         spoken = []
         app.say = spoken.append
@@ -462,6 +560,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
             "name": "Nudge",
             "condition": "run_if_two_mistakes_no_corrections",
             "response_mode": "topic_interpretation",
+            "topic": {"label": "mijn geheugen over jou"},
         }
 
         result = app.action_handler(
@@ -470,9 +569,8 @@ class CRIBranchBasic4Tests(unittest.TestCase):
             turn,
         )
 
-        self.assertEqual(result["action"], "explicit_mistake_nudge")
-        self.assertEqual(result["nudge_level"], 2)
-        self.assertIn("bakken", spoken[-1])
+        self.assertNotIn(result["action"], ("gentle_mistake_nudge", "explicit_mistake_nudge"))
+        self.assertEqual(result["action"], "no_memory_change")
 
     def test_topic_candidate_and_deliberate_mistake_topic_are_different(self):
         app = make_app()
@@ -544,7 +642,88 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertTrue(result["follow_up_needed"])
         self.assertEqual(spoken[-1], "Oeps, dan had ik dat verkeerd. Hoe heet je huisdier?")
 
-    def test_mistake_acceptance_triggers_gentle_nudge_instead_of_confirming_wrong_value(self):
+    def test_mistake_correction_to_existing_um_value_counts_as_corrected(self):
+        app = make_app()
+        spoken = []
+        app.say = spoken.append
+        app.last_um_preview = {"hobby_fav": "tekenen"}
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+        }
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "response_mode": "mistake_interpretation",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "tuinieren",
+            "mistake_topic": {
+                "domain": "hobby",
+                "label": "tekenen",
+                "fields": ["hobby_fav"],
+                "field_labels": {"hobby_fav": "je favoriete hobby"},
+                "current_values": {"hobby_fav": "tekenen"},
+            },
+        }
+        app.register_mistake_phase(turn)
+
+        result = app.action_handler(
+            IntentResult("um_add", "hobby_fav", "tekenen", 0.96),
+            "Mijn favoriete hobby is tekenen.",
+            turn,
+        )
+
+        self.assertEqual(result["action"], "mistake_corrected_no_um_change")
+        self.assertEqual(spoken[-1], "O ja, dankjewel.")
+        self.assertEqual(app.corrections_seen, 1)
+        self.assertTrue(app.mistake_states["M1"]["corrected"])
+        self.assertIn(6, app.phases_with_confirmed_change)
+
+    def test_short_answer_after_mistake_rejection_uses_mistake_field(self):
+        app = make_app()
+        spoken = []
+        app.say = spoken.append
+        app.last_um_preview = {"hobby_fav": "tekenen"}
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+        }
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "response_mode": "mistake_interpretation",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "tuinieren",
+            "mistake_topic": {
+                "domain": "hobby",
+                "label": "tekenen",
+                "fields": ["hobby_fav"],
+                "field_labels": {"hobby_fav": "je favoriete hobby"},
+                "current_values": {"hobby_fav": "tekenen"},
+            },
+        }
+        app.register_mistake_phase(turn)
+
+        rejection = app.action_handler(
+            IntentResult("dialogue_none", None, None, 0.9),
+            "Nee dat klopt niet.",
+            turn,
+        )
+        correction = app.action_handler(
+            IntentResult("dialogue_answer", None, "tekenen", 0.87),
+            "Tekenen.",
+            turn,
+        )
+
+        self.assertEqual(rejection["action"], "ask_correction_detail")
+        self.assertEqual(correction["action"], "mistake_corrected_no_um_change")
+        self.assertEqual(spoken[-1], "O ja, dankjewel.")
+        self.assertEqual(app.corrections_seen, 1)
+        self.assertTrue(app.mistake_states["M1"]["corrected"])
+
+    def test_mistake_acceptance_continues_to_wrong_value_followup_instead_of_nudge(self):
         app = make_app()
         spoken = []
         app.say = spoken.append
@@ -570,12 +749,9 @@ class CRIBranchBasic4Tests(unittest.TestCase):
             turn,
         )
 
-        self.assertEqual(result["action"], "gentle_mistake_nudge")
-        self.assertTrue(result["follow_up_needed"])
-        self.assertEqual(result["nudge_level"], 1)
-        self.assertEqual(result["mistake_id"], "M1")
-        self.assertIn("iets uit mijn geheugen", spoken[-1])
-        self.assertNotIn("sneeuwpop maken", spoken[-1])
+        self.assertEqual(result["action"], "continue_wrong_value_followup")
+        self.assertFalse(result["follow_up_needed"])
+        self.assertEqual(spoken, [])
 
     def test_confirmation_text_removes_old_value_and_yes_no_instruction(self):
         app = make_app()
@@ -724,6 +900,47 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertTrue(all(isinstance(timestamp, float) for timestamp in timestamps))
         self.assertEqual(timestamps, sorted(timestamps))
 
+    def test_resumed_conversation_log_includes_previous_conversation(self):
+        app = make_app()
+        temp_dir = tempfile.mkdtemp(prefix="cri_log_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        app.CONVERSATION_LOG_ROOT = temp_dir
+        app.CHILD_ID = "1001"
+        app.researcher_name = "Sander"
+        app.resume_from_log_path = r"C:\old\Noor.json"
+        app.start_phase_index = 4
+        app.last_um_preview = {"child_name": "Noor"}
+        app.resume_source_log = {
+            "session_id": "Noor_old",
+            "turns": [{"phase": 1, "name": "Greeting", "events": []}],
+            "events": [
+                {"timestamp": 0.0, "type": "phase_start", "phase": 1, "name": "Greeting", "layer": "L1"},
+                {"timestamp": 1.2, "type": "utterance", "speaker": "LEO", "text": "Hoi Noor."},
+                {"timestamp": 3.4, "type": "phase_end", "phase": 1},
+            ],
+        }
+        script = [
+            {
+                "phase": 5,
+                "name": "Topic 1",
+                "layer": "L2+L3",
+                "leo_text": "Ik weet ook nog dat jij aan zwemmen doet.",
+                "expects_response": True,
+            }
+        ]
+
+        app.start_conversation_log(script)
+        app.start_turn_log(script[0])
+
+        events = app.conversation_log["events"]
+        self.assertTrue(app.conversation_log["previous_log_included"])
+        self.assertEqual(app.conversation_log["previous_session_id"], "Noor_old")
+        self.assertEqual(events[1]["text"], "Hoi Noor.")
+        boundary = next(event for event in events if event["type"] == "resume_boundary")
+        self.assertGreater(boundary["timestamp"], 3.4)
+        self.assertIn("Hoi Noor.", Path(app.conversation_log["txt_path"]).read_text(encoding="utf-8"))
+        self.assertIn("RESUME: continuing from previous log", Path(app.conversation_log["txt_path"]).read_text(encoding="utf-8"))
+
     def test_intent_classifier_and_action_handler_are_logged_with_change_choice(self):
         app = make_app()
         temp_dir = tempfile.mkdtemp(prefix="cri_log_test_")
@@ -786,13 +1003,21 @@ class CRIBranchBasic4Tests(unittest.TestCase):
             "hobby_fav": "scuba diving",
             "pet_name": "Blubby",
             "fav_food": "pizza",
+            "animal_fav": "tropical fish",
+            "age": "10",
+            "hobbies": "scuba diving, tekenen",
+            "sports_enjoys": "ja",
+            "sports_fav_play": "zwemmen",
         }
-        app.memory_fields_mentioned_so_far = {"hobby_fav"}
+        app.memory_fields_mentioned_so_far = {
+            "hobby_fav", "animal_fav", "age", "hobbies",
+            "sports_enjoys", "sports_fav_play",
+        }
         turn = {
             "topic": {
-                "fields": ["pet_name"],
+                "fields": ["pet_name", "fav_food"],
                 "field_labels": {"pet_name": "de naam van je huisdier"},
-                "current_values": {"pet_name": "Blubby"},
+                "current_values": {"pet_name": "Blubby", "fav_food": "pizza"},
             },
             "used_fields": {"pet_name": "Blubby"},
         }
@@ -806,10 +1031,36 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertEqual(action["action"], "memory_access")
         self.assertIn("hobby_fav", action["memory_scope"])
         self.assertIn("pet_name", action["memory_scope"])
+        self.assertIn("sports_fav_play", action["memory_scope"])
         self.assertNotIn("fav_food", action["memory_scope"])
+        self.assertNotIn("sports_enjoys", action["memory_scope"])
         self.assertIn("scuba diving", spoken[-1])
         self.assertIn("Blubby", spoken[-1])
+        self.assertIn("tropical fish", spoken[-1])
+        self.assertIn("10", spoken[-1])
+        self.assertIn("zwemmen", spoken[-1])
         self.assertNotIn("pizza", spoken[-1])
+        self.assertNotIn("of je over sport", spoken[-1])
+        self.assertNotIn("of je sport leuk", spoken[-1])
+        self.assertEqual(len(action["returned_fields"]), 6)
+
+    def test_memory_access_scope_uses_spoken_fields_not_whole_topic(self):
+        app = make_app()
+        turn = {
+            "topic": {
+                "fields": ["sports_fav_play", "sports_enjoys"],
+                "current_values": {
+                    "sports_fav_play": "zwemmen",
+                    "sports_enjoys": "ja",
+                },
+            },
+            "used_fields": {"sports_fav_play": "zwemmen"},
+        }
+
+        scope = app.memory_access_scope(turn)
+
+        self.assertIn("sports_fav_play", scope)
+        self.assertNotIn("sports_enjoys", scope)
 
     def test_memory_access_blocks_requested_field_outside_current_scope(self):
         app = make_app()
@@ -866,6 +1117,41 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertNotIn("scuba diving", spoken[-1])
         self.assertNotIn("Blubby", spoken[-1])
 
+    def test_memory_access_interrupt_repeats_then_resumes_same_phase(self):
+        app = make_app()
+        spoken = []
+        heard = iter(["Kan ik je geheugen zien?", "Ja, dat klopt."])
+        classified = iter([
+            IntentResult("um_inspect", None, None, 0.95),
+            IntentResult("dialogue_answer", None, "ja, dat klopt", 0.9),
+        ])
+        app.say = spoken.append
+        app.listen_with_review = lambda: next(heard)
+        app.classify_with_repeat = lambda transcript: next(classified)
+        app.last_um_preview = {
+            "condition": "C1",
+            "hobby_fav": "tekenen",
+            "hobbies": "tekenen, tuinieren, lego bouwen",
+        }
+        app.memory_fields_mentioned_so_far = {"hobby_fav"}
+        turn = {
+            "phase": 4,
+            "name": "Correct hobby bridge",
+            "layer": "L1 + L2-slot + L2-pregen",
+            "content_plan": app.l1("Ik weet al dat jij van tekenen houdt."),
+            "expects_response": True,
+            "response_mode": "listen_only",
+            "used_fields": {"hobby_fav": "tekenen"},
+        }
+
+        with patch("builtins.input", side_effect=["m", ""]):
+            app.run_phase_segment(turn, turn)
+
+        memory_replies = [reply for reply in spoken if "Ik heb vandaag al genoemd" in reply]
+        self.assertEqual(len(memory_replies), 2)
+        self.assertEqual(memory_replies[0], memory_replies[1])
+        self.assertGreaterEqual(spoken.count("Ik weet al dat jij van tekenen houdt."), 2)
+
     def test_memory_access_mentioned_fields_exclude_internal_exposure(self):
         app = make_app()
         turn = {
@@ -906,7 +1192,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         profile = app.simulated_um_profile()
 
         self.assertEqual(app.simulated_persona["child_id"], 1001)
-        self.assertEqual(profile["child_name"], "Noor")
+        self.assertEqual(profile["name"], "Noor")
         self.assertEqual(profile["exposure"], "returning")
         self.assertEqual(set(app.UM_FIELDS), set(profile.keys()))
         self.assertTrue(all(profile[field] for field in app.UM_FIELDS))
@@ -917,11 +1203,11 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
         app.SIMULATED_PERSONA_DIR = temp_dir
         Path(temp_dir, "noor_1001.json").write_text(
-            json.dumps({"child_id": 1001, "child_name": "Noor", "exposure": "returning"}),
+            json.dumps({"child_id": 1001, "name": "Noor", "exposure": "returning", "condition": "C1"}),
             encoding="utf-8",
         )
         Path(temp_dir, "mila_1002.json").write_text(
-            json.dumps({"child_id": 1002, "child_name": "Mila", "exposure": "new"}),
+            json.dumps({"child_id": 1002, "name": "Mila", "exposure": "new", "condition": "C2"}),
             encoding="utf-8",
         )
 
@@ -930,8 +1216,44 @@ class CRIBranchBasic4Tests(unittest.TestCase):
         self.assertEqual([persona["child_id"] for persona in personas], ["1001", "1002"])
         self.assertEqual(personas[0]["name"], "Noor")
         self.assertEqual(personas[0]["exposure"], "returning")
+        self.assertEqual(personas[0]["condition"], "C1")
         self.assertEqual(personas[1]["name"], "Mila")
         self.assertEqual(personas[1]["exposure"], "new")
+        self.assertEqual(personas[1]["condition"], "C2")
+
+    def test_bundled_fake_personas_are_complete_and_balanced(self):
+        app = make_app()
+        personas = app.available_fake_personas()
+
+        self.assertEqual([persona["child_id"] for persona in personas], ["1001", "1002", "1003", "1004"])
+        self.assertEqual(
+            {persona["child_id"]: (persona["exposure"], persona["condition"]) for persona in personas},
+            {
+                "1001": ("returning", "C1"),
+                "1002": ("new", "C2"),
+                "1003": ("new", "C1"),
+                "1004": ("returning", "C2"),
+            },
+        )
+        self.assertEqual(sum(1 for persona in personas if persona["condition"] == "C1"), 2)
+        self.assertEqual(sum(1 for persona in personas if persona["condition"] == "C2"), 2)
+        self.assertEqual(sum(1 for persona in personas if persona["exposure"] == "new"), 2)
+        self.assertEqual(sum(1 for persona in personas if persona["exposure"] == "returning"), 2)
+
+        for persona in personas:
+            app.simulated_persona_path = persona["path"]
+            app.simulated_persona = {}
+            app.load_simulated_persona()
+            for field in app.UM_FIELDS:
+                self.assertIn(field, app.simulated_persona)
+                self.assertTrue(app.simulated_persona[field])
+            self.assertIn("script_plan", app.simulated_persona)
+            self.assertIn("used_fields", app.simulated_persona["script_plan"])
+            self.assertIn("mistakes", app.simulated_persona["script_plan"])
+            self.assertEqual(
+                {mistake["id"] for mistake in app.simulated_persona["script_plan"]["mistakes"]},
+                {"M1", "M2"},
+            )
 
     def test_configure_simulated_persona_selects_by_typed_child_id(self):
         app = make_app()
@@ -1011,7 +1333,7 @@ class CRIBranchBasic4Tests(unittest.TestCase):
             if event["type"] == "um_write"
         ]
         self.assertEqual(len(write_events), 1)
-        self.assertEqual(write_events[0]["status_code"], "simulation")
+        self.assertEqual(write_events[0]["status_code"], "fake_persona")
 
     def test_simulation_listen_uses_llm_fake_child_response(self):
         app = make_app(["Nee, mijn kat heet Momo."])

@@ -2,6 +2,7 @@
 import time
 import json
 import random
+import copy
 import requests
 import unicodedata
 import logging
@@ -54,14 +55,14 @@ VALID_INTENTS = [
 ]
 
 EMBEDDED_VALID_FIELDS = [
-    "child_name", "name", "exposure", "hobbies",
+    "name", "exposure", "hobbies",
     "condition",
-    "hobby_1", "hobby_2", "hobby_3", "hobby_4", "hobby_fav",
-    "sports_enjoys", "sports_talk", "sports_fav", "sports_plays", "sports_fav_play",
-    "books_enjoys", "books_talk", "books_fav_genre", "books_fav_title",
-    "music_enjoys", "music_talk", "music_plays_instrument", "music_instrument",
-    "animals_enjoys", "animal_talk", "animal_fav",
-    "has_pet", "pet_talk", "pet_type", "pet_name",
+    "hobby_fav",
+    "sports_enjoys", "sports_fav_play",
+    "books_enjoys", "books_fav_title",
+    "music_enjoys",
+    "animals_enjoys", "animal_fav",
+    "has_pet", "pet_type", "pet_name",
     "freetime_fav", "fav_food", "fav_subject",
     "school_strength", "school_difficulty",
     "interest", "aspiration", "role_model", "has_best_friend",
@@ -70,33 +71,19 @@ EMBEDDED_VALID_FIELDS = [
 
 FIELD_ALIASES = {
     "hobby_fav": ["lievelingshobby", "favoriete hobby", "liefste hobby", "leukste hobby", "mijn favoriete hobby"],
-    "hobby_1": ["hobby 1", "eerste hobby"],
-    "hobby_2": ["hobby 2", "tweede hobby"],
-    "hobby_3": ["hobby 3", "derde hobby"],
-    "hobby_4": ["hobby 4", "vierde hobby"],
     "hobbies": ["hobby's", "hobbies", "wat vind je leuk"],
     "sports_enjoys": ["sport leuk", "van sport", "sportief", "hou je van sport", "vind je sport"],
-    "sports_talk": ["over sport praten", "sport praten"],
-    "sports_fav": ["lievelingssport", "favoriete sport", "leukste sport", "mijn lievelingssport"],
-    "sports_plays": ["zelf sport", "doe je een sport", "speel je sport"],
     "sports_fav_play": ["sport doe je zelf", "liefste sport om te doen", "sport speel je zelf"],
     "music_enjoys": ["muziek leuk", "van muziek", "muziek mooi", "houd je van muziek", "ik hou van muziek"],
-    "music_talk": ["over muziek praten", "muziek praten"],
-    "music_plays_instrument": ["instrument speel", "speel je een instrument", "ik speel een instrument"],
-    "music_instrument": ["welk instrument", "instrument", "gitaar", "piano", "viool", "drums", "fluit", "cello", "trompet", "saxofoon", "ukelele", "keyboard"],
     "books_enjoys": ["lezen leuk", "graag lees", "lees je graag", "boeken leuk", "ik lees graag"],
-    "books_talk": ["over boeken praten", "boeken praten"],
-    "books_fav_genre": ["soort boeken", "genre", "boeken genre", "soort boek", "avontuur boek", "fantasy boek"],
     "books_fav_title": ["lievelingsboek", "favoriete boek", "boek heet", "boek is", "welk boek", "mijn lievelingsboek"],
     "freetime_fav": ["vrije tijd", "als ik vrij ben", "liefst doen", "doe je liefst", "gamen", "buiten spelen", "knutselen", "dansen", "puzzelen", "filmpjes kijken"],
     "has_best_friend": ["beste vriend", "bff", "beste vriendin", "vrienden"],
     "animals_enjoys": ["dieren leuk", "van dieren", "houd je van dieren", "ik hou van dieren"],
-    "animal_talk": ["over dieren praten", "dieren praten"],
     "animal_fav": ["lievelingsdier", "favoriete dier", "leukste dier", "mijn lievelingsdier"],
     "pet_type": ["soort huisdier", "wat voor huisdier", "mijn huisdier is een", "mijn huisdier is", "hond", "kat", "konijn", "hamster", "vogel", "vis", "reptiel"],
     "pet_name": ["naam huisdier", "hoe heet je huisdier", "huisdier heet", "naam van je huisdier", "mijn huisdier heet"],
     "has_pet": ["heb je een huisdier", "eigen dier", "ik heb een huisdier", "huisdier"],
-    "pet_talk": ["over je huisdier praten", "huisdier praten"],
     "fav_food": ["lievelingseten", "lievelings eten", "favoriete eten", "lekkerste eten", "het liefst eet", "mijn lievelingseten"],
     "fav_subject": ["lievelingsvak", "favoriete vak", "leukste vak", "mijn lievelingsvak"],
     "school_strength": ["goed in", "vakken ben je goed", "sterk in", "makkelijk vak", "waar je goed in bent", "ik ben goed in"],
@@ -105,7 +92,6 @@ FIELD_ALIASES = {
     "aspiration": ["later worden", "beroep", "droom", "wil je worden", "wat wil je worden", "ik wil later", "later wil ik"],
     "role_model": ["voorbeeld", "kijk je op", "bewonder", "held", "opkijkt naar", "ik kijk op"],
     "age": ["leeftijd", "jaar oud", "hoe oud", "ik ben", "ik word"],
-    "child_name": ["naam", "hoe heet ik", "mijn naam"],
     "name": ["naam", "hoe heet ik", "mijn naam"],
     "condition": ["condition", "conditie"],
 }
@@ -361,44 +347,43 @@ class CRI_ScriptedDialogue(SICApplication):
     CHILD_ID = "Julianna"
     UNKNOWN_VALUE = "dat weet ik nog niet"
     UM_FIELDS = (
-        "child_name", "name", "exposure", "condition",
+        "name", "exposure", "condition",
         "age", "hobbies", "hobby_fav",
-        "sports_enjoys", "sports_talk", "sports_fav", "sports_plays", "sports_fav_play",
-        "books_enjoys", "books_talk", "books_fav_genre", "books_fav_title",
-        "music_enjoys", "music_talk", "music_plays_instrument", "music_instrument",
-        "animals_enjoys", "animal_talk", "animal_fav",
-        "has_pet", "pet_talk", "pet_type", "pet_name",
+        "sports_enjoys", "sports_fav_play",
+        "books_enjoys", "books_fav_title",
+        "music_enjoys",
+        "animals_enjoys", "animal_fav",
+        "has_pet", "pet_type", "pet_name",
         "freetime_fav", "fav_food", "fav_subject",
         "school_strength", "school_difficulty",
         "aspiration", "role_model", "interest", "has_best_friend",
     )
     SCRIPT_TABLE_FIELDS = (
-        ("name", "Orientation"),
-        ("age", "Orientation"),
-        ("hobbies", "Orientation"),
-        ("hobby_fav", "Exploratory/Affective"),
-        ("sports_enjoys", "Orientation"),
-        ("sports_fav_play", "Exploratory/Affective"),
-        ("music_enjoys", "Orientation"),
-        ("books_enjoys", "Orientation"),
-        ("books_fav_title", "Exploratory/Affective"),
-        ("freetime_fav", "Orientation"),
-        ("animals_enjoys", "Orientation"),
-        ("animal_fav", "Exploratory/Affective"),
-        ("has_pet", "Orientation"),
-        ("pet_type", "Orientation"),
-        ("pet_name", "Exploratory/Affective"),
-        ("fav_food", "Orientation"),
-        ("fav_subject", "Exploratory/Affective"),
-        ("school_strength", "Exploratory/Affective"),
-        ("school_difficulty", "Affective/Exchange"),
-        ("aspiration", "Affective/Exchange"),
-        ("role_model", "Affective/Exchange"),
-        ("interest", "Affective/Exchange"),
-        ("has_best_friend", "Affective/Exchange"),
+        "name",
+        "age",
+        "hobbies",
+        "hobby_fav",
+        "sports_enjoys",
+        "sports_fav_play",
+        "music_enjoys",
+        "books_enjoys",
+        "books_fav_title",
+        "freetime_fav",
+        "animals_enjoys",
+        "animal_fav",
+        "has_pet",
+        "pet_type",
+        "pet_name",
+        "fav_food",
+        "fav_subject",
+        "school_strength",
+        "school_difficulty",
+        "aspiration",
+        "role_model",
+        "interest",
+        "has_best_friend",
     )
     FIELD_LABELS = {
-        "child_name": "je naam",
         "name": "je naam",
         "exposure": "of we elkaar al eerder hebben gezien",
         "condition": "de conditie",
@@ -406,23 +391,13 @@ class CRI_ScriptedDialogue(SICApplication):
         "hobbies": "je hobby's",
         "hobby_fav": "je favoriete hobby",
         "sports_enjoys": "of je sport leuk vindt",
-        "sports_talk": "of je over sport wilt praten",
-        "sports_fav": "je lievelingssport",
-        "sports_plays": "of je een sport doet",
         "sports_fav_play": "de sport die je graag doet",
         "books_enjoys": "of je boeken leuk vindt",
-        "books_talk": "of je over boeken wilt praten",
-        "books_fav_genre": "je favoriete soort boeken",
         "books_fav_title": "je favoriete boek",
         "music_enjoys": "of je muziek leuk vindt",
-        "music_talk": "of je over muziek wilt praten",
-        "music_plays_instrument": "of je een instrument speelt",
-        "music_instrument": "welk instrument je speelt",
         "animals_enjoys": "of je dieren leuk vindt",
-        "animal_talk": "of je over dieren wilt praten",
         "animal_fav": "je lievelingsdier",
         "has_pet": "of je een huisdier hebt",
-        "pet_talk": "of je over je huisdier wilt praten",
         "pet_type": "het soort huisdier",
         "pet_name": "de naam van je huisdier",
         "freetime_fav": "wat je graag in je vrije tijd doet",
@@ -451,8 +426,15 @@ class CRI_ScriptedDialogue(SICApplication):
 
     TOPIC_DOMAIN_ORDER = ("pet", "sports", "books", "music", "animals", "hobby", "freetime")
     BOOLEANISH_FIELDS = (
-        "has_pet", "sports_enjoys", "sports_plays", "books_enjoys",
-        "music_enjoys", "music_talk", "music_plays_instrument", "animals_enjoys",
+        "has_pet", "sports_enjoys", "books_enjoys",
+        "music_enjoys", "animals_enjoys",
+    )
+    MEMORY_ACCESS_CONTROL_FIELDS = (
+        "has_pet",
+        "sports_enjoys",
+        "books_enjoys",
+        "music_enjoys",
+        "animals_enjoys",
     )
     TUTORIAL_CONDITION_FIELD = "condition"
     MEMORY_ACCESS_EXCLUDED_FIELDS = (
@@ -490,6 +472,7 @@ class CRI_ScriptedDialogue(SICApplication):
     SIMULATION_MODE = False
     SIMULATED_PERSONA_DIR = os.path.abspath(os.path.join(_HERE, "fake_personas"))
     SIMULATED_PERSONA_PATH = os.path.join(SIMULATED_PERSONA_DIR, "noor_1001.json")
+    USE_FAKE_PERSONA_UM = True
     SIMULATION_WRITE_PERSONA_FILE = False
     WAIT_FOR_PREVIEW_CONFIRMATION = True
     REVIEW_TRANSCRIPTS = True
@@ -522,12 +505,12 @@ class CRI_ScriptedDialogue(SICApplication):
         self.conversation_log = None
         self.current_turn_log = None
         self.conversation_log_started_monotonic = None
+        self.conversation_log_time_offset = 0.0
         self.session_config = {}
         self.resume_from_log_path = None
         self.resume_source_log = {}
         self.local_child_name = ""
         self.researcher_name = ""
-        self.session_number = 1
         self.local_condition = ""
         self.start_phase_index = 0
         self.simulation_mode = bool(self.SIMULATION_MODE)
@@ -580,13 +563,6 @@ class CRI_ScriptedDialogue(SICApplication):
         normalized = self.normalize_condition_value(condition)
         return f"{normalized} ({'with tablet' if normalized == 'C2' else 'no tablet'})"
 
-    def parse_session_number(self, value: str, default: int = 1) -> int:
-        try:
-            number = int(str(value).strip())
-            return number if number > 0 else default
-        except (TypeError, ValueError):
-            return default
-
     def parse_phase_index(self, value: str, default_index: int = 0) -> int:
         try:
             phase = int(str(value).strip())
@@ -603,7 +579,9 @@ class CRI_ScriptedDialogue(SICApplication):
             self.CHILD_ID = child_id
         self.local_child_name = str(self.session_config.get("child_name") or "").strip()
         self.researcher_name = str(self.session_config.get("researcher_name") or "").strip()
-        self.session_number = self.parse_session_number(self.session_config.get("session_number"), 1)
+        fake_persona_path = str(self.session_config.get("fake_persona_path") or "").strip()
+        if fake_persona_path:
+            self.simulated_persona_path = fake_persona_path
         self.local_condition = self.normalize_condition_value(
             self.session_config.get("condition"),
             default="",
@@ -612,6 +590,10 @@ class CRI_ScriptedDialogue(SICApplication):
         self.start_phase_index = max(0, min(self.start_phase_index, self.TOTAL_SCRIPT_PHASES - 1))
 
     def check_child_in_um_api(self, child_id: str):
+        if self.USE_FAKE_PERSONA_UM:
+            print(f"\nUsing fake persona JSON for child '{child_id}'.")
+            return
+
         print(f"\nChecking child '{child_id}' in UM API ({self.UM_API_BASE})...")
         try:
             response = requests.get(f"{self.UM_API_BASE}/api/um/{child_id}", timeout=3)
@@ -624,35 +606,69 @@ class CRI_ScriptedDialogue(SICApplication):
         except Exception:
             print("  UM API is not reachable right now.")
 
+    def get_um_field_for_child(self, child_id: str, field: str) -> str:
+        """Read one UM field during pre-session setup, before CHILD_ID is applied."""
+        if self.USE_FAKE_PERSONA_UM:
+            wanted = str(child_id).strip()
+            for persona in self.available_fake_personas():
+                if persona["child_id"] == wanted:
+                    try:
+                        with open(persona["path"], "r", encoding="utf-8") as persona_file:
+                            data = json.load(persona_file)
+                        value = data.get(field)
+                        return str(value).strip() if value else ""
+                    except Exception:
+                        return ""
+            return ""
+
+        try:
+            response = requests.get(f"{self.UM_API_BASE}/api/um/{child_id}/field/{field}", timeout=3)
+            if response.status_code == 200:
+                value = response.json().get("data", {}).get("value")
+                return str(value).strip() if value else ""
+        except Exception:
+            return ""
+        return ""
+
+    def session_condition_from_um(self, child_id: str) -> str:
+        value = self.get_um_field_for_child(child_id, self.TUTORIAL_CONDITION_FIELD)
+        return self.normalize_condition_value(value, default="C1")
+
     def run_new_session_interface(self):
         previous = self.load_local_session_config()
         print("\n" + "=" * 72)
         print("CRI SESSION SETUP")
-        print("This local setup is for child ID, local first name, researcher, condition, and resume phase.")
-        child_id = self.ask_session_value("Child ID", previous.get("child_id", self.CHILD_ID))
-        child_name = self.ask_session_value("Child first name (local only)", previous.get("child_name", ""))
+        print("This local setup is for child ID, local first name, and researcher.")
+        print("UM fields are read from fake persona JSON files. New sessions always start at phase 1.")
+
+        personas = self.available_fake_personas()
+        if personas:
+            print("\nAVAILABLE FAKE PERSONAS")
+            for persona in personas:
+                print(
+                    f"  {persona['child_id']}: {persona['name']} "
+                    f"({persona['exposure']}, {persona['condition']})"
+                )
+        default_id = previous.get("child_id") or (personas[0]["child_id"] if personas else self.CHILD_ID)
+        child_id = self.ask_session_value("Child ID", default_id)
+        selected_persona = self.select_simulated_persona_by_child_id(child_id) if personas else {}
+        if selected_persona:
+            self.load_simulated_persona()
+        persona_name = selected_persona.get("name") or ""
+        child_name = self.ask_session_value("Child first name (local only)", persona_name or previous.get("child_name", ""))
         researcher = self.ask_session_value("Researcher name", previous.get("researcher_name", ""))
-        session_number = self.parse_session_number(
-            self.ask_session_value("Session number", str(previous.get("session_number", 1))),
-            1,
-        )
-        condition = self.normalize_condition_value(
-            self.ask_session_value("Condition [1/C1 = no tablet, 2/C2 = with tablet]", previous.get("condition", "C1"))
-        )
-        start_default = int(previous.get("start_phase_index", 0) or 0) + 1
-        start_phase_index = self.parse_phase_index(
-            self.ask_session_value(f"Start from phase [1-{self.TOTAL_SCRIPT_PHASES}]", str(start_default)),
-            default_index=0,
-        )
 
         self.check_child_in_um_api(child_id)
+        condition = self.session_condition_from_um(child_id)
+        start_phase_index = 0
         print("\n" + "-" * 56)
         print(f"  Child ID:    {child_id}")
         print(f"  Child name:  {child_name or '(not set)'}")
         print(f"  Researcher:  {researcher or '(not set)'}")
-        print(f"  Session:     #{session_number}")
-        print(f"  Condition:   {self.condition_display(condition)}")
-        print(f"  Start phase: {start_phase_index + 1}")
+        if selected_persona:
+            print(f"  Exposure:    {selected_persona['exposure']}")
+        print(f"  Condition:   {self.condition_display(condition)}  [from fake persona]")
+        print("  Start phase: 1  [new session]")
         print("-" * 56)
         input("\nPress Enter to continue...")
 
@@ -661,8 +677,7 @@ class CRI_ScriptedDialogue(SICApplication):
             "child_id": child_id,
             "child_name": child_name,
             "researcher_name": researcher,
-            "session_number": session_number,
-            "condition": condition,
+            "fake_persona_path": selected_persona.get("path", self.simulated_persona_path),
             "start_phase_index": start_phase_index,
             "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
@@ -670,7 +685,18 @@ class CRI_ScriptedDialogue(SICApplication):
         self.apply_session_config(config)
 
     def clean_pasted_path(self, path: str) -> str:
-        return str(path or "").strip().strip('"').strip("'")
+        clean = str(path or "").strip()
+        quote_chars = "\"'“”‘’"
+        for _ in range(3):
+            clean = clean.strip()
+            if len(clean) >= 2 and clean[0] in quote_chars and clean[-1] in quote_chars:
+                clean = clean[1:-1]
+                continue
+            if len(clean) >= 2 and clean[0] == "<" and clean[-1] == ">":
+                clean = clean[1:-1]
+                continue
+            break
+        return os.path.expandvars(os.path.expanduser(clean.strip()))
 
     def load_conversation_log_file(self, path: str) -> dict:
         clean_path = self.clean_pasted_path(path)
@@ -706,7 +732,6 @@ class CRI_ScriptedDialogue(SICApplication):
         config.setdefault("child_id", log.get("child_id", self.CHILD_ID))
         config.setdefault("child_name", log.get("child_name", ""))
         config.setdefault("researcher_name", log.get("researcher_name", ""))
-        config.setdefault("session_number", log.get("session_number", 1))
         config.setdefault("condition", log.get("tutorial_condition", "C1"))
         resume_phase = self.compute_resume_phase_from_log(log)
         config["mode"] = "resume"
@@ -721,7 +746,38 @@ class CRI_ScriptedDialogue(SICApplication):
         self.corrections_seen = int(log.get("corrections_seen", 0) or 0)
         self.mistake_states = dict(log.get("mistake_states") or {})
         self.phases_with_confirmed_change = set(log.get("phases_with_confirmed_change") or [])
-        self.memory_fields_mentioned_so_far = set(log.get("memory_fields_mentioned_so_far") or [])
+        self.memory_fields_mentioned_so_far = set(
+            self.child_facing_memory_fields(log.get("memory_fields_mentioned_so_far") or [])
+        )
+
+    def resume_console_transcript_lines(self, log: dict) -> list:
+        """Human-readable replay of a previous conversation for the CMD window."""
+        lines = []
+        for event in log.get("events") or []:
+            if not isinstance(event, dict):
+                continue
+            timestamp = self.format_log_timestamp(event.get("timestamp", 0.0))
+            event_type = event.get("type")
+            if event_type == "phase_start":
+                lines.append("")
+                lines.append(f"[{timestamp}] Phase {event.get('phase')}: {event.get('name')}")
+            elif event_type == "utterance":
+                speaker = event.get("speaker", "").upper() or "UNKNOWN"
+                lines.append(f"[{timestamp}] {speaker}: {event.get('text')}")
+            elif event_type == "phase_end":
+                lines.append(f"[{timestamp}] Phase {event.get('phase')} finished")
+        return lines
+
+    def print_resume_console_transcript(self, log: dict):
+        lines = self.resume_console_transcript_lines(log)
+        print("\n" + "-" * 72)
+        print("PREVIOUS CONVERSATION FROM LOG")
+        if lines:
+            for line in lines:
+                print(line)
+        else:
+            print("(No previous utterances found in this log.)")
+        print("-" * 72)
 
     def run_resume_session_interface(self, resume_path: str = ""):
         print("\n" + "=" * 72)
@@ -765,11 +821,14 @@ class CRI_ScriptedDialogue(SICApplication):
         print("\n" + "=" * 72)
         print("CRI SESSION")
         print("Press Enter for a new session.")
-        print("Type R + Enter to resume from a previous conversation JSON log.")
-        choice = input("Session mode: ").strip().lower()
+        print("Type R + Enter to resume, or paste a previous conversation JSON path directly.")
+        raw_choice = input("Session mode: ").strip()
+        choice = raw_choice.lower()
         print("=" * 72)
         if choice in ("r", "resume"):
             self.run_resume_session_interface()
+        elif self.clean_pasted_path(raw_choice).lower().endswith(".json"):
+            self.run_resume_session_interface(raw_choice)
         else:
             self.run_new_session_interface()
 
@@ -812,20 +871,24 @@ class CRI_ScriptedDialogue(SICApplication):
     def use_microphone_input(self) -> bool:
         return self.child_input_mode == "microphone" and not self.simulation_mode
 
+    def use_fake_persona_um(self) -> bool:
+        return bool(self.USE_FAKE_PERSONA_UM or self.simulation_mode)
+
     def persona_summary_from_file(self, path: str) -> dict:
         """Read minimal display metadata for a fake persona JSON file."""
-        with open(path, "r", encoding="utf-8") as persona_file:
+        with open(path, "r", encoding="utf-8-sig") as persona_file:
             persona = json.load(persona_file)
         child_id = persona.get("child_id")
         return {
             "child_id": str(child_id) if child_id is not None else "",
-            "name": persona.get("child_name") or persona.get("name") or "unknown",
+            "name": persona.get("name") or "unknown",
             "exposure": persona.get("exposure") or self.UNKNOWN_VALUE,
+            "condition": self.normalize_condition_value(persona.get("condition"), default="C1"),
             "path": path,
         }
 
     def available_fake_personas(self) -> list:
-        """Return all fake persona files with child ID, name, exposure, and path."""
+        """Return all fake persona files with child ID, name, exposure, condition, and path."""
         if not os.path.isdir(self.SIMULATED_PERSONA_DIR):
             return []
 
@@ -861,7 +924,10 @@ class CRI_ScriptedDialogue(SICApplication):
         env_child_id = os.environ.get("CRI_SIMULATED_CHILD_ID", "").strip()
         if env_child_id:
             selected = self.select_simulated_persona_by_child_id(env_child_id)
-            print(f"Using fake persona {selected['child_id']} - {selected['name']} ({selected['exposure']})")
+            print(
+                f"Using fake persona {selected['child_id']} - {selected['name']} "
+                f"({selected['exposure']}, {selected['condition']})"
+            )
             return
 
         personas = self.available_fake_personas()
@@ -871,12 +937,18 @@ class CRI_ScriptedDialogue(SICApplication):
 
         print("\nAVAILABLE FAKE PERSONAS")
         for persona in personas:
-            print(f"  {persona['child_id']}: {persona['name']} ({persona['exposure']})")
+            print(
+                f"  {persona['child_id']}: {persona['name']} "
+                f"({persona['exposure']}, {persona['condition']})"
+            )
         default_id = personas[0]["child_id"]
         choice = input(f"Type child ID for simulation, or press Enter for {default_id}: ").strip()
         selected_id = choice or default_id
         selected = self.select_simulated_persona_by_child_id(selected_id)
-        print(f"Selected fake persona: {selected['child_id']} - {selected['name']} ({selected['exposure']})")
+        print(
+            f"Selected fake persona: {selected['child_id']} - {selected['name']} "
+            f"({selected['exposure']}, {selected['condition']})"
+        )
 
     def setup(self):
         self.logger.info("Setting up CRI pipeline...")
@@ -957,7 +1029,7 @@ class CRI_ScriptedDialogue(SICApplication):
         path = self.simulated_persona_path
         if not os.path.exists(path):
             raise FileNotFoundError(f"Simulated persona file not found: {path}")
-        with open(path, "r", encoding="utf-8") as persona_file:
+        with open(path, "r", encoding="utf-8-sig") as persona_file:
             persona = json.load(persona_file)
         self.simulated_persona = dict(persona)
 
@@ -981,6 +1053,58 @@ class CRI_ScriptedDialogue(SICApplication):
             um[field] = str(value) if self.is_known(value) else self.UNKNOWN_VALUE
         return um
 
+    def fake_persona_script_plan(self) -> dict:
+        """Return scripted-test metadata from the fake persona JSON, if present."""
+        if not self.use_fake_persona_um():
+            return {}
+        if not self.simulated_persona:
+            self.load_simulated_persona()
+        plan = self.simulated_persona.get("script_plan") or {}
+        return plan if isinstance(plan, dict) else {}
+
+    def script_plan_mistake(self, mistake_id: str) -> dict:
+        plan = self.fake_persona_script_plan()
+        mistakes = plan.get("mistakes") or []
+        if not isinstance(mistakes, list):
+            return {}
+        wanted = str(mistake_id or "").strip().upper()
+        for mistake in mistakes:
+            if not isinstance(mistake, dict):
+                continue
+            if str(mistake.get("id", "")).strip().upper() == wanted:
+                return mistake
+        return {}
+
+    def script_plan_table_fields(self, script: list = None) -> list:
+        """Rows shown in the startup memory table.
+
+        The fake persona script_plan marks which fields are actively used, but
+        the preview still shows the full UM table so missing/unused fields stay
+        visible during testing.
+        """
+        plan = self.fake_persona_script_plan()
+        fields = plan.get("used_fields") or []
+        if isinstance(fields, str):
+            fields = self.split_memory_values(fields)
+        if not isinstance(fields, list):
+            fields = []
+
+        table_fields = list(self.SCRIPT_TABLE_FIELDS)
+        planned_fields = self.public_memory_fields(fields)
+        for mistake in plan.get("mistakes") or []:
+            if isinstance(mistake, dict):
+                planned_fields.extend(self.public_memory_fields([mistake.get("field")]))
+
+        if script:
+            discovered = list(planned_fields)
+            for turn in script:
+                discovered.extend((turn.get("used_fields") or {}).keys())
+                if turn.get("mistake_field"):
+                    discovered.append(turn["mistake_field"])
+            planned_fields = self.public_memory_fields(discovered)
+
+        return self.unique_values(table_fields + planned_fields)
+
     def get_field(self, field: str) -> str:
         """
         Pull a single UM field from Eunike's API.
@@ -991,7 +1115,7 @@ class CRI_ScriptedDialogue(SICApplication):
         """
         if not field:
             return self.UNKNOWN_VALUE
-        if self.simulation_mode:
+        if self.use_fake_persona_um():
             return self.simulated_um_profile().get(field, self.UNKNOWN_VALUE)
 
         url = f"{self.UM_API_BASE}/api/um/{self.CHILD_ID}/field/{field}"
@@ -1037,6 +1161,8 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def is_pregenerated_utterance_field(self, field: str) -> bool:
         """Fields with these prefixes are L2-pregen utterances stored in UM/GraphDB."""
+        if str(field) == "script_plan":
+            return False
         return any(str(field).startswith(prefix) for prefix in self.PREGENERATED_UTTERANCE_PREFIXES)
 
     def pregenerated_fields_from_profile(self, profile: dict) -> dict:
@@ -1084,13 +1210,13 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def pull_um(self) -> dict:
         """Fetch all UM fields used by the 4.0 early interaction flow."""
-        if self.simulation_mode:
+        if self.use_fake_persona_um():
             um = self.simulated_um_profile()
             known_count = sum(1 for value in um.values() if self.is_known(value))
-            self.logger.info("Simulated UM profile loaded: %d/%d fields set.", known_count, len(self.UM_FIELDS))
+            self.logger.info("Fake persona UM profile loaded: %d/%d fields set.", known_count, len(self.UM_FIELDS))
             for field, value in um.items():
                 if self.is_known(value):
-                    self.logger.info("SIM UM[%s] = %s", field, value)
+                    self.logger.info("FAKE UM[%s] = %s", field, value)
             self.last_um_preview = um
             return um
 
@@ -1123,6 +1249,17 @@ class CRI_ScriptedDialogue(SICApplication):
             if candidate.lower() != actual_clean:
                 return candidate
         return candidates[0]
+
+    def value_reuses_actual(self, candidate: str, actual: str) -> bool:
+        candidate_clean = str(candidate or "").strip().lower()
+        actual_clean = str(actual or "").strip().lower()
+        if not candidate_clean or not actual_clean:
+            return False
+        return (
+            candidate_clean == actual_clean
+            or actual_clean in candidate_clean
+            or candidate_clean in actual_clean
+        )
 
     def split_memory_values(self, value: str) -> list:
         """Split simple comma/and-separated UM strings into speakable values."""
@@ -1164,11 +1301,11 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def broad_clusters(self, um: dict) -> list:
         clusters = []
-        if self.yesish(um.get("sports_enjoys")) or self.known(um, "sports_fav") or self.known(um, "sports_fav_play"):
+        if self.yesish(um.get("sports_enjoys")) or self.known(um, "sports_fav_play"):
             clusters.append("sport")
-        if self.yesish(um.get("books_enjoys")) or self.known(um, "books_fav_title") or self.known(um, "books_fav_genre"):
+        if self.yesish(um.get("books_enjoys")) or self.known(um, "books_fav_title"):
             clusters.append("boeken")
-        if self.yesish(um.get("music_enjoys")) or self.known(um, "music_instrument"):
+        if self.yesish(um.get("music_enjoys")):
             clusters.append("muziek")
         if self.yesish(um.get("animals_enjoys")) or self.known(um, "animal_fav") or self.known(um, "pet_name"):
             clusters.append("dieren")
@@ -1199,14 +1336,18 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def related_wrong_hobby_value(self, um: dict) -> str:
         actual = self.known(um, "hobby_fav")
+        fallback_candidates = ["bakken", "voetbal", "dansen", "muziek maken", "tuinieren", "schilderen"]
         for hobby in self.all_hobbies(um):
             if (
                 hobby.strip().lower() in ("bakken", "koken", "taarten bakken")
-                and (not actual or hobby.strip().lower() != actual.strip().lower())
+                and (not actual or not self.value_reuses_actual(hobby, actual))
             ):
                 return hobby
         for hobby in self.all_hobbies(um):
-            if actual and hobby.strip().lower() != actual.strip().lower():
+            if actual and not self.value_reuses_actual(hobby, actual):
+                return hobby
+        for hobby in fallback_candidates:
+            if not actual or not self.value_reuses_actual(hobby, actual):
                 return hobby
         topic = self.topic_candidate(
             domain="hobby",
@@ -1219,7 +1360,10 @@ class CRI_ScriptedDialogue(SICApplication):
             options=[],
             reground="",
         )
-        return self.opposite_memory_value(topic, "hobby_fav", actual or "tekenen")
+        wrong_value = self.opposite_memory_value(topic, "hobby_fav", actual or "tekenen")
+        if actual and self.value_reuses_actual(wrong_value, actual):
+            return self.pick_wrong_value(actual, fallback_candidates)
+        return wrong_value
 
     def opening_summary(self, um: dict) -> str:
         """Phase 2: correct opening summary with no child response yet."""
@@ -1263,7 +1407,7 @@ class CRI_ScriptedDialogue(SICApplication):
         local_name = str(getattr(self, "local_child_name", "") or "").strip()
         if local_name:
             return local_name
-        return self.known(um, "child_name") or self.known(um, "name") or self.CHILD_ID
+        return self.known(um, "name") or self.known(um, "child_name") or self.CHILD_ID
 
     def child_exposure_kind(self, um: dict) -> str:
         exposure = str(self.known(um, "exposure") or "").strip().lower()
@@ -1276,10 +1420,7 @@ class CRI_ScriptedDialogue(SICApplication):
         return "new"
 
     def tutorial_condition(self, um: dict = None) -> str:
-        """Read C1/C2 from local session config first, then UM/GraphDB."""
-        local_condition = self.normalize_condition_value(getattr(self, "local_condition", ""), default="")
-        if local_condition in ("C1", "C2"):
-            return local_condition
+        """Read C1/C2 from UM/GraphDB first; local config is only a fallback."""
         profile = um or self.last_um_preview or {}
         value = self.known(profile, self.TUTORIAL_CONDITION_FIELD)
         clean = str(value or "").strip().lower()
@@ -1287,6 +1428,9 @@ class CRI_ScriptedDialogue(SICApplication):
             return "C2"
         if "c1" in clean:
             return "C1"
+        local_condition = self.normalize_condition_value(getattr(self, "local_condition", ""), default="")
+        if local_condition in ("C1", "C2"):
+            return local_condition
         return "C1"
 
     def greeting_text(self, um: dict) -> str:
@@ -1350,7 +1494,7 @@ class CRI_ScriptedDialogue(SICApplication):
             print("CONDITION MISMATCH")
             print(f"Local session config says: {local_condition}")
             print(f"UM/GraphDB profile says:  {um_condition}")
-            print("Leo will use the local session config, but please check this before continuing.")
+            print("Leo will use the UM/GraphDB condition, but please check this before continuing.")
             print("!" * 72)
             input("Press Enter to continue anyway...")
 
@@ -1408,7 +1552,7 @@ class CRI_ScriptedDialogue(SICApplication):
             subject = pet or animal or f"je {pet_type}"
             current = {
                 field: self.known(um, field)
-                for field in ("pet_name", "pet_type", "animal_fav", "has_pet", "pet_talk", "animal_talk")
+                for field in ("pet_name", "pet_type", "animal_fav", "has_pet")
                 if self.known(um, field)
             }
             correct_values = [f"{subject} bij jou hoort"]
@@ -1417,14 +1561,12 @@ class CRI_ScriptedDialogue(SICApplication):
             candidates.append(self.topic_candidate(
                 domain="huisdier",
                 label=subject,
-                fields=["pet_name", "pet_type", "animal_fav", "has_pet", "pet_talk", "animal_talk"],
+                fields=["pet_name", "pet_type", "animal_fav", "has_pet"],
                 field_labels={
                     "pet_name": "de naam van je huisdier",
                     "pet_type": "het soort huisdier",
                     "animal_fav": "je lievelingsdier",
                     "has_pet": "of je een huisdier hebt",
-                    "pet_talk": "of je over je huisdier wilt praten",
-                    "animal_talk": "of je over dieren wilt praten",
                 },
                 current_values=current,
                 correct_values=correct_values,
@@ -1433,23 +1575,20 @@ class CRI_ScriptedDialogue(SICApplication):
                 reground=f"Wat ik zeker wil onthouden, is dat {subject} belangrijk voor je is.",
             ))
 
-        sport = self.known(um, "sports_fav_play") or self.known(um, "sports_fav")
+        sport = self.known(um, "sports_fav_play")
         if sport or self.yesish(um.get("sports_enjoys")):
             label = sport or "sport"
             current = {
                 field: self.known(um, field)
-                for field in ("sports_enjoys", "sports_talk", "sports_fav", "sports_plays", "sports_fav_play")
+                for field in ("sports_enjoys", "sports_fav_play")
                 if self.known(um, field)
             }
             candidates.append(self.topic_candidate(
                 domain="sport",
                 label=label,
-                fields=["sports_enjoys", "sports_talk", "sports_fav", "sports_plays", "sports_fav_play"],
+                fields=["sports_enjoys", "sports_fav_play"],
                 field_labels={
                     "sports_enjoys": "of je sport leuk vindt",
-                    "sports_talk": "of je over sport wilt praten",
-                    "sports_fav": "je lievelingssport",
-                    "sports_plays": "of je een sport doet",
                     "sports_fav_play": "de sport die je graag doet",
                 },
                 current_values=current,
@@ -1459,22 +1598,20 @@ class CRI_ScriptedDialogue(SICApplication):
                 reground=f"Ik houd goed vast dat {label} iets is waar jij iets mee hebt.",
             ))
 
-        book = self.known(um, "books_fav_title") or self.known(um, "books_fav_genre")
+        book = self.known(um, "books_fav_title")
         if book or self.yesish(um.get("books_enjoys")):
             label = book or "boeken"
             current = {
                 field: self.known(um, field)
-                for field in ("books_enjoys", "books_talk", "books_fav_genre", "books_fav_title")
+                for field in ("books_enjoys", "books_fav_title")
                 if self.known(um, field)
             }
             candidates.append(self.topic_candidate(
                 domain="boeken",
                 label=label,
-                fields=["books_enjoys", "books_talk", "books_fav_genre", "books_fav_title"],
+                fields=["books_enjoys", "books_fav_title"],
                 field_labels={
                     "books_enjoys": "of je boeken leuk vindt",
-                    "books_talk": "of je over boeken wilt praten",
-                    "books_fav_genre": "je favoriete soort boeken",
                     "books_fav_title": "je favoriete boek",
                 },
                 current_values=current,
@@ -1484,23 +1621,19 @@ class CRI_ScriptedDialogue(SICApplication):
                 reground=f"Ik weet in elk geval dat {label} bij jouw boekenwereld hoort.",
             ))
 
-        music = self.known(um, "music_instrument")
-        if music or self.yesish(um.get("music_enjoys")):
-            label = music or "muziek"
+        if self.yesish(um.get("music_enjoys")):
+            label = "muziek"
             current = {
                 field: self.known(um, field)
-                for field in ("music_enjoys", "music_talk", "music_plays_instrument", "music_instrument")
+                for field in ("music_enjoys",)
                 if self.known(um, field)
             }
             candidates.append(self.topic_candidate(
                 domain="muziek",
                 label=label,
-                fields=["music_enjoys", "music_talk", "music_plays_instrument", "music_instrument"],
+                fields=["music_enjoys"],
                 field_labels={
                     "music_enjoys": "of je muziek leuk vindt",
-                    "music_talk": "of je over muziek wilt praten",
-                    "music_plays_instrument": "of je een instrument speelt",
-                    "music_instrument": "welk instrument je speelt",
                 },
                 current_values=current,
                 correct_values=[f"{label} bij jou en muziek hoort", "je eerder iets over muziek vertelde"],
@@ -1569,13 +1702,6 @@ class CRI_ScriptedDialogue(SICApplication):
             return (999, 999)
 
         domain = topic.get("domain")
-        talk_fields = {
-            "huisdier": ("pet_talk", "animal_talk"),
-            "sport": ("sports_talk",),
-            "boeken": ("books_talk",),
-            "muziek": ("music_talk",),
-        }.get(domain, ())
-        wants_talk = any(self.yesish(um.get(field)) for field in talk_fields)
         base_order = {
             "huisdier": 0,
             "sport": 1,
@@ -1585,7 +1711,7 @@ class CRI_ScriptedDialogue(SICApplication):
             "eten": 5,
             "droom": 6,
         }.get(domain, 20)
-        return (0 if wants_talk else 1, base_order)
+        return (0, base_order)
 
     def select_topic_domain(self, um: dict) -> dict:
         candidates = self.topic_candidates(um)
@@ -1712,16 +1838,14 @@ class CRI_ScriptedDialogue(SICApplication):
             topic = self.topic_candidate(
                 domain="boeken",
                 label=book,
-                fields=["books_enjoys", "books_talk", "books_fav_genre", "books_fav_title"],
+                fields=["books_enjoys", "books_fav_title"],
                 field_labels={
                     "books_enjoys": "of je boeken leuk vindt",
-                    "books_talk": "of je over boeken wilt praten",
-                    "books_fav_genre": "je favoriete soort boeken",
                     "books_fav_title": "je favoriete boek",
                 },
                 current_values={
                     field: self.known(um, field)
-                    for field in ("books_enjoys", "books_talk", "books_fav_genre", "books_fav_title")
+                    for field in ("books_enjoys", "books_fav_title")
                     if self.known(um, field)
                 },
                 correct_values=[f"je favoriete boek {book} is"],
@@ -1767,20 +1891,13 @@ class CRI_ScriptedDialogue(SICApplication):
         """Mila Part 1 priority: talk preference + enough detail, with sport first when it is a hobby."""
         domain = topic.get("domain")
         hobbies = " ".join(self.all_hobbies(um)).lower()
-        sport_value = self.known(um, "sports_fav_play") or self.known(um, "sports_fav")
+        sport_value = self.known(um, "sports_fav_play")
         sport_is_hobby = sport_value and sport_value.lower() in hobbies
-        if domain == "sport" and self.yesish(um.get("sports_talk")) and sport_is_hobby:
+        if domain == "sport" and sport_is_hobby:
             return (0, 0)
 
-        talk_fields = {
-            "sport": ("sports_talk",),
-            "muziek": ("music_talk",),
-            "huisdier": ("pet_talk", "animal_talk"),
-            "boeken": ("books_talk",),
-        }.get(domain, ())
-        wants_talk = any(self.yesish(um.get(field)) for field in talk_fields)
         order = {"sport": 1, "muziek": 2, "huisdier": 3, "boeken": 4}.get(domain, 20)
-        return (0 if wants_talk else 1, order)
+        return (0, order)
 
     def select_part1_topic1(self, um: dict) -> dict:
         """Select Topic 1 from sport/music/animals/books, falling back to a hobby."""
@@ -1821,21 +1938,22 @@ class CRI_ScriptedDialogue(SICApplication):
             return [
                 {
                     "content_plan": self.l2_slot(
-                        "Ik weet ook nog dat jij zelf {sport} speelt.",
+                        "Ik weet ook nog dat jij aan {sport} doet.",
                         {"sport": sport},
                     ),
                     "expects_response": True,
                     "response_mode": "listen_only",
+                    "used_fields": {"sports_fav_play": sport},
                 },
                 {
-                    "content_plan": self.l2_pregen(
-                        "sport_position_question",
-                        "In welke positie speel jij?",
-                        ["sports_fav_play"],
+                    "content_plan": self.l2_slot(
+                        "Waarom zit je op {sport}?",
+                        {"sport": sport},
                     ),
                     "expects_response": True,
                     "response_mode": "acknowledge",
                     "llm_turn": True,
+                    "used_fields": {"sports_fav_play": sport},
                 },
                 {
                     "content_plan": self.l2_slot(
@@ -1845,25 +1963,29 @@ class CRI_ScriptedDialogue(SICApplication):
                     ),
                     "expects_response": True,
                     "response_mode": "listen_only",
+                    "used_fields": {"sports_fav_play": sport},
                 },
                 {
                     "content_plan": self.sequence(
                         self.l1("Dat snap ik helemaal. Dat klinkt ook echt leuk."),
                         self.l2_pregen(
                             "sport_followup_choice",
-                            "Ben jij dan meer van snel rennen, goed overspelen, of juist lekker fanatiek meedoen?",
+                            "Wat vind je daar meestal het fijnst aan: bezig zijn, beter worden, of samen met anderen iets doen?",
                             ["sports_fav_play"],
                         ),
                     ),
                     "expects_response": True,
                     "response_mode": "listen_only",
+                    "used_fields": {},
                 },
                 {
                     "content_plan": self.l1("Maar jij doet natuurlijk nog meer leuke dingen."),
                     "expects_response": False,
+                    "used_fields": {},
                 },
             ]
 
+        topic_fields = self.topic_label_fields(topic)
         return [
             {
                 "content_plan": self.l2_slot(
@@ -1872,6 +1994,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 ),
                 "expects_response": True,
                 "response_mode": "listen_only",
+                "used_fields": {field: topic.get("current_values", {}).get(field) for field in topic_fields},
             },
             {
                 "content_plan": self.l2_pregen(
@@ -1882,12 +2005,22 @@ class CRI_ScriptedDialogue(SICApplication):
                 "expects_response": True,
                 "response_mode": "acknowledge",
                 "llm_turn": True,
+                "used_fields": {field: topic.get("current_values", {}).get(field) for field in topic_fields},
             },
             {
                 "content_plan": self.l1("Maar jij doet natuurlijk nog meer leuke dingen."),
                 "expects_response": False,
+                "used_fields": {},
             },
         ]
+
+    def topic_label_fields(self, topic: dict) -> list:
+        """Best-effort field list for the concrete topic label Leo says aloud."""
+        current = topic.get("current_values", {}) or {}
+        for field in topic.get("fields", []) or []:
+            if field in current and self.is_known(current.get(field)):
+                return [field]
+        return []
 
     def topic2_phase_segments(self, topic: dict) -> list:
         """Build the correct re-ground topic before M2."""
@@ -1908,6 +2041,7 @@ class CRI_ScriptedDialogue(SICApplication):
                         ),
                     ),
                     "expects_response": False,
+                    "used_fields": {"pet_name": pet_name},
                 },
                 {
                     "content_plan": self.l2_pregen(
@@ -1918,6 +2052,7 @@ class CRI_ScriptedDialogue(SICApplication):
                     "expects_response": True,
                     "response_mode": "acknowledge",
                     "llm_turn": True,
+                    "used_fields": {"pet_name": pet_name},
                 },
                 {
                     "content_plan": self.l1(
@@ -1925,9 +2060,11 @@ class CRI_ScriptedDialogue(SICApplication):
                         "Ze doen vaak alsof zij precies weten wat er aan de hand is, en ik net niet."
                     ),
                     "expects_response": False,
+                    "used_fields": {},
                 },
             ]
 
+        topic_fields = self.topic_label_fields(topic)
         return [
             {
                 "content_plan": self.l2_slot(
@@ -1937,6 +2074,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 "expects_response": True,
                 "response_mode": "acknowledge",
                 "llm_turn": True,
+                "used_fields": {field: topic.get("current_values", {}).get(field) for field in topic_fields},
             }
         ]
 
@@ -1974,6 +2112,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 "Return only a short noun phrase or short activity phrase.",
                 "Do not insult the child.",
                 "Do not reuse the actual value.",
+                "Do not include the actual value inside a longer phrase.",
                 "Make it clearly wrong or opposite enough that the child can correct Leo.",
             ],
             "output_schema": {
@@ -1998,7 +2137,7 @@ class CRI_ScriptedDialogue(SICApplication):
             )
             parsed = self.extract_json_object(response.choices[0].message.content)
             wrong_value = str(parsed.get("wrong_value") or "").strip()
-            if self.is_known(wrong_value) and wrong_value.lower() != str(actual).strip().lower():
+            if self.is_known(wrong_value) and not self.value_reuses_actual(wrong_value, actual):
                 self.logger.info(
                     "LLM picked deliberate wrong value for %s: actual=%s wrong=%s",
                     field,
@@ -2023,7 +2162,7 @@ class CRI_ScriptedDialogue(SICApplication):
         label = topic.get("label", "dit onderwerp")
         current = topic.get("current_values", {})
         if domain == "sport":
-            sport = current.get("sports_fav_play") or current.get("sports_fav") or label
+            sport = current.get("sports_fav_play") or label
             return f"Wat vind jij zo leuk aan {sport}?"
         if domain == "huisdier":
             pet = current.get("pet_name") or label
@@ -2184,11 +2323,8 @@ class CRI_ScriptedDialogue(SICApplication):
             "hobby_fav": "Wat is je favoriete hobby?",
             "hobbies": "Welke hobby's wil je dat ik onthoud?",
             "freetime_fav": "Wat doe je graag in je vrije tijd?",
-            "sports_fav": "Wat is je lievelingssport?",
             "sports_fav_play": "Welke sport doe je graag?",
             "books_fav_title": "Wat is je favoriete boek?",
-            "books_fav_genre": "Welke soort boeken vind je leuk?",
-            "music_instrument": "Welk instrument speel je?",
             "aspiration": "Wat wil je later doen of worden?",
         }
         question = field_questions.get(
@@ -2224,8 +2360,9 @@ class CRI_ScriptedDialogue(SICApplication):
         }
 
     def topic_no_update_response(self, topic: dict) -> str:
+        label = topic.get("label", "dit onderwerp")
         return (
-            f"OkÃ©, dan is er niets nieuws over {topic['label']}. "
+            f"OkÃ©, dan is er niets nieuws over {label}. "
             "Dan onthoud ik wat ik al wist."
         )
 
@@ -2397,19 +2534,35 @@ class CRI_ScriptedDialogue(SICApplication):
             if field and field in self.UM_FIELDS and field not in excluded
         ]
 
-    def current_phase_memory_fields(self, turn: dict) -> list:
-        """Fields tied to the currently active script phase/category."""
-        fields = []
-        fields.extend((turn.get("used_fields") or {}).keys())
+    def is_child_facing_memory_field(self, field: str) -> bool:
+        """True for UM fields that are meaningful to say back to the child."""
+        if field not in self.UM_FIELDS:
+            return False
+        if field in self.MEMORY_ACCESS_EXCLUDED_FIELDS:
+            return False
+        if field in self.MEMORY_ACCESS_CONTROL_FIELDS:
+            return False
+        value = self.last_um_preview.get(field)
+        if self.yesish(value) and self.field_label(field).startswith("of je"):
+            return False
+        return True
 
-        topic = turn.get("topic") or turn.get("mistake_topic") or {}
-        fields.extend(topic.get("fields") or [])
-        fields.extend((topic.get("current_values") or {}).keys())
+    def child_facing_memory_fields(self, fields) -> list:
+        return [
+            field for field in self.public_memory_fields(self.unique_values(list(fields or [])))
+            if self.is_child_facing_memory_field(field)
+        ]
+
+    def current_phase_memory_fields(self, turn: dict) -> list:
+        """UM fields Leo actually said in the currently active phase segment."""
+        fields = []
+        fields.extend(turn.get("spoken_fields") or [])
+        fields.extend((turn.get("used_fields") or {}).keys())
 
         if turn.get("mistake_field"):
             fields.append(turn["mistake_field"])
 
-        return self.public_memory_fields(self.unique_values(fields))
+        return self.child_facing_memory_fields(fields)
 
     def register_mentioned_memory_fields(self, turn: dict):
         """Remember which UM fields Leo has already brought into this conversation."""
@@ -2425,7 +2578,7 @@ class CRI_ScriptedDialogue(SICApplication):
         """Memory Leo may reveal now: previous mentions plus current phase fields."""
         mentioned = getattr(self, "memory_fields_mentioned_so_far", set())
         fields = list(mentioned) + self.current_phase_memory_fields(turn)
-        return self.public_memory_fields(self.unique_values(fields))
+        return self.child_facing_memory_fields(fields)
 
     def memory_value(self, field: str) -> str:
         """Read from the already-pulled UM snapshot first, then fall back to the API."""
@@ -2434,13 +2587,13 @@ class CRI_ScriptedDialogue(SICApplication):
             return str(value)
         return self.get_field(field)
 
-    def memory_access_summary(self, fields: list, limit: int = 4) -> str:
+    def memory_access_summary(self, fields: list, limit: int = None) -> str:
         parts = []
         for field in fields:
             value = self.memory_value(field)
             if self.is_known(value):
                 parts.append(f"{self.field_label(field)}: {value}")
-            if len(parts) >= limit:
+            if limit and len(parts) >= limit:
                 break
         return "; ".join(parts)
 
@@ -2472,66 +2625,65 @@ class CRI_ScriptedDialogue(SICApplication):
             returned = [
                 field for field in scope
                 if self.is_known(self.memory_value(field))
-            ][:4]
+            ]
             return f"Ik heb vandaag al genoemd: {summary}.", scope, returned
 
         return "Ik heb vandaag nog niet zoveel uit mijn geheugen genoemd.", scope, []
 
     def table_true_value(self, um: dict, field: str) -> str:
         if field == "name":
-            return self.known(um, "child_name") or self.known(um, "name") or self.UNKNOWN_VALUE
+            return self.known(um, "name") or self.known(um, "child_name") or self.UNKNOWN_VALUE
         return self.known(um, field) or self.UNKNOWN_VALUE
 
     def script_memory_table(self, script: list, um: dict) -> list:
         script_values = {}
-        used_fields = set()
         mistakes = {}
+        mistake_values = {}
 
         for turn in script:
             for field, value in (turn.get("used_fields") or {}).items():
                 if not self.is_known(value):
                     continue
                 script_values.setdefault(field, []).append(str(value))
-                used_fields.add(field)
 
             mistake_field = turn.get("mistake_field")
             if mistake_field:
                 wrong = turn.get("mistake_wrong")
                 if self.is_known(wrong):
                     script_values.setdefault(mistake_field, []).append(str(wrong))
-                used_fields.add(mistake_field)
+                    mistake_values[mistake_field] = str(wrong)
                 if turn.get("mistake_id"):
                     mistakes[mistake_field] = (
                         f"{turn.get('mistake_id')} {turn.get('mistake_type', 'wrong')}"
                     )
 
         rows = []
-        for field, spt in self.SCRIPT_TABLE_FIELDS:
-            values = self.unique_values(script_values.get(field, []))
+        for field in self.script_plan_table_fields(script):
+            values = (
+                [mistake_values[field]]
+                if field in mistake_values
+                else self.unique_values(script_values.get(field, []))
+            )
             rows.append({
                 "field": field,
-                "spt": spt,
                 "true_value": self.table_true_value(um, field),
                 "script_value": self.format_dutch_list(values, "-") if values else "-",
                 "mistake": mistakes.get(field, "-"),
-                "used": "yes" if field in used_fields else "-",
             })
         return rows
 
     def print_script_memory_table(self, rows: list):
-        headers = ("Field", "SPT", "True Value", "Script Value", "Mistake?", "Used?")
-        widths = [18, 22, 24, 28, 22, 6]
+        headers = ("Field", "True Value", "Script Value", "Mistake?")
+        widths = [18, 24, 28, 22]
         print("\nWalkthrough memory table:")
         print("  " + " | ".join(header.ljust(widths[i]) for i, header in enumerate(headers)))
         print("  " + "-+-".join("-" * width for width in widths))
         for row in rows:
             values = (
                 row["field"],
-                row["spt"],
                 row["true_value"],
                 row["script_value"],
                 row["mistake"],
-                row["used"],
             )
             clipped = [
                 (str(value)[:width - 3] + "...") if len(str(value)) > width else str(value)
@@ -2555,7 +2707,6 @@ class CRI_ScriptedDialogue(SICApplication):
         print(f"Child id: {self.CHILD_ID}")
         print(f"Child:    {self.child_display_name(self.last_um_preview)}")
         print(f"Researcher: {self.researcher_name or '(not set)'}")
-        print(f"Session:  #{self.session_number}")
         print(f"Start:    phase {self.start_phase_index + 1}")
         if self.resume_from_log_path:
             print(f"Resume:   {self.resume_from_log_path}")
@@ -2567,6 +2718,11 @@ class CRI_ScriptedDialogue(SICApplication):
         print("=" * 72)
         input("Press Enter to start the interaction...")
         print()
+
+    def print_resume_context_before_interaction(self):
+        """Replay previous conversation after the final start confirmation."""
+        if self.resume_from_log_path and self.resume_source_log:
+            self.print_resume_console_transcript(self.resume_source_log)
 
     def build_script(self) -> list:
         """
@@ -2582,14 +2738,18 @@ class CRI_ScriptedDialogue(SICApplication):
         first_topic = self.select_part1_topic1(um)
         second_topic = self.select_part1_topic2(um, first_topic)
 
+        m1_plan = self.script_plan_mistake("M1")
         m1_topic = self.hobby_mistake_topic(um)
-        m1_field = "hobby_fav"
+        m1_field = m1_plan.get("field") or "hobby_fav"
         m1_actual = m1_topic.get("current_values", {}).get(m1_field) or m1_topic.get("label")
-        m1_wrong = self.related_wrong_hobby_value(um)
+        m1_wrong = m1_plan.get("wrong_value") or self.related_wrong_hobby_value(um)
+        m1_type = m1_plan.get("type") or "related-but-wrong"
 
-        m2_field = "fav_food"
+        m2_plan = self.script_plan_mistake("M2")
+        m2_field = m2_plan.get("field") or "fav_food"
         m2_actual = self.known(um, m2_field) or "pannenkoeken"
-        m2_wrong = self.pick_wrong_value(m2_actual, ["pizza", "pasta", "spruitjes"])
+        m2_wrong = m2_plan.get("wrong_value") or self.pick_wrong_value(m2_actual, ["pizza", "pasta", "spruitjes"])
+        m2_type = m2_plan.get("type") or "completely-wrong"
         m2_topic = self.topic_candidate(
             domain="eten",
             label="je lievelingseten",
@@ -2734,7 +2894,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 "layer": "L2-slot WRONG + L2-pregen",
                 "dialogue_case": self.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M1",
-                "mistake_type": "related-but-wrong",
+                "mistake_type": m1_type,
                 "mistake_field": m1_field,
                 "mistake_actual": m1_actual,
                 "mistake_wrong": m1_wrong,
@@ -2786,7 +2946,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 "layer": "L1 + L2-slot WRONG + L2-pregen",
                 "dialogue_case": self.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M2",
-                "mistake_type": "completely-wrong",
+                "mistake_type": m2_type,
                 "mistake_field": m2_field,
                 "mistake_actual": m2_actual,
                 "mistake_wrong": m2_wrong,
@@ -2845,9 +3005,10 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def log_timestamp(self) -> float:
         start = getattr(self, "conversation_log_started_monotonic", None)
+        offset = float(getattr(self, "conversation_log_time_offset", 0.0) or 0.0)
         if start is None:
-            return 0.0
-        return round(max(0.0, time.monotonic() - start), 3)
+            return round(offset, 3)
+        return round(offset + max(0.0, time.monotonic() - start), 3)
 
     def format_log_timestamp(self, timestamp) -> str:
         try:
@@ -2871,8 +3032,8 @@ class CRI_ScriptedDialogue(SICApplication):
         if local_name:
             return local_name
         return (
-            self.known(self.last_um_preview, "child_name")
-            or self.known(self.last_um_preview, "name")
+            self.known(self.last_um_preview, "name")
+            or self.known(self.last_um_preview, "child_name")
             or self.CHILD_ID
         )
 
@@ -2939,12 +3100,40 @@ class CRI_ScriptedDialogue(SICApplication):
             return
         self.conversation_log.update(self.runtime_state_snapshot())
 
+    def max_conversation_timestamp(self, log: dict) -> float:
+        """Find the last timestamp from a previous log so resumed logs can continue counting upward."""
+        timestamps = []
+        for key in ("started_at", "ended_at"):
+            value = log.get(key)
+            if isinstance(value, (int, float)):
+                timestamps.append(float(value))
+
+        for event in log.get("events") or []:
+            value = event.get("timestamp") if isinstance(event, dict) else None
+            if isinstance(value, (int, float)):
+                timestamps.append(float(value))
+
+        for turn in log.get("turns") or []:
+            if not isinstance(turn, dict):
+                continue
+            for key in ("started_at", "ended_at"):
+                value = turn.get(key)
+                if isinstance(value, (int, float)):
+                    timestamps.append(float(value))
+
+        return max(timestamps) if timestamps else 0.0
+
     def start_conversation_log(self, script: list):
         if not self.CONVERSATION_LOG_ENABLED:
             return
 
         started = datetime.now().astimezone()
         self.conversation_log_started_monotonic = time.monotonic()
+        previous_log = self.resume_source_log if self.resume_from_log_path else {}
+        previous_events = copy.deepcopy(previous_log.get("events") or [])
+        previous_turns = copy.deepcopy(previous_log.get("turns") or [])
+        previous_last_timestamp = self.max_conversation_timestamp(previous_log) if previous_log else 0.0
+        self.conversation_log_time_offset = previous_last_timestamp + 0.001 if previous_events or previous_turns else 0.0
         child_name = self.conversation_child_name()
         session_id = self.conversation_session_id(child_name, started)
         session_dir = os.path.join(self.CONVERSATION_LOG_ROOT, session_id)
@@ -2963,7 +3152,6 @@ class CRI_ScriptedDialogue(SICApplication):
             "child_name": child_name,
             "child_input_mode": self.child_input_mode,
             "researcher_name": self.researcher_name,
-            "session_number": self.session_number,
             "session_config": dict(self.session_config),
             "resume_from_log": self.resume_from_log_path,
             "start_phase": self.start_phase_index + 1,
@@ -2980,11 +3168,20 @@ class CRI_ScriptedDialogue(SICApplication):
             "json_path": os.path.join(session_dir, f"{file_base}.json"),
             "um_snapshot_start": dict(self.last_um_preview),
             "planned_phases": [self.planned_turn_log(turn) for turn in script],
-            "turns": [],
-            "events": [],
+            "previous_log_included": bool(previous_events or previous_turns),
+            "previous_session_id": previous_log.get("session_id") if previous_log else None,
+            "turns": previous_turns,
+            "events": previous_events,
         }
         self.conversation_log.update(self.runtime_state_snapshot())
         self.current_turn_log = None
+        if previous_events or previous_turns:
+            self.log_conversation_event(
+                "resume_boundary",
+                from_log=self.resume_from_log_path,
+                previous_session_id=previous_log.get("session_id"),
+                resume_phase=self.start_phase_index + 1,
+            )
         self.write_conversation_logs()
         self.logger.info("Conversation log folder: %s", session_dir)
 
@@ -3053,12 +3250,11 @@ class CRI_ScriptedDialogue(SICApplication):
     def render_conversation_text(self) -> str:
         log = self.conversation_log or {}
         lines = [
-            f"Session: {log.get('session_id', '')}",
+            f"Conversation log: {log.get('session_id', '')}",
             f"Script: {log.get('script_version', '')}",
             f"Child id: {log.get('child_id', '')}",
             f"Child name: {log.get('child_name', '')}",
             f"Researcher: {log.get('researcher_name', '')}",
-            f"Session number: {log.get('session_number', '')}",
             f"Child input mode: {log.get('child_input_mode', '')}",
             f"Tutorial condition: {log.get('tutorial_condition', '')}",
             f"Resume from log: {log.get('resume_from_log') or ''}",
@@ -3146,6 +3342,12 @@ class CRI_ScriptedDialogue(SICApplication):
                 )
             elif event_type == "tester_control":
                 lines.append(f"[{timestamp}] TESTER: {event.get('action')}")
+            elif event_type == "resume_boundary":
+                lines.append("")
+                lines.append(
+                    f"[{timestamp}] RESUME: continuing from previous log "
+                    f"{event.get('from_log')} at phase {event.get('resume_phase')}"
+                )
             elif event_type == "phase_skipped":
                 lines.append(
                     f"[{timestamp}] Phase {event.get('phase')} skipped: "
@@ -3212,6 +3414,18 @@ class CRI_ScriptedDialogue(SICApplication):
         )
 
     def log_action_handler_result(self, action_result: dict):
+        change = action_result.get("change") if isinstance(action_result.get("change"), dict) else {}
+        if change:
+            self.logger.info(
+                "ActionHandler: %s -> %s[%s] %s -> %s",
+                action_result.get("action"),
+                change.get("action"),
+                change.get("field"),
+                change.get("old_value"),
+                change.get("new_value"),
+            )
+        else:
+            self.logger.info("ActionHandler: %s", action_result.get("action"))
         self.log_conversation_event(
             "action_handler",
             phase=(self.current_turn_context or {}).get("phase"),
@@ -3624,7 +3838,15 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def change_from_intent_result(self, result, turn: dict, transcript: str) -> dict:
         intent = result.intent
-        if intent not in ("um_add", "um_update", "dialogue_update", "um_delete"):
+        mistake_state = self.mistake_states.get(turn.get("mistake_id"), {})
+        dialogue_answer_corrects_mistake = (
+            intent == "dialogue_answer"
+            and turn.get("response_mode") == "mistake_interpretation"
+            and turn.get("mistake_field")
+            and mistake_state.get("wrong_value_rejected")
+            and self.is_known(result.value)
+        )
+        if intent not in ("um_add", "um_update", "dialogue_update", "um_delete") and not dialogue_answer_corrects_mistake:
             return {}
 
         allowed = self.allowed_change_fields(turn)
@@ -3632,7 +3854,9 @@ class CRI_ScriptedDialogue(SICApplication):
         field = result.field
         value = result.value
 
-        if not field and turn.get("mistake_field") and intent in ("um_add", "um_update", "dialogue_update"):
+        if not field and turn.get("mistake_field") and (
+            intent in ("um_add", "um_update", "dialogue_update") or dialogue_answer_corrects_mistake
+        ):
             field = turn.get("mistake_field")
         if not field and len(allowed) == 1:
             field = allowed[0]
@@ -3662,6 +3886,19 @@ class CRI_ScriptedDialogue(SICApplication):
         if not self.is_known(value):
             return {}
         if self.is_known(old_value) and str(old_value).strip().lower() == str(value).strip().lower():
+            if turn.get("mistake_id") and (
+                result.intent in ("um_add", "um_update", "dialogue_update") or dialogue_answer_corrects_mistake
+            ):
+                return {
+                    "action": "already_correct",
+                    "field": field,
+                    "field_label": field_label,
+                    "old_value": str(old_value),
+                    "new_value": str(value),
+                    "confidence": result.confidence,
+                    "reason": "Child corrected Leo by restating the already-correct UM value.",
+                    "source_text": transcript,
+                }
             return {}
 
         return {
@@ -3749,6 +3986,20 @@ class CRI_ScriptedDialogue(SICApplication):
         change = self.change_from_intent_result(result, turn, transcript)
 
         if change:
+            if change.get("action") == "already_correct":
+                self.corrections_seen += 1
+                self.mark_current_mistake_corrected()
+                self.phases_with_confirmed_change.add(self.turn_phase(turn))
+                response = "O ja, dankjewel."
+                self.say(response)
+                return self.action_result(
+                    "mistake_corrected_no_um_change",
+                    True,
+                    "Child corrected deliberate mistake by restating the already-correct UM value.",
+                    change=change,
+                    leo_response=response,
+                )
+
             self.confirm_topic_change(change)
             return self.action_result(
                 f"confirm_{change['action']}",
@@ -3790,6 +4041,9 @@ class CRI_ScriptedDialogue(SICApplication):
                 if mode == "mistake_interpretation"
                 else self.topic_correction_question(turn.get("topic", {}))
             )
+            if mode == "mistake_interpretation" and turn.get("mistake_id"):
+                state = self.mistake_states.setdefault(turn["mistake_id"], {"id": turn["mistake_id"]})
+                state["wrong_value_rejected"] = True
             self.say(response)
             return self.action_result(
                 "ask_correction_detail",
@@ -3798,11 +4052,6 @@ class CRI_ScriptedDialogue(SICApplication):
                 leo_response=response,
                 follow_up_needed=True,
             )
-
-        if turn.get("condition") == "run_if_two_mistakes_no_corrections":
-            nudge = self.mistake_nudge_action(turn, force_explicit=True)
-            if nudge:
-                return nudge
 
         if intent == "dialogue_question":
             response = self.llm_response(transcript)
@@ -3813,11 +4062,6 @@ class CRI_ScriptedDialogue(SICApplication):
                 "Child asked a dialogue question.",
                 leo_response=response,
             )
-
-        if mode == "mistake_interpretation":
-            nudge = self.mistake_nudge_action(turn)
-            if nudge:
-                return nudge
 
         if mode == "listen_only":
             return self.action_result(
@@ -3837,13 +4081,10 @@ class CRI_ScriptedDialogue(SICApplication):
             )
 
         if mode == "mistake_interpretation":
-            response = turn.get("follow_up") or "Dankjewel, dan ga ik verder."
-            self.say(response)
             return self.action_result(
-                "no_memory_change",
+                "continue_wrong_value_followup",
                 True,
-                "No UM-changing correction detected after deliberate mistake.",
-                leo_response=response,
+                "No correction detected after deliberate mistake; continue with the scripted follow-up about the wrong value.",
             )
 
         if mode == "topic_interpretation":
@@ -3884,7 +4125,7 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def write_um_change(self, change: dict) -> bool:
         field = change["field"]
-        if self.simulation_mode:
+        if self.use_fake_persona_um():
             try:
                 if change["action"] == "delete":
                     self.simulated_persona[field] = self.UNKNOWN_VALUE
@@ -3906,7 +4147,7 @@ class CRI_ScriptedDialogue(SICApplication):
                     old_value=change.get("old_value"),
                     new_value=new_value,
                     success=True,
-                    status_code="simulation",
+                    status_code="fake_persona",
                 )
                 return True
             except Exception as e:
@@ -4088,6 +4329,32 @@ class CRI_ScriptedDialogue(SICApplication):
 
             print("Please press Enter, or type T to repeat, or Q to quit.")
 
+    def memory_access_interrupt_control(self, action: dict) -> str:
+        """Testing checkpoint after memory access, then resume the same phase."""
+        if not self.POST_PHASE_TEST_CONTROLS:
+            return "continue"
+
+        leo_response = action.get("leo_response") or ""
+        while True:
+            print("\n" + "=" * 72)
+            choice = input("Memory shown. Press Enter to continue this phase, or M + Enter to repeat memory: ")
+            choice = choice.strip().lower()
+            print("=" * 72)
+
+            if choice == "":
+                self.log_conversation_event("tester_control", action="continue_after_memory_access")
+                return "continue"
+            if choice in ("m", "memory", "repeat", "r"):
+                self.log_conversation_event("tester_control", action="repeat_memory_access")
+                if leo_response:
+                    self.say(leo_response)
+                continue
+
+            print("Please press Enter to continue, or type M to repeat the memory answer.")
+
+    def is_memory_access_action(self, action: dict) -> bool:
+        return action.get("action") in ("memory_access", "memory_access_tablet")
+
     def should_skip_phase(self, turn: dict) -> bool:
         condition = turn.get("condition")
         if condition == "skip_if_change_after_phase":
@@ -4157,22 +4424,31 @@ class CRI_ScriptedDialogue(SICApplication):
             self.logger.info("No child response expected for this phase segment.")
             return
 
-        time.sleep(0.5)
-        transcript = self.listen_with_review()
-        time.sleep(0.8)
+        shutdown_event = getattr(self, "shutdown_event", None)
+        while not (shutdown_event and shutdown_event.is_set()):
+            time.sleep(0.5)
+            transcript = self.listen_with_review()
+            time.sleep(0.8)
 
-        result = self.classify_with_repeat(transcript)
-        action = self.action_handler(result, transcript, context)
-        self.log_action_handler_result(action)
-        if action.get("follow_up_needed"):
-            self.follow_up_action_handler(context)
+            result = self.classify_with_repeat(transcript)
+            action = self.action_handler(result, transcript, context)
+            self.log_action_handler_result(action)
+
+            if self.is_memory_access_action(action):
+                self.memory_access_interrupt_control(action)
+                self.say(self.turn_text(context))
+                continue
+
+            if action.get("follow_up_needed"):
+                self.follow_up_action_handler(context)
+                return
+
+            if not action.get("handled"):
+                if context.get("llm_turn") and transcript:
+                    self.say(self.llm_response(transcript))
+                else:
+                    self.say(context.get("follow_up", ""))
             return
-
-        if not action.get("handled"):
-            if context.get("llm_turn") and transcript:
-                self.say(self.llm_response(transcript))
-            else:
-                self.say(context.get("follow_up", ""))
 
     def run_phase(self, turn: dict, phase_index: int, total_phases: int):
         self.current_turn_context = turn
@@ -4219,6 +4495,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.logger.info("Script ready - %d phases.", len(script))
         self.start_conversation_log(script)
         self.print_prestart_preview(script)
+        self.print_resume_context_before_interaction()
 
         try:
             if not self.simulation_mode and not self.USE_DESKTOP_MIC:
