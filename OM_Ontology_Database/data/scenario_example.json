@@ -1,0 +1,110 @@
+{
+  "_comment": "One entry per child. Prepare this manually based on each child's UM.",
+  "scenarios": [
+    {
+      "child_id": "2",
+      "mistakes": [
+        {
+          "id": "M1",
+          "target_field": "hobby_fav",
+          "wrong_value": "judo",
+          "mistake_type": "related-but-wrong",
+          "spt_level": "orientation",
+          "step": 4
+        },
+        {
+          "id": "M2",
+          "target_field": "fav_food",
+          "wrong_value": "pizza",
+          "mistake_type": "completely-wrong",
+          "spt_level": "orientation",
+          "step": 6
+        },
+        {
+          "id": "M3",
+          "target_field": "school_strength",
+          "wrong_value": "rekenen",
+          "mistake_type": "completely-wrong",
+          "spt_level": "exploratory",
+          "step": 10
+        },
+        {
+          "id": "M4",
+          "target_field": "aspiration",
+          "wrong_value": "juf",
+          "mistake_type": "completely-wrong",
+          "spt_level": "affective",
+          "step": 14
+        }
+      ],
+      "utterances": [
+        {
+          "step_id": "hobby_bridge_reaction",
+          "layer": "L2-pregen",
+          "branch": "default",
+          "text": "[STUB] Dat is een leuke combinatie: voetbal, schaatsen, judo en padel."
+        },
+        {
+          "step_id": "m1_followup",
+          "layer": "L2-pregen",
+          "branch": "not_corrected",
+          "text": "[STUB] Wat vind jij het leukste om te doen als je aan judo denkt?"
+        },
+        {
+          "step_id": "m1_followup",
+          "layer": "L2-pregen",
+          "branch": "corrected",
+          "text": "[STUB] Wat vind jij het leukste aan voetbal?"
+        },
+        {
+          "step_id": "m2_followup",
+          "layer": "L2-pregen",
+          "branch": "not_corrected",
+          "text": "[STUB] Pizza is best een goede keuze. Wat vind jij daar lekker aan?"
+        },
+        {
+          "step_id": "m2_followup",
+          "layer": "L2-pregen",
+          "branch": "corrected",
+          "text": "[STUB] Cag kebabi klinkt echt lekker!"
+        },
+        {
+          "step_id": "school_connection",
+          "layer": "L2-pregen",
+          "branch": "default",
+          "text": "[STUB] Dat past bij jou, met je hobby's en interesses."
+        },
+        {
+          "step_id": "m3_followup",
+          "layer": "L2-pregen",
+          "branch": "not_corrected",
+          "text": "[STUB] Rekenen is ook een belangrijk vak."
+        },
+        {
+          "step_id": "m3_followup",
+          "layer": "L2-pregen",
+          "branch": "corrected",
+          "text": "[STUB] Wat vind jij het leukste aan gym?"
+        },
+        {
+          "step_id": "m4_followup",
+          "layer": "L2-pregen",
+          "branch": "not_corrected",
+          "text": "[STUB] Juf is echt een mooi beroep."
+        },
+        {
+          "step_id": "m4_followup",
+          "layer": "L2-pregen",
+          "branch": "corrected",
+          "text": "[STUB] Dokter klinkt als een mooie droom!"
+        },
+        {
+          "step_id": "closing",
+          "layer": "L2-pregen",
+          "branch": "default",
+          "text": "[STUB] Het was heel leuk om met je te kletsen. Tot de volgende keer!"
+        }
+      ]
+    }
+  ]
+}

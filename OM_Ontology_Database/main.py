@@ -20,6 +20,7 @@ from pydantic import BaseModel
 import config
 from models.um_fields import VALID_FIELDS, CATEGORY_LABELS, SENSITIVITY_TIERS
 from services import graphdb_client as db
+from services import cri_scenario
 from services.validation import validate_field
 
 logging.basicConfig(level=logging.INFO)
@@ -618,6 +619,184 @@ def validate_only(update: FieldUpdate):
         "status": "ok",
         "data": results,
         "all_valid": len(results["invalid"]) == 0,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CRI SCENARIO
+# ──────────────────────────────────────────────────────────────────────────────
+
+class ScenarioGenerate(BaseModel):
+    """Request body for generating a CRI scenario."""
+    mistakes: list[dict]
+    utterances: list[dict] = []
+    version: str = "1.0"
+
+
+class UtteranceUpdate(BaseModel):
+    """Request body for setting/updating a single utterance."""
+    step_id: str
+    layer: str           # "L2-slot" | "L2-pregen"
+    branch: str          # "default" | "corrected" | "not_corrected"
+    text: str
+
+
+class InteractionEvent(BaseModel):
+    """Request body for logging a CRI interaction event."""
+    event_type: str       # "correction" | "no_correction" | "nudge_triggered" | "nudge_correction"
+    mistake_id: Optional[str] = None
+    field: Optional[str] = None
+    wrong_value: Optional[str] = None
+    child_response: Optional[str] = None
+    corrected: bool = False
+    phase: Optional[str] = None       # "early" | "school" | "aspiration"
+    step: Optional[int] = None
+    session_id: str = "unknown"
+
+
+@app.post("/api/um/{child_id}/scenario/generate", tags=["CRI Scenario"],
+          dependencies=[Depends(require_api_key)])
+def generate_scenario(child_id: str, body: ScenarioGenerate):
+    """
+    Create a CRI scenario for a child with mistake definitions and utterances.
+    Overwrites any existing scenario.
+
+    Called by scripts/generate_scenarios.py after selecting wrong values
+    based on the child's UM data.
+    """
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+
+    cri_scenario.create_scenario(child_id, body.mistakes, body.version)
+
+    if body.utterances:
+        cri_scenario.set_utterances_batch(child_id, body.utterances)
+
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id,
+            "mistakes_created": len(body.mistakes),
+            "utterances_created": len(body.utterances),
+        }
+    }
+
+
+@app.get("/api/um/{child_id}/scenario", tags=["CRI Scenario"])
+def get_scenario(child_id: str):
+    """
+    Return the complete CRI scenario for a child.
+    Includes mistakes, utterances (organized by step and branch).
+
+    Called by the CRI frontend script at the start of the interaction
+    to load everything it needs in one request.
+    """
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+
+    scenario = cri_scenario.get_scenario(child_id)
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id,
+            "scenario": scenario,
+        }
+    }
+
+
+@app.post("/api/um/{child_id}/scenario/utterance", tags=["CRI Scenario"],
+          dependencies=[Depends(require_api_key)])
+def update_utterance(child_id: str, body: UtteranceUpdate):
+    """
+    Set or update a single CRI utterance.
+
+    Used to replace stub utterances with real authored/generated text.
+    Idempotent: overwrites existing utterance for same step+branch.
+    """
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+    if not cri_scenario.scenario_exists(child_id):
+        raise HTTPException(404, f"No scenario found for child '{child_id}'. Generate one first.")
+
+    cri_scenario.set_utterance(child_id, body.step_id, body.layer, body.branch, body.text)
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id,
+            "step_id": body.step_id,
+            "branch": body.branch,
+            "updated": True,
+        }
+    }
+
+
+@app.post("/api/um/{child_id}/scenario/event", tags=["CRI Scenario"],
+          dependencies=[Depends(require_api_key)])
+def log_event(child_id: str, body: InteractionEvent):
+    """
+    Log a CRI interaction event (correction, no_correction, nudge, etc.).
+
+    Called by the frontend during/after the CRI interaction.
+    The frontend is responsible for:
+        1. Calling this endpoint to log what happened
+        2. Calling POST /fields to update the UM if the child corrected a value
+    """
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+
+    cri_scenario.log_interaction_event(
+        child_id=child_id,
+        event_type=body.event_type,
+        mistake_id=body.mistake_id,
+        field=body.field,
+        wrong_value=body.wrong_value,
+        child_response=body.child_response,
+        corrected=body.corrected,
+        phase=body.phase,
+        step=body.step,
+        session_id=body.session_id,
+    )
+
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id,
+            "event_type": body.event_type,
+            "logged": True,
+        }
+    }
+
+
+@app.get("/api/um/{child_id}/scenario/events", tags=["CRI Scenario"])
+def get_events(child_id: str):
+    """Return all CRI interaction events for a child."""
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+
+    events = cri_scenario.get_interaction_events(child_id)
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id,
+            "events": events,
+            "total": len(events),
+        }
+    }
+
+
+@app.delete("/api/um/{child_id}/scenario", tags=["CRI Scenario"],
+            dependencies=[Depends(require_api_key)])
+def delete_scenario_endpoint(child_id: str):
+    """Delete the entire CRI scenario for a child."""
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+    if not cri_scenario.scenario_exists(child_id):
+        raise HTTPException(404, f"No scenario found for child '{child_id}'.")
+
+    cri_scenario.delete_scenario(child_id)
+    return {
+        "status": "deleted",
+        "data": {"child_id": child_id, "message": "CRI scenario deleted."}
     }
 
 
