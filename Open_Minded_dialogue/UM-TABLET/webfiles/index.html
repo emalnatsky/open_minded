@@ -1,556 +1,135 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Geheugenboom — Leo</title>
-  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --green-dark:  #2d6a2d;
-      --green-mid:   #3d8b3d;
-      --green-light: #5cb85c;
-      --green-pale:  #e8f5e9;
-      --brown:       #6d4c41;
-      --brown-dark:  #4e342e;
-      --yellow:      #fdd835;
-      --orange:      #fb8c00;
-      --blue:        #1976d2;
-      --pink:        #e91e63;
-      --purple:      #7b1fa2;
-      --teal:        #00796b;
-      --red:         #c62828;
-      --white:       #ffffff;
-      --bg:          #f1f8e9;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: "Nunito", sans-serif;
-      background: var(--bg);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 16px 12px 48px;
-      overflow-x: hidden;
-    }
-
-    /* ── Header ─────────────────────────────────────────────────── */
-    .header {
-      text-align: center;
-      margin-bottom: 6px;
-    }
-    .header h1 {
-      font-family: "Baloo 2", cursive;
-      font-size: 2.1rem;
-      font-weight: 800;
-      color: var(--green-dark);
-      letter-spacing: 0.5px;
-      line-height: 1;
-    }
-    .header .sub {
-      font-size: 0.82rem;
-      color: #666;
-      margin-top: 4px;
-    }
-
-    /* ── Status bar ─────────────────────────────────────────────── */
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      background: white;
-      border-radius: 20px;
-      padding: 7px 14px;
-      margin: 8px 0 4px;
-      font-size: 0.78rem;
-      color: #555;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    .dot {
-      width: 9px; height: 9px;
-      border-radius: 50%;
-      background: #f0a500;
-      flex-shrink: 0;
-      transition: background 0.4s;
-    }
-    .dot.connected { background: #43a047; }
-    .dot.error     { background: #e53935; }
-
-    /* ── Tree ───────────────────────────────────────────────────── */
-    .tree-wrap {
-      position: relative;
-      width: 340px;
-      margin: 0 auto;
-    }
-    .tree-svg {
-      width: 340px;
-      height: 380px;
-      display: block;
-    }
-
-    /* ── Category buttons on tree ───────────────────────────────── */
-    .cat-buttons {
-      position: absolute;
-      top: 0; left: 0;
-      width: 340px;
-      height: 380px;
-      pointer-events: none;
-    }
-    .cat-btn {
-      position: absolute;
-      pointer-events: all;
-      border: none;
-      border-radius: 18px;
-      padding: 5px 11px 5px 9px;
-      font-family: "Baloo 2", cursive;
-      font-size: 0.78rem;
-      font-weight: 700;
-      color: white;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-      transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
-      white-space: nowrap;
-      line-height: 1.2;
-    }
-    .cat-btn:hover  { transform: scale(1.07); box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
-    .cat-btn:active { transform: scale(0.96); }
-    .cat-btn.active { outline: 3px solid white; }
-    .cat-btn .ico   { font-size: 0.9rem; }
-
-    /* 10 category positions — spread around the tree canopy */
-    .cat-hobby     { background: var(--green-mid);  top: 52px;  left: 14px;  }
-    .cat-sport     { background: var(--blue);        top: 100px; left: 8px;   }
-    .cat-muziek    { background: var(--purple);      top: 148px; left: 12px;  }
-    .cat-boeken    { background: var(--orange);      top: 196px; left: 8px;   }
-    .cat-vrije_tijd{ background: var(--teal);        top: 244px; left: 12px;  }
-    .cat-sociaal   { background: var(--pink);        top: 60px;  right: 8px;  }
-    .cat-dieren    { background: #558b2f;            top: 110px; right: 6px;  }
-    .cat-eten      { background: var(--red);         top: 160px; right: 8px;  }
-    .cat-school    { background: #37474f;            top: 210px; right: 6px;  }
-    .cat-aspiratie { background: #f57f17;            top: 258px; right: 8px;  }
-
-    /* ── Leaf panel (slides up from bottom) ─────────────────────── */
-    .leaf-panel {
-      width: 340px;
-      background: white;
-      border-radius: 20px;
-      padding: 14px 16px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.13);
-      margin-top: 8px;
-      min-height: 80px;
-      transition: all 0.3s ease;
-    }
-    .leaf-panel .panel-title {
-      font-family: "Baloo 2", cursive;
-      font-size: 1rem;
-      font-weight: 700;
-      color: var(--green-dark);
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .leaf-panel .empty-msg {
-      font-size: 0.82rem;
-      color: #aaa;
-      font-style: italic;
-      text-align: center;
-      padding: 8px 0;
-    }
-
-    /* ── Individual leaf items ──────────────────────────────────── */
-    .leaves-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .leaf {
-      padding: 6px 14px;
-      border-radius: 50px;
-      font-family: "Nunito", sans-serif;
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: white;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.18);
-      animation: leafPop 0.3s cubic-bezier(0.34,1.56,0.64,1) both;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .leaf.updated {
-      animation: leafPop 0.3s cubic-bezier(0.34,1.56,0.64,1) both,
-                 flash 1.4s ease-out 0.3s;
-    }
-    @keyframes leafPop {
-      from { opacity:0; transform: scale(0.5) rotate(-8deg); }
-      to   { opacity:1; transform: scale(1)   rotate(0deg);  }
-    }
-    @keyframes flash {
-      0%   { box-shadow: 0 0 0 4px var(--yellow); }
-      100% { box-shadow: 0 2px 6px rgba(0,0,0,0.18); }
-    }
-
-    /* field label inside leaf */
-    .leaf-label {
-      font-size: 0.7rem;
-      opacity: 0.75;
-      font-weight: 400;
-    }
-
-    /* ── Robot row ──────────────────────────────────────────────── */
-    .robot-row {
-      display: flex;
-      align-items: flex-end;
-      gap: 10px;
-      width: 340px;
-      margin-top: 10px;
-      padding-left: 6px;
-    }
-    .robot-emoji { font-size: 3rem; line-height: 1; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.2)); }
-    .speech-bubble {
-      background: #d4f0c0;
-      border: 2px solid var(--green-mid);
-      border-radius: 14px;
-      padding: 9px 13px;
-      font-size: 0.8rem;
-      color: #2d5a27;
-      font-weight: 600;
-      max-width: 200px;
-      line-height: 1.35;
-      position: relative;
-      transition: opacity 0.3s;
-    }
-    .speech-bubble::after {
-      content: "";
-      position: absolute;
-      bottom: 12px; right: -11px;
-      border: 5px solid transparent;
-      border-left-color: var(--green-mid);
-    }
-
-    /* ── Timestamp ──────────────────────────────────────────────── */
-    .timestamp {
-      font-size: 0.7rem;
-      color: #bbb;
-      margin-top: 10px;
-      text-align: center;
-    }
-
-    /* ── No-data notice ─────────────────────────────────────────── */
-    .no-data {
-      background: #fff8e1;
-      border: 1.5px dashed #fdd835;
-      border-radius: 12px;
-      padding: 10px 14px;
-      font-size: 0.78rem;
-      color: #795548;
-      text-align: center;
-      margin-top: 8px;
-      width: 340px;
-      display: none;
-    }
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Leo's Geheugen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body>
 
-  <div class="header">
-    <h1>🌳 Geheugenboom</h1>
-    <p class="sub">Klik op een categorie om te zien wat ik over jou onthoud</p>
-  </div>
+  <!-- ============================================================
+       SCREEN 1 — WELCOME
+       ============================================================ -->
+  <section id="screen-welcome" class="screen active">
+    <img src="/static/images/background.png" class="bg-img" alt="" />
 
-  <div class="status-bar">
-    <div class="dot" id="status-dot"></div>
-    <span id="status-text">Verbinden met server…</span>
-  </div>
-
-  <!-- Tree + category buttons -->
-  <div class="tree-wrap">
-    <svg class="tree-svg" viewBox="0 0 340 380" xmlns="http://www.w3.org/2000/svg">
-      <!-- trunk -->
-      <rect x="152" y="240" width="36" height="130" rx="8" fill="#6d4c41"/>
-      <rect x="162" y="240" width="10" height="130" fill="#5d4037" opacity="0.35"/>
-      <!-- root bumps -->
-      <ellipse cx="138" cy="368" rx="22" ry="8" fill="#5d4037" opacity="0.5"/>
-      <ellipse cx="202" cy="368" rx="22" ry="8" fill="#5d4037" opacity="0.5"/>
-      <!-- canopy layers -->
-      <ellipse cx="170" cy="175" rx="130" ry="110" fill="#2e7d32"/>
-      <ellipse cx="170" cy="155" rx="115" ry="95"  fill="#388e3c"/>
-      <ellipse cx="135" cy="165" rx="85"  ry="72"  fill="#43a047"/>
-      <ellipse cx="205" cy="160" rx="80"  ry="68"  fill="#43a047"/>
-      <ellipse cx="170" cy="125" rx="95"  ry="82"  fill="#4caf50"/>
-      <ellipse cx="170" cy="100" rx="70"  ry="60"  fill="#66bb6a"/>
-      <!-- texture highlights -->
-      <circle cx="118" cy="110" r="13" fill="#81c784" opacity="0.5"/>
-      <circle cx="205" cy="105" r="11" fill="#81c784" opacity="0.45"/>
-      <circle cx="155" cy="82"  r="15" fill="#a5d6a7" opacity="0.45"/>
-      <circle cx="230" cy="150" r="10" fill="#81c784" opacity="0.4"/>
-      <circle cx="100" cy="155" r="12" fill="#66bb6a" opacity="0.5"/>
-      <circle cx="185" cy="65"  r="9"  fill="#c8e6c9" opacity="0.5"/>
-      <!-- ground -->
-      <ellipse cx="170" cy="370" rx="115" ry="14" fill="#558b2f" opacity="0.35"/>
-    </svg>
-
-    <!-- Category buttons -->
-    <div class="cat-buttons" id="cat-container">
-      <button class="cat-btn cat-hobby"      id="btn-hobby"      onclick="showCategory('hobby')"      ><span class="ico">🎨</span>Hobby's</button>
-      <button class="cat-btn cat-sport"      id="btn-sport"      onclick="showCategory('sport')"      ><span class="ico">⚽</span>Sport</button>
-      <button class="cat-btn cat-muziek"     id="btn-muziek"     onclick="showCategory('muziek')"     ><span class="ico">🎵</span>Muziek</button>
-      <button class="cat-btn cat-boeken"     id="btn-boeken"     onclick="showCategory('boeken')"     ><span class="ico">📚</span>Boeken</button>
-      <button class="cat-btn cat-vrije_tijd" id="btn-vrije_tijd" onclick="showCategory('vrije_tijd')" ><span class="ico">🌤</span>Vrije Tijd</button>
-      <button class="cat-btn cat-sociaal"    id="btn-sociaal"    onclick="showCategory('sociaal')"    ><span class="ico">👫</span>Sociaal</button>
-      <button class="cat-btn cat-dieren"     id="btn-dieren"     onclick="showCategory('dieren')"     ><span class="ico">🐾</span>Dieren</button>
-      <button class="cat-btn cat-eten"       id="btn-eten"       onclick="showCategory('eten')"       ><span class="ico">🍕</span>Eten</button>
-      <button class="cat-btn cat-school"     id="btn-school"     onclick="showCategory('school')"     ><span class="ico">📖</span>School</button>
-      <button class="cat-btn cat-aspiratie"  id="btn-aspiratie"  onclick="showCategory('aspiratie')"  ><span class="ico">⭐</span>Dromen</button>
+    <!-- Closed book on the right -->
+    <div class="welcome-book" id="welcomeBook" role="button" tabindex="0" aria-label="Open Leo's geheugenboek">
+      <div class="book-glow"></div>
+      <img src="/static/images/book_closed.png" class="welcome-book-img" alt="Boek" />
     </div>
+
+    <!-- Robot on the left with speech bubble -->
+    <div class="welcome-robot">
+      <div class="speech-bubble" id="welcomeBubble">
+        <span class="bubble-text" id="welcomeBubbleText">Klik op mijn boek om meer te ontdekken!</span>
+        <div class="bubble-tail bubble-tail-down"></div>
+      </div>
+      <img src="/static/images/robocik.png" class="robot-img" alt="Leo" />
+    </div>
+  </section>
+
+  <!-- ============================================================
+       SCREEN 2 — TABLE OF CONTENTS
+       ============================================================ -->
+  <section id="screen-toc" class="screen">
+    <img src="/static/images/background.png" class="bg-img bg-dim" alt="" />
+
+    <button class="back-btn" data-back-to="welcome" aria-label="Terug">
+      <span class="back-arrow">◀</span><span>TERUG</span>
+    </button>
+
+    <div class="book-stage">
+      <div class="open-book" id="tocBook">
+        <img src="/static/images/book.png" class="book-bg" alt="" />
+
+      <!-- Left page: first 5 categories -->
+        <div class="page page-left">
+          <h1 class="page-title">Inhoudsopgave</h1>
+          <div class="page-title-underline"></div>
+          <ul class="toc-list" id="tocListLeft"></ul>
+        </div>
+
+  <!-- Right page: last 5 categories -->
+        <div class="page page-right">
+          <h1 class="page-title">&nbsp;</h1>
+          <div class="page-title-underline" style="visibility:hidden"></div>
+          <ul class="toc-list" id="tocListRight"></ul>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="robot-bottom">
+      <img src="/static/images/robocik.png" class="robot-img robot-small" alt="" />
+      <div class="speech-bubble bubble-mini">
+        <span class="bubble-text">Klik op de categorie die je wilt lezen!</span>
+        <div class="bubble-tail bubble-tail-left"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       SCREEN 3 — CATEGORY PAGE
+       ============================================================ -->
+  <section id="screen-category" class="screen">
+    <img src="/static/images/background.png" class="bg-img bg-dim" alt="" />
+
+    <button class="back-btn" data-back-to="toc" aria-label="Terug">
+      <span class="back-arrow">◀</span><span>TERUG</span>
+    </button>
+
+    <div class="book-stage">
+      <div class="open-book" id="categoryBook">
+        <img src="/static/images/book.png" class="book-bg" alt="" />
+
+        <!-- Left page: category title -->
+        <div class="page page-left">
+          <div class="cat-header">
+            <div class="cat-icon-big" id="catIconBig">🎨</div>
+            <h1 class="cat-title-big" id="catTitleBig">Hobby's</h1>
+            <div class="cat-underline" id="catUnderline"></div>
+          </div>
+          <div class="cat-meta">
+            <div class="meta-row">
+              <span class="meta-label">Wat Leo weet</span>
+              <span class="meta-value" id="catCount">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right page: pills -->
+        <div class="page page-right">
+          <h2 class="right-page-title">Mijn aantekeningen</h2>
+          <div class="pills-container" id="pillsContainer"></div>
+          <div class="empty-state" id="emptyState">
+            <span class="empty-icon">✎</span>
+            <p class="empty-text">Leo heeft hier nog niets opgeschreven...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="robot-bottom">
+      <img src="/static/images/robocik.png" class="robot-img robot-small" alt="" />
+      <div class="speech-bubble bubble-mini">
+        <span class="bubble-text" id="catBubbleText">Hobby's</span>
+        <div class="bubble-tail bubble-tail-left"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Connection indicator -->
+  <div class="conn-indicator" id="connIndicator">
+    <div class="conn-dot"></div>
+    <span class="conn-text" id="connText">Verbinden…</span>
   </div>
 
-  <!-- Leaf panel -->
-  <div class="leaf-panel" id="leaf-panel">
-    <div class="empty-msg">Klik op een categorie hierboven ↑</div>
-  </div>
-
-  <div class="no-data" id="no-data-notice">
-    Geen data beschikbaar — is Eunike's API actief?
-  </div>
-
-  <!-- Robot -->
-  <div class="robot-row">
-    <div class="speech-bubble" id="speech">Welkom bij mijn Geheugenboom!</div>
-    <div class="robot-emoji">🤖</div>
-  </div>
-
-  <div class="timestamp" id="timestamp"></div>
-
-  <!-- Socket.IO -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-  <script>
-
-    // ── Category config ───────────────────────────────────────────────────────
-    // Keys match Eunike's CATEGORY_LABELS dict exactly.
-    // Dutch label + emoji colour used for leaf pill colour.
-    const CATEGORIES = {
-      hobby:      { label: "Hobby's",        icon: "🎨", color: "#3d8b3d" },
-      sport:      { label: "Sport",           icon: "⚽", color: "#1976d2" },
-      muziek:     { label: "Muziek",          icon: "🎵", color: "#7b1fa2" },
-      boeken:     { label: "Boeken",          icon: "📚", color: "#fb8c00" },
-      vrije_tijd: { label: "Vrije Tijd",      icon: "🌤", color: "#00796b" },
-      sociaal:    { label: "Sociaal",         icon: "👫", color: "#e91e63" },
-      dieren:     { label: "Dieren",          icon: "🐾", color: "#558b2f" },
-      eten:       { label: "Eten",            icon: "🍕", color: "#c62828" },
-      school:     { label: "School",          icon: "📖", color: "#37474f" },
-      aspiratie:  { label: "Dromen & Idolen", icon: "⭐", color: "#f57f17" },
-    };
-
-    // ── Live UM store — populated via Socket.IO from um_tablet_server.py ─────
-    // Structure: { category_key: { field_name: { value, prev_value } } }
-    window.liveUM = {};
-    let liveUM = window.liveUM;
-    let currentCategory = null;
-
-    // ── Category mapping — maps Eunike's API category label to our key ───────
-    // Eunike's CATEGORY_LABELS values → our category keys
-    const CAT_LABEL_TO_KEY = {
-      "hobby's":        "hobby",
-      "hobbies":        "hobby",
-      "sport":          "sport",
-      "muziek":         "muziek",
-      "music":          "muziek",
-      "boeken":         "boeken",
-      "books":          "boeken",
-      "vrije tijd":     "vrije_tijd",
-      "vrije_tijd":     "vrije_tijd",
-      "free time":      "vrije_tijd",
-      "sociaal":        "sociaal",
-      "social":         "sociaal",
-      "dieren":         "dieren",
-      "animals":        "dieren",
-      "eten":           "eten",
-      "food":           "eten",
-      "school":         "school",
-      "dromen & idolen":"aspiratie",
-      "aspiratie":      "aspiratie",
-      "aspiration":     "aspiratie",
-      "dromen":         "aspiratie",
-    };
-
-    function mapCategory(rawLabel) {
-      if (!rawLabel) return "overig";
-      const lower = rawLabel.toLowerCase().trim();
-      // exact match first
-      if (CAT_LABEL_TO_KEY[lower]) return CAT_LABEL_TO_KEY[lower];
-      // partial match fallback
-      for (const [key, val] of Object.entries(CAT_LABEL_TO_KEY)) {
-        if (lower.includes(key) || key.includes(lower)) return val;
-      }
-      return "overig";
-    }
-
-    // ── Field name → readable Dutch label ────────────────────────────────────
-    const FIELD_LABELS = {
-      hobby_fav:           "Lievelingshobby",
-      hobbies:             "Hobbies",
-      sports_enjoys:       "Houdt van sport",
-      sports_fav:          "Lievelingssport",
-      sports_plays:        "Doet zelf",
-      sports_fav_play:     "Speelt het liefst",
-      music_enjoys:        "Houdt van muziek",
-      music_plays_instrument: "Speelt instrument",
-      music_instrument:    "Instrument",
-      books_enjoys:        "Houdt van boeken",
-      books_fav_genre:     "Favoriete genre",
-      books_fav_title:     "Lievelingsboek",
-      freetime_fav:        "Liefste bezigheid",
-      has_best_friend:     "Heeft beste vriend",
-      animals_enjoys:      "Houdt van dieren",
-      animal_fav:          "Lievelingsdier",
-      has_pet:             "Heeft huisdier",
-      pet_type:            "Soort huisdier",
-      pet_name:            "Naam huisdier",
-      fav_food:            "Lievelingseten",
-      fav_subject:         "Lievelingsvak",
-      school_strength:     "Goed in",
-      school_difficulty:   "Lastig vak",
-      interest:            "Interesses",
-      aspiration:          "Wil later worden",
-      role_model:          "Voorbeeld",
-      age:                 "Leeftijd",
-      name:                "Naam",
-    };
-
-    function fieldLabel(key) {
-      return FIELD_LABELS[key] || key.replace(/_/g, " ");
-    }
-
-    // ── Render leaves for selected category ───────────────────────────────────
-    function showCategory(catKey) {
-      currentCategory = catKey;
-
-      // highlight active button
-      document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("active"));
-      const activeBtn = document.getElementById("btn-" + catKey);
-      if (activeBtn) activeBtn.classList.add("active");
-
-      const cat = CATEGORIES[catKey];
-      const panel = document.getElementById("leaf-panel");
-      const data = liveUM[catKey] || {};
-      const entries = Object.entries(data).filter(([k, v]) => v && v.value);
-
-      if (entries.length === 0) {
-        panel.innerHTML = `
-          <div class="panel-title">${cat ? cat.icon + " " + cat.label : catKey}</div>
-          <div class="empty-msg">Nog geen informatie in deze categorie</div>
-        `;
-        setSpeech("Ik weet hier nog niets over!");
-        return;
-      }
-
-      const color = cat ? cat.color : "#4caf50";
-      const leavesHTML = entries.map(([field, meta], i) => {
-        const isUpdated = meta.updated ? " updated" : "";
-        const delay = (i * 0.06).toFixed(2);
-        return `
-          <div class="leaf${isUpdated}" style="background:${color}; animation-delay:${delay}s">
-            <span class="leaf-label">${fieldLabel(field)}</span>
-            &nbsp;${meta.value}
-          </div>`;
-      }).join("");
-
-      panel.innerHTML = `
-        <div class="panel-title">${cat ? cat.icon + " " + cat.label : catKey}</div>
-        <div class="leaves-grid">${leavesHTML}</div>
-      `;
-
-      if (cat) setSpeech(`Dit weet ik over jouw ${cat.label.toLowerCase()}!`);
-    }
-
-    function setSpeech(text) {
-      document.getElementById("speech").textContent = text;
-    }
-
-    // ── Socket.IO — real updates from um_tablet_server.py ────────────────────
-    // um_tablet_server.py broadcasts: { child_id, fields: { field: { value, category, changes } }, timestamp }
-    function handleUMUpdate(data) {
-      console.log("handleUMUpdate called with", Object.keys(data.fields || {}).length, "fields");
-      const fields    = data.fields    || {};
-      const timestamp = data.timestamp || "";
-
-      // Group by category key — map Eunike's category label to our keys
-      const grouped = {};
-      Object.entries(fields).forEach(([field, meta]) => {
-        const rawCat = meta.category || "";
-        const catKey = mapCategory(rawCat);
-        if (!grouped[catKey]) grouped[catKey] = {};
-
-        const prevValue = (liveUM[catKey] && liveUM[catKey][field])
-          ? liveUM[catKey][field].value : null;
-        const newValue = meta.value;
-
-        grouped[catKey][field] = {
-          value:   newValue || "—",
-          updated: prevValue !== null && prevValue !== newValue,
-        };
-      });
-
-      // Merge into liveUM
-      Object.assign(liveUM, grouped);
-
-      // Update timestamp
-      document.getElementById("timestamp").textContent =
-        timestamp ? "Bijgewerkt: " + timestamp : "";
-
-      // Re-render if a category is open
-      if (currentCategory && liveUM[currentCategory]) {
-        showCategory(currentCategory);
-      }
-
-      // Show/hide no-data notice
-      const hasData = Object.values(liveUM).some(cat =>
-        Object.values(cat).some(f => f.value && f.value !== "—")
-      );
-      document.getElementById("no-data-notice").style.display = hasData ? "none" : "block";
-
-      setSpeech(currentCategory ? null : "Ik heb nieuwe informatie ontvangen!");
-      setStatus("connected", "Live data ontvangen ✓");
-    }
-
-    // ── Status helpers ────────────────────────────────────────────────────────
-    function setStatus(state, text) {
-      document.getElementById("status-dot").className  = "dot " + state;
-      document.getElementById("status-text").textContent = text;
-    }
-
-    // ── Socket.IO connection ──────────────────────────────────────────────────
-    try {
-      window.socket = io({ transports: ["websocket", "polling"] });
-
-      window.socket.on("connect", () => {
-        setStatus("connected", "Verbonden met server ✓");
-      });
-      window.socket.on("disconnect", () => {
-        setStatus("error", "Verbinding verbroken");
-      });
-      window.socket.on("connect_error", () => {
-        setStatus("error", "Server niet bereikbaar");
-      });
-      window.socket.on("sic/webinfo", (data) => {
-        if (data.label === "um_update") {
-          handleUMUpdate(data.message);
-        }
-      });
-
-    } catch (e) {
-      setStatus("error", "Socket.IO niet beschikbaar");
-    }
-
-    // ── Init ──────────────────────────────────────────────────────────────────
-    setStatus("connecting", "Verbinden met server…");
-  </script>
+  <script src="/static/script.js"></script>
 </body>
 </html>

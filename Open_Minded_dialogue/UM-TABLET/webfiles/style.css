@@ -1,0 +1,834 @@
+/* ============================================================
+   Leo's Geheugen 
+   Target: 1024 x 768 Tablet Chrome
+   ============================================================ */
+
+:root {
+  --paper-cream:     #f4e4c1;
+  --paper-cream-dk:  #e8d4a3;
+  --ink:             #2b1810;
+  --ink-soft:        #4a3328;
+  --book-purple:     #9b59d6;
+  --book-purple-dk:  #5e3a8e;
+  --book-purple-x:   #3d2560;
+  --bubble-bg:       #fffdf5;
+  --bubble-border:   #2b1810;
+  --gold:            #f4c534;
+  --red:             #c83e3e;
+  --pink-eraser:     #ff8ba0;
+  --pink-eraser-dk:  #c8536b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  font-family: 'Nunito', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+body {
+  width: 1280px;
+  height: 800px;
+  margin: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center center;
+  /* JS sets transform: translate(-50%,-50%) scale(...) */
+}
+
+img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges; }
+
+/* ============================================================
+   Screens
+   ============================================================ */
+.screen {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: none;
+  overflow: hidden;
+}
+.screen.active { display: block; animation: screenIn 380ms ease-out; }
+@keyframes screenIn {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.bg-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  object-position: center;
+  z-index: 0;
+}
+.bg-dim {
+  filter: brightness(0.62) saturate(1.1);
+}
+
+/* ============================================================
+   SCREEN 1
+   ============================================================ */
+.welcome-book {
+  position: absolute;
+  right: 400px;
+  top: 48%;
+  transform: translateY(-50%);
+  width: 480px; height: 580px;
+  z-index: 3;
+  cursor: pointer;
+  animation: bookFloat 3s ease-in-out infinite;
+}
+.welcome-book-img {
+  position: relative; z-index: 2;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 0 rgba(0,0,0,0.35)) drop-shadow(0 22px 30px rgba(0,0,0,0.45));
+  transition: transform 200ms ease;
+}
+.welcome-book:hover .welcome-book-img,
+.welcome-book:active .welcome-book-img { transform: scale(1.06); }
+
+/* Title overlaid on the book cover */
+.welcome-book-title {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 30px;
+  color: #fff;
+  text-align: center;
+  line-height: 1.5;
+  letter-spacing: 1px;
+  text-shadow:
+    3px 3px 0 #3d2560,
+    -2px -2px 0 #3d2560,
+    2px -2px 0 #3d2560,
+    -2px 2px 0 #3d2560,
+    0 6px 12px rgba(0,0,0,0.4);
+  pointer-events: none;
+  width: 70%;
+}
+
+.book-glow {
+  position: absolute; inset: -40px;
+  background: radial-gradient(ellipse at center, rgba(244,197,52,0.55) 0%, rgba(244,197,52,0) 65%);
+  z-index: 1;
+  animation: glowPulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.95); }
+  50%      { opacity: 1;   transform: scale(1.1); }
+}
+
+/*.tap-hint {
+  position: absolute;
+  top: 30px; right: 10px;
+  background: var(--gold);
+  color: var(--ink);
+  font-family: 'Press Start 2P', monospace;
+  font-size: 16px;
+  padding: 12px 16px;
+  border: 4px solid var(--ink);
+  box-shadow: 0 4px 0 0 var(--ink);
+  transform: rotate(10deg);
+  animation: tapWiggle 1.2s ease-in-out infinite;
+  z-index: 4;
+}
+@keyframes tapWiggle {
+  0%, 100% { transform: rotate(10deg) translateY(0) scale(1); }
+  50%      { transform: rotate(10deg) translateY(-8px) scale(1.06); }
+}*/
+
+@keyframes bookFloat {
+  0%, 100% { transform: translateY(-50%) translateY(0); }
+  50%      { transform: translateY(-50%) translateY(-12px); }
+}
+
+.welcome-robot {
+  position: absolute;
+  left: 210px;
+  bottom: 140px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: -5px;
+}
+#welcomeBubble {
+  margin-bottom: -46px;   /* pulls bubble closer to robot, increase to pull more */
+  margin-left: -60px;   /* negative pulls the bubble LEFT of the robot */
+}
+
+.robot-img {
+  width: 240px; height: auto;
+  filter: drop-shadow(0 8px 0 rgba(0,0,0,0.3)) drop-shadow(0 14px 22px rgba(0,0,0,0.4));
+}
+.robot-bob { animation: bob 1.6s ease-in-out infinite; transform-origin: bottom center; }
+@keyframes bob {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  50%      { transform: translateY(-12px) rotate(1.5deg); }
+}
+
+/* ============================================================
+   Speech Bubble (chunky pixel)
+   ============================================================ */
+.speech-bubble {
+  position: relative;
+  background: var(--bubble-bg);
+  border: 4px solid var(--bubble-border);
+  box-shadow: 0 6px 0 0 var(--bubble-border), 0 12px 22px rgba(0,0,0,0.3);
+  padding: 15px 21px;
+  max-width: 280px;
+  animation: bubblePop 380ms cubic-bezier(.5,1.7,.4,1) both;
+}
+.bubble-text {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+  display: block;
+}
+.speech-bubble.text-swap .bubble-text { animation: textSwap 420ms ease both; }
+@keyframes textSwap {
+  0%   { opacity: 1; transform: translateY(0); }
+  40%  { opacity: 0; transform: translateY(-6px); }
+  60%  { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes bubblePop {
+  0%   { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+
+/* Tail variants */
+.bubble-tail {
+  position: absolute;
+  width: 0; height: 0;
+}
+.bubble-tail-down {
+  bottom: -22px;
+  left: 70px;
+  border-left: 18px solid transparent;
+  border-right: 18px solid transparent;
+  border-top: 22px solid var(--bubble-border);
+}
+.bubble-tail-down::after {
+  content: '';
+  position: absolute;
+  top: -26px; left: -14px;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 18px solid var(--bubble-bg);
+}
+.bubble-tail-left {
+  left: -22px;
+  bottom: 18px;
+  border-top: 14px solid transparent;
+  border-bottom: 14px solid transparent;
+  border-right: 22px solid var(--bubble-border);
+}
+.bubble-tail-left::after {
+  content: '';
+  position: absolute;
+  top: -10px; left: 4px;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-right: 18px solid var(--bubble-bg);
+}
+
+/* ============================================================
+   SCREEN 2 & 3 — book stage
+   ============================================================ */
+.book-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; 
+  padding-left: 120px;     
+  z-index: 2;
+  padding: 30px 30px 130px 120px;
+}
+
+.open-book {
+  position: relative;
+  width: 1200px;
+  height: 800px;
+  filter: drop-shadow(0 18px 0 rgba(0,0,0,0.28)) drop-shadow(0 28px 40px rgba(0,0,0,0.5));
+}
+
+.book-bg {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* TOC book grows in */
+#tocBook.book-enter { animation: bookGrow 700ms cubic-bezier(.34,1.56,.64,1) both; }
+@keyframes bookGrow {
+  0%   { transform: scale(0.05) rotate(-15deg); opacity: 0; }
+  60%  { opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* Pages are absolutely positioned over the book.png art */
+.page {
+  position: absolute;
+  top: 7%;
+  bottom: 16%;
+  width: 40%;
+  z-index: 2;
+  padding: 28px 30px;
+  overflow: visible;
+}
+.page-left  { left: 6%; }
+.page-right { right: 6%; }
+
+/* faint paper texture overlaid */
+.page::before {
+  content: '';
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(120,80,40,0.05) 1px, transparent 1px),
+    radial-gradient(circle at 70% 60%, rgba(120,80,40,0.04) 1px, transparent 1px),
+    radial-gradient(circle at 40% 80%, rgba(120,80,40,0.06) 1px, transparent 1px);
+  background-size: 30px 30px, 50px 50px, 40px 40px;
+}
+
+/* ============================================================
+   TOC content
+   ============================================================ */
+.page-title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 20px;
+  color: var(--book-purple-x);
+  text-align: center;
+  margin-top: 70px;           
+  margin-bottom: 10px;
+  margin-left: 90px;
+  line-height: 1.3;
+  text-shadow: 3px 3px 0 var(--gold);
+}
+.page-title-underline {
+  width: 60%;
+  height: 3px;
+  background: var(--ink);
+  margin: 0 0 16px 120px;
+  box-shadow: 0 5px 0 0 var(--ink-soft);
+}
+
+.toc-list {
+  list-style: none;
+  position: relative; z-index: 1;
+  margin-top: 50px;     /* DOWN — increase to push list lower on the page */
+  margin-left: 65px;     /* RIGHT — push list right */
+  margin-right: 8px;    /* compensate on the right side */
+}
+
+#tocListRight {
+  margin-top: -30px;    /* push right list further down to align nicely with "Inhoudsopgave" title */
+  margin-left: 0px;   /* push right list further right to balance the page visually */
+}
+#screen-toc .page-right {
+  right: 15%;        /* was 6% — pulls right page closer to spine */
+}
+
+.toc-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  margin-bottom:8px;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: all 140ms ease;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  animation: tocItemIn 400ms ease-out both;
+}
+.toc-item:hover, .toc-item:active {
+  background: rgba(244,197,52,0.4);
+  border-color: var(--ink);
+  /*transform: translateX(6px);*/
+  box-shadow: 4px 4px 0 0 var(--ink);
+}
+.toc-icon {
+  font-size: 18px;
+  width: 28px;
+  text-align: center;
+  filter: drop-shadow(2px 2px 0 rgba(0,0,0,0.15));
+  flex-shrink: 0;
+}
+.toc-icon img {
+  width: 36px;
+  height: 36px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  display: block;
+  margin: 0 auto;
+  object-fit: contain;
+}
+.toc-label {
+  font-size: 20px;
+  color: var(--ink);
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.toc-dots {
+  flex: 1;
+  max-width: 150px; 
+  border-bottom: 3px dotted var(--ink-soft);
+  margin: 0 6px;
+  align-self: center;
+  height: 1px;
+  position: relative;
+  top: 4px;
+}
+.toc-page {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 11px;
+  color: var(--book-purple-x);
+  flex-shrink: 0;
+}
+
+@keyframes tocItemIn {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Right decoration page */
+.page-right .deco-stamp {
+  width: 240px; height: 240px;
+  border: 5px solid var(--book-purple-dk);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-8deg);
+  background: rgba(244, 197, 52, 0.18);
+  box-shadow: inset 0 0 0 3px var(--paper-cream), inset 0 0 0 6px var(--book-purple-dk);
+  margin: 50px auto 0;
+  text-align: center;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--book-purple-x);
+}
+.deco-line {
+  width: 130px;
+  height: 3px;
+  background: var(--book-purple-x);
+  margin: 6px auto;
+}
+.deco-title {
+  font-size: 20px;
+  line-height: 1.4;
+  margin: 6px 0;
+}
+.deco-sub {
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+.doodles {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+.doodle {
+  position: absolute;
+  font-size: 26px;
+  color: var(--book-purple);
+  opacity: 0.5;
+  animation: doodleFloat 4s ease-in-out infinite;
+}
+.d1 { top: 8%;  left: 14%; }
+.d2 { top: 18%; right: 12%; color: var(--red); animation-delay: 0.6s; }
+.d3 { bottom: 18%; left: 12%; color: var(--red); animation-delay: 1.2s; }
+.d4 { bottom: 12%; right: 14%; color: var(--book-purple); animation-delay: 1.8s; }
+.d5 { top: 46%; right: 4%; color: var(--gold); animation-delay: 2.4s; }
+@keyframes doodleFloat {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50%      { transform: translateY(-10px) rotate(15deg); }
+}
+
+/* ============================================================
+   Robot bottom (screens 2 & 3)
+   ============================================================ */
+.robot-bottom {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+#screen-toc .robot-bottom {
+  bottom: 50px;        /* move UP, increase to go higher */
+  left: 60%;           /* move RIGHT, was 58% (centered) */
+}
+.robot-small { width: 240px; }
+.bubble-mini {
+  max-width: 300px;
+  padding: 14px 20px;
+  margin-bottom: 130px;
+  margin-left: -50px;      /* NEW — pulls bubble left into the robot's space */
+}
+.bubble-mini .bubble-text { font-size: 12px; }
+
+/* ============================================================
+   Back button
+   ============================================================ */
+.back-btn {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 10;
+  background: var(--gold);
+  border: 4px solid var(--ink);
+  color: var(--ink);
+  font-family: 'Press Start 2P', monospace;
+  font-size: 12px;
+  padding: 12px 18px;
+  cursor: pointer;
+  box-shadow: 0 5px 0 0 var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.back-btn:hover  { transform: translateY(-2px); box-shadow: 0 7px 0 0 var(--ink); }
+.back-btn:active { transform: translateY(3px); box-shadow: 0 2px 0 0 var(--ink); }
+.back-arrow { font-size: 14px; }
+
+/* ============================================================
+   SCREEN 3 — Category page content
+   ============================================================ */
+#screen-category .robot-bottom {
+  bottom: 54px;       /* move UP — increase to go higher */
+  left: 53%;          /* move RIGHT — was 50% (centered) */
+}
+
+#screen-category .page {
+  padding: 28px 24px;
+}
+#screen-category .page-right {
+  padding-top: 180px;       /* push everything DOWN from top of page */
+  padding-left: -90px;       /* push everything RIGHT */
+  padding-right: 0px;
+}
+#screen-category .page-right { right: 14%; }
+
+#screen-category .page-left {
+  padding-top: 90px;       /* push title down from top */
+  padding-left: 90px;       /* push everything right */
+}
+
+
+.cat-header {
+  text-align: center;
+  margin-bottom: 26px;
+  position: relative; z-index: 1;
+}
+.cat-icon-big {
+  font-size: 80px;
+  margin-bottom: 8px;
+  filter: drop-shadow(4px 4px 0 rgba(0,0,0,0.18));
+  animation: iconWobble 2.5s ease-in-out infinite;
+}
+.cat-icon-big img {
+  width: 96px;
+  height: 96px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  display: block;
+  margin: 0 auto;
+  object-fit: contain;
+}
+@keyframes iconWobble {
+  0%, 100% { transform: rotate(-3deg); }
+  50%      { transform: rotate(3deg); }
+}
+.cat-title-big {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 22px;
+  color: var(--book-purple-x);
+  margin-bottom: 10px;
+  text-shadow: 3px 3px 0 var(--gold);
+  line-height: 1.3;
+}
+.cat-underline {
+  width: 70%;
+  height: 4px;
+  margin: 0 auto;
+  background: var(--ink);
+  box-shadow: 0 5px 0 0 var(--ink-soft);
+}
+
+.cat-meta {
+  margin-top: 36px;
+  position: relative; z-index: 1;
+  padding: 0 6px;
+  max-width: 280px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 4px;
+  border-bottom: 3px dashed var(--ink-soft);
+}
+.meta-label {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  letter-spacing: 0.4px;
+}
+.meta-value {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 16px;
+  color: var(--book-purple-x);
+}
+
+.right-page-title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 14px;
+  color: var(--book-purple-x);
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid var(--ink);
+  box-shadow: 0 5px 0 -3px var(--ink-soft);
+  text-align: center;
+  position: relative; z-index: 1;
+}
+#screen-category .right-page-title {
+  max-width: 300px;       /* match the pills width */
+  margin-left: 28px;
+}
+
+.pills-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative; z-index: 1;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px;
+}
+#screen-category .pills-container {
+  max-width: 320px;     
+}
+.pills-container::-webkit-scrollbar { width: 6px; }
+.pills-container::-webkit-scrollbar-track { background: rgba(0,0,0,0.06); }
+.pills-container::-webkit-scrollbar-thumb { background: var(--book-purple-dk); }
+
+.empty-state {
+  display: none;
+  text-align: center;
+  margin-top: 40px;
+  color: var(--ink-soft);
+  position: relative; z-index: 1;
+}
+.empty-state.show { display: block; }
+.empty-icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 10px;
+  color: var(--book-purple);
+}
+.empty-text {
+  font-family: 'Nunito', sans-serif;
+  font-size: 14px;
+  font-style: italic;
+  font-weight: 600;
+}
+#screen-category .empty-state {
+  max-width: 280px;        /* match the pills width */
+  margin-left: 30px;
+  margin-right: auto;
+  margin-top: 20px;        /* vertical centering — adjust to taste */
+}
+/* ============================================================
+   Pills (UM values)  + eraser animation
+   ============================================================ */
+.pill {
+  --pill-color: #5e3a8e;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 14px;
+  background: var(--bubble-bg);
+  border: 4px solid var(--ink);
+  color: var(--ink);
+  font-family: 'Nunito', sans-serif;
+  box-shadow: 0 5px 0 0 var(--pill-color), 0 8px 12px rgba(0,0,0,0.18);
+  overflow: hidden;
+  max-width: 100%;
+}
+.pill-label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  color: var(--pill-color);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.pill-value {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* enter animation for brand-new pills */
+.pill.pill-enter {
+  animation: pillPop 480ms cubic-bezier(.5,1.7,.4,1) both;
+}
+@keyframes pillPop {
+  0%   { transform: scale(0.4) rotate(-6deg); opacity: 0; }
+  60%  { transform: scale(1.07) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* typewriter writing-in for value text on update */
+.pill-value.writing {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 3px solid var(--pill-color);
+  max-width: 0;
+  animation: typeIn 600ms steps(24, end) forwards, caretBlink 350ms steps(2) 4;
+}
+@keyframes typeIn {
+  from { max-width: 0; }
+  to   { max-width: 100%; }
+}
+@keyframes caretBlink {
+  50% { border-color: transparent; }
+}
+
+/* ============================================================
+   Eraser animation — left-to-right wipe of old value
+   ============================================================ */
+.pill.pill-erasing {
+  position: relative;
+  pointer-events: none;
+}
+.pill.pill-erasing .pill-label,
+.pill.pill-erasing .pill-value {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 0%, #000 100%);
+          mask-image: linear-gradient(to right, transparent 0%, #000 0%, #000 100%);
+  -webkit-mask-size: 200% 100%;
+          mask-size: 200% 100%;
+  -webkit-mask-position: 0% 0%;
+          mask-position: 0% 0%;
+  animation: eraseWipe 800ms ease-in forwards;
+}
+@keyframes eraseWipe {
+  0%   { -webkit-mask-position: 0% 0%;   mask-position: 0% 0%; }
+  100% { -webkit-mask-position: -100% 0%; mask-position: -100% 0%; }
+}
+
+/* the rubber eraser sprite that travels across */
+.pill.pill-erasing::after {
+  content: '';
+  position: absolute;
+  top: 4px; bottom: 4px;
+  width: 30px;
+  background:
+    linear-gradient(180deg,
+      var(--pink-eraser) 0%,
+      var(--pink-eraser) 45%,
+      #fff 45%, #fff 50%,
+      var(--pink-eraser-dk) 50%,
+      var(--pink-eraser-dk) 100%);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 0 rgba(0,0,0,0.3), inset -3px 0 0 rgba(0,0,0,0.15);
+  left: -36px;
+  animation: eraserMove 800ms ease-in forwards;
+  z-index: 5;
+}
+@keyframes eraserMove {
+  0%   { left: -36px; transform: rotate(-6deg) translateY(0); }
+  20%  { transform: rotate(-6deg) translateY(-2px); }
+  40%  { transform: rotate(6deg)  translateY(2px); }
+  60%  { transform: rotate(-6deg) translateY(-2px); }
+  80%  { transform: rotate(6deg)  translateY(2px); }
+  100% { left: calc(100% + 6px); transform: rotate(6deg) translateY(0); }
+}
+
+/* eraser shavings — small flecks that puff out behind eraser */
+.pill.pill-erasing::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 6px; height: 6px;
+  background: var(--ink-soft);
+  border-radius: 50%;
+  left: -36px;
+  box-shadow:
+    -10px -8px 0 -1px var(--ink-soft),
+    -16px 4px 0 -2px var(--ink-soft),
+    -22px -2px 0 -1px var(--ink-soft),
+    -8px 8px 0 -2px var(--ink-soft);
+  animation: shavings 800ms ease-in forwards;
+  opacity: 0;
+  z-index: 4;
+}
+@keyframes shavings {
+  0%   { opacity: 0; left: -36px; }
+  15%  { opacity: 0.6; }
+  100% { opacity: 0; left: calc(100% + 6px); }
+}
+
+/* "first-write" pills (no prior value) skip the eraser */
+.pill.pill-fresh .pill-value {
+  animation: typeIn 600ms steps(24, end) forwards;
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 0;
+}
+
+/* ============================================================
+   Connection indicator
+   ============================================================ */
+.conn-indicator {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+  background: rgba(0,0,0,0.55);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  color: #fff;
+  border: 3px solid rgba(255,255,255,0.15);
+}
+.conn-dot {
+  width: 10px; height: 10px;
+  background: #888;
+  border: 2px solid #000;
+  transition: background 0.4s;
+}
+.conn-indicator.connected .conn-dot { background: #4caf50; animation: pulseDot 2s ease-in-out infinite; }
+.conn-indicator.error     .conn-dot { background: #f44336; }
+@keyframes pulseDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(76,175,80,0.6); }
+  50%      { box-shadow: 0 0 0 6px rgba(76,175,80,0); }
+}
