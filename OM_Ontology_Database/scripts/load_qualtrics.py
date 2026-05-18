@@ -208,6 +208,7 @@ def load_csv(filepath: str):
         if pet_names:
             fields["pet_name"] = ", ".join(pet_names)
 
+        # 5) Match chosen hobby# to the given hobby itself
         if "hobby_fav" in fields:
             import re
             m = re.match(r"Hobby\s+(\d+)", str(fields["hobby_fav"]), re.IGNORECASE)
@@ -219,6 +220,12 @@ def load_csv(filepath: str):
                         fields["hobby_fav"] = actual
                     else:
                         del fields["hobby_fav"]
+
+        # 6) Determine child type from source label
+        if "new" in SOURCE.lower():
+            fields["exposure"] = "new"
+        elif "returning" in SOURCE.lower():
+            fields["exposure"] = "returning"
 
         # ── Write fields through API ──────────────────────────────────────
         if fields:
