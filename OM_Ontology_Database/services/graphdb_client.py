@@ -100,7 +100,14 @@ def _escape_sparql_string(value: str) -> str:
     value = value.replace('"', '\\"')
     value = value.replace("\n", "\\n")
     value = value.replace("\r", "\\r")
-    return value
+    # Escape non-ASCII as SPARQL \uXXXX — avoids HTTP encoding ambiguity
+    result = ""
+    for ch in value:
+        if ord(ch) > 127:
+            result += f"\\u{ord(ch):04X}"
+        else:
+            result += ch
+    return result
 
 
 def _sanitize_for_uri(text: str) -> str:
