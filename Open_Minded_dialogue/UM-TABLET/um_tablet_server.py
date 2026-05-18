@@ -70,6 +70,7 @@ class UMTabletServer(SICApplication):
             port=WEB_PORT,
             templates_dir=webfiles_dir,
             static_dir=webfiles_dir,
+            cors_allowed_origins="*",
         )
         self.webserver = Webserver(conf=web_conf)
 
