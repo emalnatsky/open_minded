@@ -13,7 +13,6 @@ This dict is the SINGLE SOURCE OF TRUTH for:
   - Which fields are targeted in the memory-probe / DECRI demo (mistake_priority)
   - Sensitivity tier using Julianna's privacy onion layer classification
   - Category labels for GUI display
-  - is_talk_preference: whether this is a consent/preference field (not factual knowledge)
 
 DO NOT add new fields at runtime. Schema changes require:
   1. Update this file
@@ -45,10 +44,6 @@ MISTAKE PRIORITY:
   "decri" marks aspiration as the field specifically designed to demo the open-memory
   Delete/Update flow during the user study.
 
-RELATIONSHIP NAMES:
-  Must match the object property names in um_schema.ttl exactly.
-  e.g. "hasHobby" here → um:hasHobby in the ontology.
-
 """
 
 from typing import Literal, Optional
@@ -69,7 +64,7 @@ VALID_FIELDS: dict[str, dict] = {
         "required": False,
         "sensitivity_tier": 1,
         "category": "hobby",
-        "relationship": "hasHobby",             # ← was LIKES_HOBBY
+        "relationship": "LIKES_HOBBY",
         "target_class": "Hobby",
         "node_property": "name",
         "extra_node_props": [],
@@ -82,33 +77,25 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": False,
-        "is_talk_preference": False,
     },
 
     "hobby_fav": {
         # Q02 — Welke hobby vind je het allerleukst?
-        # CONVERTED TO NODE: children sometimes name multiple favourites.
-        # Reuses Hobby class — hasFavouriteHobby differentiates from hasHobby.
-        "storage": "node",
+        # Single favourite hobby. Stored cleanly. Primary mistake field.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "hobby",
-        "relationship": "hasFavouriteHobby",     # ← new relationship
-        "target_class": "Hobby",                  # ← reuses Hobby class
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": True,
         "xsd_type": "xsd:string",
-        "description": "Child's favourite hobby(s)",
+        "description": "Child's single favourite hobby",
         "gate_by": None,
         "gate_condition": None,
         "gate_value": None,
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "hobby_talk": {
@@ -129,7 +116,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -154,33 +140,26 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "sports_fav": {
         # Q04 — Welke sport vind je het leukst?
-        # CONVERTED TO NODE: children sometimes name multiple favourites.
-        # Reuses Sport class — hasFavouriteSport differentiates from playsSport.
-        "storage": "node",
+        # Free text. Visible if Q03 ≠ Nee (includes "weet niet").
+        # Favourite sport even if not personally playing.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "sport",
-        "relationship": "hasFavouriteSport",      # ← new relationship
-        "target_class": "Sport",                   # ← reuses Sport class
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": True,
         "xsd_type": "xsd:string",
-        "description": "Child's favourite sport(s) to watch or do",
-        "gate_by": None,  #"sports_enjoys",
+        "description": "Child's favourite sport to watch or do",
+        "gate_by": None, #"sports_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "sports_plays": {
@@ -201,7 +180,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "sports_fav_play": {
@@ -215,7 +193,7 @@ VALID_FIELDS: dict[str, dict] = {
         "required": False,
         "sensitivity_tier": 1,
         "category": "sport",
-        "relationship": "playsSport",            # ← was PLAYS_SPORT
+        "relationship": "PLAYS_SPORT",
         "target_class": "Sport",
         "node_property": "name",
         "extra_node_props": [],
@@ -228,7 +206,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": False,
-        "is_talk_preference": False,
     },
 
     "sports_talk": {
@@ -249,7 +226,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "nee",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     "sports_play_talk": {
@@ -270,7 +246,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "nee",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -278,6 +253,8 @@ VALID_FIELDS: dict[str, dict] = {
     # ══════════════════════════════════════════════════════════════
 
     "music_enjoys": {
+        # Q07 — Hou je echt van muziek? GATE QUESTION.
+        # MC. Unlocks Q08 and Q09 if ≠ Nee.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -293,10 +270,12 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "music_talk": {
+        # Q08 — Zou je het leuk vinden om daar later met Leo over te praten?
+        # MC. Opt-in gate for music as conversation topic. Visible if Q07 ≠ Nee.
+        # This is a consent/preference field, not a factual one.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -309,13 +288,13 @@ VALID_FIELDS: dict[str, dict] = {
         "gate_by": "music_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
-        "declined_sentinel": "nee",
+        "declined_sentinel": "nee",   # if music_enjoys=nee, store "nee" — robot won't probe music
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     "music_plays_instrument": {
+        # Q09 — Speel je een instrument? MC. Visible if Q07 ≠ Nee. Gates Q10.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -331,17 +310,19 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "music_instrument": {
+        # Q10 — Welk instrument speel je?
+        # Free text, raw/mixed. STRICTLY only if Q09 = Ja.
+        # Secondary mistake field.
         "storage": "node",
         "type": "string",
-        "multi_value": True,
+        "multi_value": True,       # can play more than one instrument
         "required": False,
         "sensitivity_tier": 1,
         "category": "muziek",
-        "relationship": "playsInstrument",       # ← was PLAYS_INSTRUMENT
+        "relationship": "PLAYS_INSTRUMENT",
         "target_class": "Instrument",
         "node_property": "name",
         "extra_node_props": [],
@@ -354,7 +335,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": False,
-        "is_talk_preference": False,
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -362,6 +342,8 @@ VALID_FIELDS: dict[str, dict] = {
     # ══════════════════════════════════════════════════════════════
 
     "books_enjoys": {
+        # Q11 — Lees je graag? GATE QUESTION.
+        # MC. Unlocks Q12 and Q13 if ≠ Nee.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -377,42 +359,41 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "books_fav_genre": {
         # Q12 — Wat voor boeken lees je het liefst? MC.
-        # ← CONVERTED TO NODE: children can select multiple genres.
-        "storage": "node",
+        # Visible if Q11 ≠ Nee. Multiple choice → no LLM needed.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "boeken",
-        "relationship": "likesBookGenre",        # ← new node relationship
-        "target_class": "BookGenre",
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": False,
         "xsd_type": "xsd:string",
-        "description": "Book genres the child likes",
+        "description": "Child's favourite book genre",
         "gate_by": None, #"books_enjoys",
         "gate_condition": "not_equals",
         "gate_value": "nee",
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
+
+
     "books_fav_title": {
+        # Q13 — Wat is jouw lievelingsboek?
+        # Free text, raw/mixed. Visible if Q11 ≠ Nee.
+        # LLM validates but should NOT flag real book titles — prompt must account for this.
+        # Primary mistake field.
         "storage": "node",
         "type": "string",
-        "multi_value": True,
+        "multi_value": False,
         "required": False,
         "sensitivity_tier": 1,
         "category": "boeken",
-        "relationship": "hasFavouriteBook",      # ← was LIKES_BOOK
+        "relationship": "LIKES_BOOK",
         "target_class": "Book",
         "node_property": "title",
         "extra_node_props": [],
@@ -425,10 +406,11 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": False,
-        "is_talk_preference": False,
     },
 
     "books_talk": {
+        # Q21 — Zou je het leuk vinden om met mij te kletsen over boeken en lezen?
+        # MC. Visible if books_enjoys ≠ nee.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -444,7 +426,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "nee",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -453,39 +434,38 @@ VALID_FIELDS: dict[str, dict] = {
 
     "freetime_fav": {
         # Q14 — Wat doe je het liefst als je vrij bent? MC, always visible.
-        # ← CONVERTED TO NODE: children can select multiple activities.
-        "storage": "node",
+        # Mistake priority YES. MC → no LLM needed.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "sociaal",
-        "relationship": "likesFreeTimeActivity", # ← new node relationship
-        "target_class": "FreetimeActivity",
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": False,
         "xsd_type": "xsd:string",
-        "description": "What child likes doing in free time",
+        "description": "What child most likes to do in free time (MC options)",
         "gate_by": None,
         "gate_condition": None,
         "gate_value": None,
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
+
 
     # ══════════════════════════════════════════════════════════════
     # CLUSTER: SOCIAAL  (Q15)
     # ══════════════════════════════════════════════════════════════
 
     "has_best_friend": {
+        # Q15 — Heb je een beste vriend?
+        # MC. Always visible but skippable. No opt-in gate needed.
+        # "Liever niet zeggen" is a sensitivity-aware opt-out.
+        # If chosen: robot knows not to push on social topics.
         "storage": "scalar",
         "type": "enum",
         "allowed_values": ["ja", "nee", "wil ik liever niet zeggen", "liever niet zeggen"],
         "required": False,
-        "sensitivity_tier": 2,
+        "sensitivity_tier": 2,       # social relationships are tier 2
         "category": "sociaal",
         "llm_validate": False,
         "xsd_type": "xsd:string",
@@ -496,7 +476,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -504,6 +483,8 @@ VALID_FIELDS: dict[str, dict] = {
     # ══════════════════════════════════════════════════════════════
 
     "animals_enjoys": {
+        # Q16 — Hou je van dieren? GATE QUESTION.
+        # MC. Unlocks Q17 and Q18 if ≠ Nee.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -519,17 +500,19 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "animal_fav": {
+        # Q17 — Welk dier vind jij het leukst?
+        # Free text. Stored cleanly = True (but still LLM validate for plausibility).
+        # Visible if Q16 ≠ Nee. Secondary mistake field.
         "storage": "node",
         "type": "string",
-        "multi_value": True,
+        "multi_value": False,
         "required": False,
         "sensitivity_tier": 1,
         "category": "dieren",
-        "relationship": "hasFavouriteAnimal",    # ← was LIKES_ANIMAL
+        "relationship": "LIKES_ANIMAL",
         "target_class": "Animal",
         "node_property": "name",
         "extra_node_props": [],
@@ -542,10 +525,12 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "animal_talk": {
+        # Q18 — Zou je daar later met Leo over willen praten?
+        # MC. Opt-in for animals as conversation topic. Visible if Q16 ≠ Nee.
+        # Same pattern as music_talk — consent/preference field.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -561,10 +546,10 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "nee",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     "has_pet": {
+        # Q19 — Heb je een huisdier? MC. Always visible. Gates Q20 and Q21.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet"],
@@ -580,40 +565,60 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
-    # ── CONSOLIDATED PET FIELD ────────────────────────────────────
-    # Replaces the old separate pet_type + pet_name fields.
-    # Each Pet node now has both petType and petName on the same instance,
-    # so you always know which name belongs to which animal type.
-
-    "pets": {
-        # Q20+Q29 — Pet type + pet name paired on same node.
-        # Multi-value: child can have multiple pets.
+    "pet_type": {
+        # Q20 — Wat voor huisdier heb je? MC, raw/mixed (can have multiple types).
+        # STRICTLY only if Q19 = Ja. Secondary mistake field.
         "storage": "node",
         "type": "string",
         "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "dieren",
-        "relationship": "hasPetInstance",        # ← replaces HAS_PET + HAS_PET_NAME
+        "relationship": "HAS_PET",
         "target_class": "Pet",
-        "node_property": "petType",              # primary value (e.g. "Hond")
-        "extra_node_props": ["petName"],          # name lives alongside type
+        "node_property": "petType",
+        "extra_node_props": ["petName"],
         "llm_validate": True,
         "xsd_type": "xsd:string",
-        "description": "Child's pet (type and name on same node)",
+        "description": "Type(s) of pet the child has",
         "gate_by": None, #"has_pet",
         "gate_condition": "equals",
         "gate_value": "ja",
         "declined_sentinel": None,
         "mistake_priority": "secondary",
         "stored_cleanly": False,
-        "is_talk_preference": False,
+    },
+
+    "pet_name": {
+        # Q21 — Hoe heet jouw huisdier? Free text, raw/mixed.
+        # STRICTLY only if Q19 = Ja. NOT a mistake field — names are personal.
+        # No LLM validation: pet names are arbitrary strings, LLM would over-flag.
+        "storage": "node",
+        "type": "string",
+        "multi_value": True,
+        "required": False,
+        "sensitivity_tier": 1,
+        "category": "dieren",
+        "relationship": "HAS_PET_NAME",
+        "target_class": "PetName",
+        "node_property": "name",
+        "extra_node_props": [],
+        "llm_validate": False,       # names: do not LLM-validate, would over-flag
+        "xsd_type": "xsd:string",
+        "description": "Name(s) of child's pet(s)",
+        "gate_by": None, #"has_pet",
+        "gate_condition": "equals",
+        "gate_value": "ja",
+        "declined_sentinel": None,
+        "mistake_priority": None,
+        "stored_cleanly": False,
     },
 
     "pet_talk": {
+        # Q30 — Zou je het leuk vinden om met mij te kletsen over een huisdier?
+        # MC. Visible only if has_pet = ja.
         "storage": "scalar",
         "type": "boolean",
         "allowed_values": ["ja", "nee", "misschien", "een beetje", "weet niet", "Geen huisdier"],
@@ -629,7 +634,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "Geen huisdier",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -637,48 +641,41 @@ VALID_FIELDS: dict[str, dict] = {
     # ══════════════════════════════════════════════════════════════
 
     "fav_food": {
-        # Q22 — Wat vind je het lekkerste om te eten?
-        # CONVERTED TO NODE: children sometimes name multiple foods.
-        # Primary CRI mistake field.
-        "storage": "node",
+        # Q22 — Wat is jouw lievelingseten? Free text. Always visible.
+        # PRIMARY mistake field — highest priority for the memory probe phase.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "eten",
-        "relationship": "hasFavouriteFood",       # ← new relationship
-        "target_class": "Food",                    # ← new class
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": True,
         "xsd_type": "xsd:string",
-        "description": "Child's favourite food(s)",
+        "description": "Child's favourite food",
         "gate_by": None,
         "gate_condition": None,
         "gate_value": None,
         "declined_sentinel": None,
         "mistake_priority": "primary",
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
-
 
     # ══════════════════════════════════════════════════════════════
     # CLUSTER: SCHOOL  (Q23–Q25)
     # ══════════════════════════════════════════════════════════════
 
     "fav_subject": {
+        # Q23 — Wat is je lievelingsvak op school? MC. Always visible.
         "storage": "node",
         "type": "string",
         "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "school",
-        "relationship": "likesSubject",          # ← was LIKES_SUBJECT
+        "relationship": "LIKES_SUBJECT",
         "target_class": "Subject",
         "node_property": "name",
         "extra_node_props": [],
-        "llm_validate": False,
+        "llm_validate": False,       # MC — controlled values
         "xsd_type": "xsd:string",
         "description": "School subject(s) child likes most",
         "gate_by": None,
@@ -687,17 +684,18 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "school_strength": {
+        # Q24 — In welke vakken ben jij goed? MC. Always visible.
+        # New in v5.1. Multi-value (can be good at multiple subjects).
         "storage": "node",
         "type": "string",
         "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "school",
-        "relationship": "strongAtSubject",       # ← was STRONG_AT_SUBJECT
+        "relationship": "STRONG_AT_SUBJECT",
         "target_class": "Subject",
         "node_property": "name",
         "extra_node_props": [],
@@ -710,17 +708,18 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "school_difficulty": {
+        # Q25 — Is er een vak dat je soms lastig vindt? MC. Always visible but optional.
+        # Tier 2: sharing academic difficulty is more sensitive than liking a subject.
         "storage": "node",
         "type": "string",
         "multi_value": True,
         "required": False,
         "sensitivity_tier": 2,
         "category": "school",
-        "relationship": "findsDifficult",        # ← was FINDS_DIFFICULT
+        "relationship": "FINDS_DIFFICULT",
         "target_class": "Subject",
         "node_property": "name",
         "extra_node_props": [],
@@ -733,7 +732,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -743,17 +741,12 @@ VALID_FIELDS: dict[str, dict] = {
     "interest": {
         # Q24 — Welke onderwerpen of dingen vind jij heel interessant?
         # Free long text. Always visible, required, child-authored.
-        # Kept as scalar for now. Interest class exists in ontology for future use.
-        "storage": "node",
-        "multi_value": True,
+        # Future: LLM could extract specific interests into node entities.
+        "storage": "scalar",
         "type": "string",
         "required": False,
         "sensitivity_tier": 1,
         "category": "aspiratie",
-        "relationship": "hasInterest",  # ← add
-        "target_class": "Interest",  # ← add
-        "node_property": "name",  # ← add
-        "extra_node_props": [],
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "What the child finds interesting (free text)",
@@ -763,23 +756,18 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": False,
-        "is_talk_preference": False,
     },
 
     "aspiration": {
-        # Q26 — Wat wil jij later worden? Free text.
-        # CONVERTED TO NODE: children sometimes give multiple answers.
-        # DECRI demo field for open-memory Delete/Update interaction.
-        "storage": "node",
+        # Q26 — Wat wil jij later worden? Free text. Optional.
+        # "DECRI" mistake priority: specifically designed as the demo field for
+        # the open-memory Delete/Update interaction — robot states a wrong
+        # aspiration, child corrects it, and can see the change in the GUI.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 1,
         "category": "aspiratie",
-        "relationship": "hasAspiration",           # ← new relationship
-        "target_class": "Aspiration",              # ← new class
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": True,
         "xsd_type": "xsd:string",
         "description": "What the child wants to be when they grow up",
@@ -789,40 +777,35 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": "decri",
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "role_model": {
-        # Q27 — Is er iemand naar wie jij echt opkijkt?
-        # CONVERTED TO NODE: children sometimes name multiple people.
-        # Sensitivity tier 2.
-        "storage": "node",
+        # Q27 — Is er iemand naar wie jij echt opkijkt? Free text, raw/mixed.
+        # Always visible. No mistake priority — personal/sensitive enough not to probe.
+        # Tier 2: naming a person (celebrity or personal) is more sensitive.
+        "storage": "scalar",
         "type": "string",
-        "multi_value": True,
         "required": False,
         "sensitivity_tier": 2,
         "category": "aspiratie",
-        "relationship": "hasRoleModel",            # ← new relationship
-        "target_class": "RoleModel",               # ← new class
-        "node_property": "name",
-        "extra_node_props": [],
         "llm_validate": True,
         "xsd_type": "xsd:string",
-        "description": "Person(s) the child looks up to (public figure or personal)",
+        "description": "Person the child looks up to (public figure or personal)",
         "gate_by": None,
         "gate_condition": None,
         "gate_value": None,
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": False,
-        "is_talk_preference": False,
     },
 
     # ══════════════════════════════════════════════════════════════
-    # AGE + SYSTEM FIELDS
+    # AGE  (Q27 in spreadsheet — added back in v5.1 update)
     # ══════════════════════════════════════════════════════════════
 
     "age": {
+        # ID 27 — Hoe oud ben je?
+        # Integer, range 6-13. Always visible. Asked in Qualtrics.
         "storage": "scalar",
         "type": "integer",
         "min": 6,
@@ -839,10 +822,10 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "exposure": {
+        # Set during import — "new" or "returning"
         "storage": "scalar",
         "type": "enum",
         "allowed_values": ["new", "returning"],
@@ -858,10 +841,10 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
     "condition": {
+        # For tagging whether using the tablet or not
         "storage": "scalar",
         "type": "enum",
         "allowed_values": ["condition_1", "condition_2"],
@@ -877,7 +860,6 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": False,
     },
 
 }
@@ -1001,7 +983,7 @@ QUALTRICS_COLUMN_MAP: dict[str, str] = {
     "Q36_4":  "aspiration",
     "Q37":    "role_model",
     # ── Multi-column and MC+Other fields are handled separately ──────────
-    # in load_qualtrics_new.py (HOBBIES_COLS, PET_TYPE_MAP, MC_OTHER_MAP).
+    # in load_qualtrics_old.py (HOBBIES_COLS, PET_NAME_COLS, MC_OTHER_MAP).
     # See that file for: Q5_1..Q5_4 (hobbies), Q19+Q19_11_TEXT (books genre),
     # Q20+Q20_1_TEXT (books title), Q22+Q22_15_TEXT (freetime),
     # Q28+Q28_8_TEXT (pet type), Q29_1..Q29_8 (pet names),

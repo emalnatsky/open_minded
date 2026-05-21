@@ -2,7 +2,7 @@
 Load a Qualtrics CSV export into the UM service via the API.
 
 USAGE:
-    python scripts/load_qualtrics.py path/to/export.csv
+    python scripts/load_qualtrics_new.py path/to/export.csv
 
 PREREQUISITES:
     - The FastAPI server must be running (python main.py)
@@ -39,8 +39,9 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 API_URL = "http://localhost:8000"
-SOURCE  = "qualtrics_check-in_May7"
+SOURCE  = "qualtrics_import"
 CHILD_ID_COLUMN = "ExternalReference"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COLUMN MAPPING — matches the actual Qualtrics export headers (May 2026)
@@ -101,7 +102,7 @@ MC_OTHER_MAP: list[tuple[str, str, str]] = [
     ("Q19",          "Q19_11_TEXT",    "books_fav_genre"),
     ("Q20",          "Q20_1_TEXT",     "books_fav_title"),
     ("Q22",          "Q22_15_TEXT",    "freetime_fav"),
-    ("Q28",          "Q28_8_TEXT",     "pet_type"),
+    # pet_type removed — handled by paired pet logic below
     ("Q32",          "Q32_12_TEXT",    "fav_subject"),
     ("Q33",          "Q33_12_TEXT",    "school_strength"),
     ("Q195",         "Q195_12_TEXT",   "school_difficulty"),
@@ -111,11 +112,19 @@ MC_OTHER_MAP: list[tuple[str, str, str]] = [
 # Multi-column fields: multiple CSV columns merge into one UM field
 HOBBIES_COLS = ["Q5_1", "Q5_2", "Q5_3", "Q5_4"]
 
-# Pet name columns — one per animal type
+# Pet name columns — maps each column to its animal type (Dutch)
 # Q29_1=Hond, Q29_2=Kat, Q29_3=Konijn, Q29_4=Hamster,
 # Q29_5=Vogel, Q29_6=Vis, Q29_7=Reptiel, Q29_8=Anders
-PET_NAME_COLS = ["Q29_1", "Q29_2", "Q29_3", "Q29_4",
-                 "Q29_5", "Q29_6", "Q29_7", "Q29_8"]
+PET_TYPE_MAP = {
+    "Q29_1": "Hond",
+    "Q29_2": "Kat",
+    "Q29_3": "Konijn",
+    "Q29_4": "Hamster",
+    "Q29_5": "Vogel",
+    "Q29_6": "Vis",
+    "Q29_7": "Reptiel",
+    "Q29_8": "Anders",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -176,17 +185,17 @@ def load_csv(filepath: str):
         for csv_col, um_field in SIMPLE_MAP.items():
             raw = _clean(row.get(csv_col))
             if raw:
-                # Age is already written by create_child above — skip here
-                # to avoid a redundant write that creates a false "reaffirmed"
+                # Age needs to stay as int
                 if um_field == "age":
                     continue
-                fields[um_field] = raw
+                else:
+                    fields[um_field] = raw
 
-                # 2) MC + Other text merges
-                for choice_col, text_col, um_field in MC_OTHER_MAP:
-                    val = _resolve_mc_other(row, choice_col, text_col)
-                    if val:
-                        fields[um_field] = val
+        # 2) MC + Other text merges
+        for choice_col, text_col, um_field in MC_OTHER_MAP:
+            val = _resolve_mc_other(row, choice_col, text_col)
+            if val:
+                fields[um_field] = val
 
         # 3) Hobbies — merge up to 4 columns into comma-separated string
         hobbies = []
@@ -199,16 +208,39 @@ def load_csv(filepath: str):
             # splitting into individual hobby nodes if needed
             fields["hobbies"] = ", ".join(hobbies)
 
-        # 4) Pet names — collect all non-empty names across animal types
-        pet_names = []
-        for col in PET_NAME_COLS:
-            name = _clean(row.get(col))
-            if name:
-                pet_names.append(name)
-        if pet_names:
-            fields["pet_name"] = ", ".join(pet_names)
+        # 4) Pets — create paired type+name entries
+        # Each pet needs its own API call (separate extra_props per pet),
+        # so we collect them here and write after the main batch.
+        pet_entries = []  # list of {"value": "Hond", "extra_props": {"petName": "Toby"}}
+        pet_type_val = _resolve_mc_other(row, "Q28", "Q28_8_TEXT")
+        if pet_type_val:
+            pet_types = [p.strip() for p in pet_type_val.split(",") if p.strip()]
+            # Filter out "Anders" placeholder from the type list
+            clean_types = []
+            for pt in pet_types:
+                if any(kw in pt.lower() for kw in ("anders", "namelijk", "other", "titel van het boek")):
+                    # The "Anders" text was already resolved by _resolve_mc_other
+                    continue
+                clean_types.append(pt)
+            # If _resolve_mc_other appended the custom text, it's already in the list
+            for pt in (clean_types if clean_types else pet_types):
+                # Find the name column for this pet type
+                pet_name = None
+                for col, animal in PET_TYPE_MAP.items():
+                    if animal.lower() == pt.lower():
+                        pet_name = _clean(row.get(col))
+                        break
+                entry = {"value": pt}
+                if pet_name:
+                    entry["extra_props"] = {"petName": pet_name}
+                else:
+                    entry["extra_props"] = {}
+                pet_entries.append(entry)
 
-        # 5) Match chosen hobby# to the given hobby itself
+        # 5) Fix Qualtrics piping for hobby_fav
+        # Q6 asks "which hobby is your favourite?" and the choices are piped
+        # from Q5_1..Q5_4. But Qualtrics exports the LABEL ("Hobby 1") not
+        # the actual typed text. Resolve it here.
         if "hobby_fav" in fields:
             import re
             m = re.match(r"Hobby\s+(\d+)", str(fields["hobby_fav"]), re.IGNORECASE)
@@ -254,7 +286,31 @@ def load_csv(filepath: str):
                 failed += 1
         else:
             logger.info("Child %s: no fields to write after mapping.", child_id)
-            success += 1
+
+        # ── Write pets individually (each needs its own extra_props) ──────
+        for pet in pet_entries:
+            pet_resp = requests.post(
+                f"{API_URL}/api/um/{child_id}/fields",
+                json={
+                    "fields": {"pets": pet["value"]},
+                    "extra_props": pet.get("extra_props", {}),
+                    "source": SOURCE,
+                    "session_id": SOURCE,
+                },
+                timeout=10,
+            )
+            if pet_resp.status_code == 200:
+                pet_data = pet_resp.json().get("data", {})
+                pet_name_str = pet.get("extra_props", {}).get("petName", "")
+                logger.info(
+                    "  Pet written: %s (name: %s)",
+                    pet["value"], pet_name_str or "none"
+                )
+            else:
+                logger.warning(
+                    "  Pet write failed for %s: %s",
+                    pet["value"], pet_resp.text[:100]
+                )
 
     logger.info("Done. %d succeeded, %d failed.", success, failed)
 
@@ -294,21 +350,11 @@ def _parse_int(val) -> int | None:
 
 
 def _resolve_mc_other(row: dict, choice_col: str, text_col: str) -> str | None:
-    """
-    Resolve a Qualtrics MC question with an "Other" option.
-    Handles multi-select: child may pick "Gym,Anders, namelijk:"
-    In that case, keep "Gym" AND append the custom text.
-    """
     choice = _clean(row.get(choice_col))
     text   = _clean(row.get(text_col))
-
     if not choice:
         return text
-
-    # Split multi-select values (Qualtrics joins them with commas)
     parts = [p.strip() for p in choice.split(",") if p.strip()]
-
-    # Separate real choices from the "Anders" placeholder
     real_choices = []
     has_other = False
     for part in parts:
@@ -316,14 +362,10 @@ def _resolve_mc_other(row: dict, choice_col: str, text_col: str) -> str | None:
             has_other = True
         else:
             real_choices.append(part)
-
-    # Append the custom text if "Anders" was selected
     if has_other and text:
         real_choices.append(text)
-
     if not real_choices:
-        return text  # only "Anders" was selected, use the text
-
+        return text
     return ",".join(real_choices)
 
 

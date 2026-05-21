@@ -34,7 +34,7 @@ from models.um_fields import VALID_FIELDS
 _NODE_PRIMARY_PROPS = {
     fdef["node_property"]
     for fdef in VALID_FIELDS.values()
-    if fdef["storage"] == "node" and "node_property" in fdef
+    if fdef["storage"] == "node"
 }
 
 _NODE_PROVENANCE_PROPS = {"active", "source", "timestamp", "sessionId", "childId"}
@@ -325,11 +325,6 @@ def get_child_profile(child_id: str) -> dict:
         FILTER(STRSTARTS(STR(?nodeClass), "{UM_PREFIX}"))
         FILTER(?nodeClass != um:Child)
         FILTER(?nodeClass != um:HistoryEntry)
-        FILTER(?nodeClass != um:CRINode)
-        FILTER(?nodeClass != um:CRIScenario)
-        FILTER(?nodeClass != um:CRIMistake)
-        FILTER(?nodeClass != um:CRIUtterance)
-        FILTER(?nodeClass != um:CRIInteractionEvent)
         FILTER(?nodeUri != <{uri}>)
         ?nodeUri ?nodeProp ?nodeVal .
         FILTER(?nodeProp != rdf:type)
@@ -595,7 +590,7 @@ def _write_node(
                         WHERE  {{ <{old_node_uri}> um:active ?oldActive }};
                         INSERT DATA {{
                             <{old_node_uri}> um:active "false"^^xsd:string .
-                            <{old_node_uri}> um:supersededBy <{new_node_uri}> .
+                            <{old_node_uri}> um:SUPERSEDED_BY <{new_node_uri}> .
                         }}
                         """)
 
@@ -769,18 +764,10 @@ def delete_child(child_id: str) -> None:
     """
     Hard-delete ALL triples where child is the subject,
     AND all HistoryEntry nodes belonging to this child,
-    AND all node triples for this child's nodes,
-    AND the CRI scenario + mistakes + utterances + events.
+    AND all node triples for this child's nodes.
     GDPR-compliant full erasure.
     """
     child_uri_str = _child_uri(child_id)
-
-    # 0. Delete CRI scenario first (if any) — scenario nodes use um:forChild
-    #    not um:childId, so step 3 below would miss them.
-    #    Lazy import avoids circular dependency (cri_scenario imports from us).
-    from services import cri_scenario as cri
-    if cri.scenario_exists(child_id):
-        cri.delete_scenario(child_id)
 
     # 1. Delete all child-uri triples
     sparql_update(f"""
@@ -847,118 +834,3 @@ def get_history(child_id: str, field_name: Optional[str] = None) -> list[dict]:
             "change_type": b.get("changeType", {}).get("value", "updated"),
         })
     return rows
-
-
-# ── Single-field node query ───────────────────────────────────────────────────
-
-def get_node_field_values(child_id: str, field_name: str) -> list[dict]:
-    """
-    Return all active node values for a node field, including extra_props.
-
-    Used by the GET /field/{field_name} endpoint so it returns the full
-    picture (e.g. petType + petName together), not just the primary value.
-
-    Returns a list of dicts, each with: value, extra_props, source, timestamp, session_id, node_uri.
-    Returns empty list if no active nodes exist.
-    """
-    field_def    = VALID_FIELDS[field_name]
-    rel          = field_def["relationship"]
-    node_prop    = field_def["node_property"]
-    uri          = _child_uri(child_id)
-
-    # Query all properties on all active nodes for this relationship
-    r = sparql_query(f"""
-    {_PREFIXES}
-    SELECT ?nodeUri ?prop ?val WHERE {{
-        <{uri}> um:{rel} ?nodeUri .
-        ?nodeUri um:active "true"^^xsd:string .
-        ?nodeUri ?prop ?val .
-        FILTER(?prop != rdf:type)
-    }}
-    """)
-
-    # Group by node URI
-    node_map: dict[str, dict[str, str]] = {}
-    for row in r["results"]["bindings"]:
-        n_uri    = row["nodeUri"]["value"]
-        prop_key = row["prop"]["value"].replace(UM_PREFIX, "")
-        val      = row["val"]["value"]
-        node_map.setdefault(n_uri, {})[prop_key] = val
-
-    entries = []
-    for n_uri, props in node_map.items():
-        entries.append({
-            "node_uri":    n_uri,
-            "value":       props.get(node_prop, ""),
-            "extra_props": {
-                k: v for k, v in props.items()
-                if k not in _NODE_STANDARD_PROPS
-            },
-            "source":      props.get("source", "unknown"),
-            "timestamp":   props.get("timestamp", "unknown"),
-            "session_id":  props.get("sessionId", "unknown"),
-        })
-    return entries
-
-# ── Node-field update for one of the values ───────────────────────────────────────────────────
-
-def swap_node_field_value(
-    child_id: str,
-    field_name: str,
-    old_value: str,
-    new_value: str,
-    source: str,
-    session_id: str,
-) -> None:
-    """
-    Atomically replace one value with another in a multi-value node field.
-    Logs a single clean history entry: old_value → new_value.
-    """
-    field_def    = VALID_FIELDS[field_name]
-    rel          = field_def["relationship"]
-    target_class = field_def["target_class"]
-    node_prop    = field_def["node_property"]
-    child_uri_str = _child_uri(child_id)
-
-    old_node_uri = _node_uri(target_class, child_id, old_value, field_name)
-    new_node_uri = _node_uri(target_class, child_id, new_value, field_name)
-    now          = _now_iso()
-    safe_src     = _escape_sparql_string(source)
-    safe_sess    = _escape_sparql_string(session_id)
-    safe_new_val = _escape_sparql_string(new_value)
-
-    # Verify old node exists and is active
-    old_actual = _get_node_prop_value(old_node_uri, node_prop)
-    if old_actual is None:
-        raise HTTPException(404, f"Value '{old_value}' not found for field '{field_name}'.")
-
-    # Log single clean history entry
-    _log_history(child_id, field_name, old_value, new_value, source, session_id)
-
-    # Deactivate old node
-    sparql_update(f"""
-    {_PREFIXES}
-    DELETE {{ <{child_uri_str}> um:{rel} <{old_node_uri}> }}
-    WHERE  {{ <{child_uri_str}> um:{rel} <{old_node_uri}> }};
-    DELETE {{ <{old_node_uri}> um:active ?oldActive }}
-    WHERE  {{ <{old_node_uri}> um:active ?oldActive }};
-    INSERT DATA {{
-        <{old_node_uri}> um:active "false"^^xsd:string .
-        <{old_node_uri}> um:supersededBy <{new_node_uri}> .
-    }}
-    """)
-
-    # Create new node
-    sparql_update(f"""
-    {_PREFIXES}
-    INSERT DATA {{
-        <{new_node_uri}> rdf:type um:{target_class} ;
-                         um:{node_prop} "{safe_new_val}"^^xsd:string ;
-                         um:active "true"^^xsd:string ;
-                         um:source "{safe_src}" ;
-                         um:timestamp "{now}"^^xsd:dateTime ;
-                         um:sessionId "{safe_sess}" ;
-                         um:childId "{_escape_sparql_string(child_id)}" .
-        <{child_uri_str}> um:{rel} <{new_node_uri}> .
-    }}
-    """)

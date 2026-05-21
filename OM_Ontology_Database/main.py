@@ -109,6 +109,11 @@ class FieldUpdate(BaseModel):
         }
     }
 
+class NodeValueSwap(BaseModel):
+    new_value: str
+    source: str = "child_corrected"
+    session_id: str = "unknown"
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -213,7 +218,7 @@ def get_profile(child_id: str):
 
 @app.get("/api/um/{child_id}/field/{field_name}", tags=["Read"])
 def get_field(child_id: str, field_name: str):
-    """Get a specific field value with its provenance metadata."""
+    """Get a specific field value with its provenance metadata and extra properties."""
     _validate_field_name(field_name)
     if not db.child_exists(child_id):
         raise HTTPException(404, f"Child '{child_id}' not found.")
@@ -227,11 +232,10 @@ def get_field(child_id: str, field_name: str):
         return {"status": "ok", "data": {"field": field_name, "value": val}}
 
     else:
-        node_uri = db._get_current_node_uri(child_id, field_name)
-        if node_uri is None:
+        entries = db.get_node_field_values(child_id, field_name)
+        if not entries:
             raise HTTPException(404, f"Field '{field_name}' not set for child '{child_id}'.")
-        val = db._get_node_prop_value(node_uri, field_def["node_property"])
-        return {"status": "ok", "data": {"field": field_name, "value": val, "node_uri": node_uri}}
+        return {"status": "ok", "data": {"field": field_name, "values": entries}}
 
 
 @app.get("/api/um/{child_id}/category/{category}", tags=["Read"])
@@ -380,6 +384,33 @@ def update_fields(child_id: str, update: FieldUpdate):
         "data": results,
     }
 
+@app.patch("/api/um/{child_id}/field/{field_name}/value/{old_value}",
+           tags=["Update"], dependencies=[Depends(require_api_key)])
+def swap_node_value(child_id: str, field_name: str, old_value: str, body: NodeValueSwap):
+    """
+    Replace one value with another in a multi-value node field.
+    Logs a single history entry: old_value → new_value.
+
+    Use for: "Not voetbal, I like rugby" or "Change rekenen to gym".
+    """
+    _validate_field_name(field_name)
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+    if VALID_FIELDS[field_name]["storage"] != "node":
+        raise HTTPException(400, f"Field '{field_name}' is scalar — use POST /fields to overwrite.")
+
+    db.swap_node_field_value(
+        child_id, field_name, old_value, body.new_value,
+        body.source, body.session_id,
+    )
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id, "field": field_name,
+            "old_value": old_value, "new_value": body.new_value,
+        }
+    }
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # INSPECT — history
@@ -458,6 +489,7 @@ def inspect_categorized(child_id: str):
 def delete_field(child_id: str, field_name: str):
     """
     Delete a specific field (child says 'forget this').
+    For multi-value node fields, deletes ALL values.
     Preserves history — marks deletion in HistoryEntry.
     """
     _validate_field_name(field_name)
@@ -468,11 +500,10 @@ def delete_field(child_id: str, field_name: str):
     if field_def["storage"] == "scalar":
         db.delete_scalar_field(child_id, field_name)
     else:
-        # For node fields without a specific value, delete the current active node
-        node_uri = db._get_current_node_uri(child_id, field_name)
-        if node_uri:
-            val = db._get_node_prop_value(node_uri, field_def["node_property"]) or ""
-            db.delete_node_field_value(child_id, field_name, val)
+        # Delete ALL active nodes for this field, not just one
+        entries = db.get_node_field_values(child_id, field_name)
+        for entry in entries:
+            db.delete_node_field_value(child_id, field_name, entry["value"])
 
     return {
         "status": "deleted",
@@ -563,6 +594,15 @@ def export_session(child_id: str):
         values = [e["value"] for e in entries if e.get("value")]
         if values:
             flat_current[field] = ", ".join(values)
+        # Flatten extra_props into companion columns: e.g. pets_petName
+        for entry in entries:
+            for prop_key, prop_val in entry.get("extra_props", {}).items():
+                col_name = f"{field}_{prop_key}"
+                existing = flat_current.get(col_name, "")
+                if existing:
+                    flat_current[col_name] = f"{existing}, {prop_val}"
+                else:
+                    flat_current[col_name] = prop_val
 
     # Count how many fields were changed at least once during the session
     changed_fields = {h["field"] for h in history}
