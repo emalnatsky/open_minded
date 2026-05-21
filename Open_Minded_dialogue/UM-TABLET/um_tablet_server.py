@@ -35,7 +35,7 @@ from sic_framework.services.webserver.webserver_service import (
 
 # ---------------------------------------------------------------------------config-------------------------------------------------------------------------
 
-CHILD_ID        = "Julianna_dutch"
+CHILD_ID        = "610"
 UM_API_BASE     = "http://localhost:8000"
 POLL_INTERVAL_S = 2.0
 WEB_PORT        = 8080

@@ -1,23 +1,18 @@
 """
-Export child UM session data to JSON, CSV, or XLSX.
+Export child UM session data to JSON or CSV.
 
 USAGE:
     python scripts/export_session.py child_001              # single child → JSON
     python scripts/export_session.py --all                   # all children → JSON
     python scripts/export_session.py --all --format csv      # all children → one CSV
-    python scripts/export_session.py --all --format xlsx     # all children → one XLSX
-    python scripts/export_session.py --all --format both     # all children → JSON + XLSX
+    python scripts/export_session.py --all --format both     # all children → JSON + CSV
 
-The CSV/XLSX output creates a flat table with one row per child and one column
-per UM field, suitable for opening in Excel or importing into SPSS/R.
-
-Node fields with extra_props (like pets with petName) appear as companion
-columns: e.g. "pets" → "Kat, Hond" and "pets_petName" → "donald en edgar, Rex".
+The CSV output creates a flat table with one row per child and one column per
+UM field, suitable for opening in Excel or importing into SPSS/R.
 
 PREREQUISITES:
     - The FastAPI server must be running (python main.py)
     - GraphDB must be running with the open-memory-robots repository
-    - For XLSX: pip install openpyxl
 """
 
 import sys
@@ -59,28 +54,34 @@ def export_child_json(child_id: str, output_dir: str = "data/exports") -> Path |
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FLAT TABLE EXPORT (CSV or XLSX)
+# CSV EXPORT (all children, flat table)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_flat_rows(child_ids: list[str]) -> tuple[list[str], list[dict]]:
+def export_all_csv(child_ids: list[str], output_dir: str = "data/exports") -> Path | None:
     """
-    Fetch all children and build flat rows for tabular export.
-    Returns (headers, rows).
+    Export all children's current UM values into one flat CSV file.
+    One row per child, one column per field. Multi-value node fields
+    are joined with " | " separators.
 
-    Node fields with extra_props get companion columns:
-      pets → "Kat, Hond"
-      pets_petName → "donald en edgar, Rex"
+    Does NOT include history — just current values. For history,
+    use the JSON export.
     """
+    if not child_ids:
+        print("No children to export.")
+        return None
+
+    # Fetch schema to get all field names as column headers
     schema_resp = requests.get(f"{API_URL}/api/schema", timeout=10)
     schema_resp.raise_for_status()
     all_fields = list(schema_resp.json()["data"]["fields"].keys())
 
+    # Fixed metadata columns + all UM fields
     meta_columns = ["child_id", "exposure", "age", "created_at"]
+    # Remove fields already in meta_columns to avoid duplication
     field_columns = [f for f in all_fields if f not in ("age", "exposure")]
+    headers = meta_columns + field_columns
 
     rows = []
-    extra_columns_seen = set()
-
     for child_id in child_ids:
         resp = requests.get(f"{API_URL}/api/um/{child_id}/export", timeout=30)
         if resp.status_code != 200:
@@ -101,31 +102,10 @@ def _build_flat_rows(child_ids: list[str]) -> tuple[list[str], list[dict]]:
         for field in field_columns:
             row[field] = current.get(field, "")
 
-        # Pick up companion columns from current_profile (e.g. pets_petName)
-        for key, val in current.items():
-            if key not in meta_columns and key not in field_columns:
-                row[key] = val
-                extra_columns_seen.add(key)
-
         rows.append(row)
-        populated = len([v for v in row.values() if v])
-        print(f"  {child_id}: {populated} columns populated")
+        print(f"  {child_id}: {len([v for v in row.values() if v])} columns populated")
 
-    # Build final header list: meta + fields + any extra_prop companion columns
-    extra_sorted = sorted(extra_columns_seen)
-    headers = meta_columns + field_columns + extra_sorted
-
-    return headers, rows
-
-
-def export_all_csv(child_ids: list[str], output_dir: str = "data/exports") -> Path | None:
-    """Export all children's current UM values into one flat CSV file."""
-    if not child_ids:
-        print("No children to export.")
-        return None
-
-    headers, rows = _build_flat_rows(child_ids)
-
+    # Write CSV
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -137,77 +117,6 @@ def export_all_csv(child_ids: list[str], output_dir: str = "data/exports") -> Pa
         writer.writerows(rows)
 
     print(f"\n  CSV exported: {filename} ({len(rows)} children, {len(headers)} columns)")
-    return filename
-
-
-def export_all_xlsx(child_ids: list[str], output_dir: str = "data/exports") -> Path | None:
-    """Export all children's current UM values into one formatted XLSX file."""
-    if not child_ids:
-        print("No children to export.")
-        return None
-
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    except ImportError:
-        print("ERROR: openpyxl not installed. Run: pip install openpyxl")
-        return None
-
-    headers, rows = _build_flat_rows(child_ids)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "UM Export"
-
-    # ── Header row styling ──
-    header_font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="4472C4")
-    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    thin_border = Border(
-        bottom=Side(style="thin", color="B0B0B0"),
-        right=Side(style="thin", color="E0E0E0"),
-    )
-
-    for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_align
-
-    # ── Data rows ──
-    data_font = Font(name="Arial", size=10)
-    alt_fill = PatternFill("solid", fgColor="F2F7FB")
-
-    for row_idx, row_data in enumerate(rows, 2):
-        for col_idx, header in enumerate(headers, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=row_data.get(header, ""))
-            cell.font = data_font
-            cell.border = thin_border
-            if row_idx % 2 == 0:
-                cell.fill = alt_fill
-
-    # ── Column widths (auto-fit approximation) ──
-    for col_idx, header in enumerate(headers, 1):
-        max_len = len(header)
-        for row_data in rows:
-            val = str(row_data.get(header, ""))
-            max_len = max(max_len, len(val))
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 4, 40)
-
-    # ── Freeze top row ──
-    ws.freeze_panes = "A2"
-
-    # ── Auto-filter ──
-    ws.auto_filter.ref = ws.dimensions
-
-    # ── Save ──
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = out_dir / f"all_children_export_{ts}.xlsx"
-    wb.save(str(filename))
-
-    print(f"\n  XLSX exported: {filename} ({len(rows)} children, {len(headers)} columns)")
     return filename
 
 
@@ -228,7 +137,7 @@ def get_all_child_ids() -> list[str]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Export child UM session data to JSON, CSV, and/or XLSX."
+        description="Export child UM session data to JSON and/or CSV."
     )
     parser.add_argument(
         "child_id", nargs="?",
@@ -243,8 +152,8 @@ if __name__ == "__main__":
         help="Export every child in the database"
     )
     parser.add_argument(
-        "--format", choices=["json", "csv", "xlsx", "both"], default="json",
-        help="Output format: json (detailed per-child), csv (flat table), xlsx (formatted spreadsheet), both (json + xlsx)"
+        "--format", choices=["json", "csv", "both"], default="json",
+        help="Output format: json (detailed per-child), csv (flat table), both"
     )
     args = parser.parse_args()
 
@@ -259,20 +168,16 @@ if __name__ == "__main__":
             for cid in ids:
                 export_child_json(cid, args.out)
 
-        if args.format == "csv":
+        if args.format in ("csv", "both"):
             print(f"\nExporting {len(ids)} children as CSV to {args.out}/")
             export_all_csv(ids, args.out)
-
-        if args.format in ("xlsx", "both"):
-            print(f"\nExporting {len(ids)} children as XLSX to {args.out}/")
-            export_all_xlsx(ids, args.out)
 
         print("\nDone.")
 
     elif args.child_id:
-        if args.format in ("csv", "xlsx"):
-            print(f"{args.format.upper()} format requires --all (one row per child).")
-            print("Use --format json for single child, or --all --format xlsx for all.")
+        if args.format == "csv":
+            print("CSV format requires --all (one row per child).")
+            print("Use --format json for single child, or --all --format csv for all.")
             sys.exit(1)
         export_child_json(args.child_id, args.out)
 

@@ -202,11 +202,9 @@ def _check_shacl(field_name: str, value, field_def: dict) -> Optional[str]:
     else:
         # Node field: add the relationship to a typed target node
         # This mirrors how graphdb_client._write_node() creates triples:
-        #   <child> um:hasHobby <node>
+        #   <child> um:LIKES_HOBBY <node>
         #   <node>  rdf:type       um:Hobby
         #   <node>  um:name        "voetbal"
-        #   <node>  um:active      "true"
-        #   <node>  um:childId     "child123"
         relationship = field_def["relationship"]
         target_class = field_def["target_class"]
         node_prop    = field_def["node_property"]
@@ -215,9 +213,6 @@ def _check_shacl(field_name: str, value, field_def: dict) -> Optional[str]:
         data_graph.add((child_subject, UM[relationship], node_subject))
         data_graph.add((node_subject, RDF.type, UM[target_class]))
         data_graph.add((node_subject, UM[node_prop], Literal(str(value).strip(), datatype=XSD.string)))
-        # SHACL shapes require active + childId on all UMNode subclasses
-        data_graph.add((node_subject, UM["active"], Literal("true", datatype=XSD.string)))
-        data_graph.add((node_subject, UM["childId"], Literal("validation_subject", datatype=XSD.string)))
 
     shapes_graph = Graph()
     shapes_graph.parse(SHACL_SHAPES_PATH, format="turtle")
