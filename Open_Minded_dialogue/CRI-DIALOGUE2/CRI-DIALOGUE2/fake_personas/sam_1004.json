@@ -1,0 +1,62 @@
+{
+  "child_id": 1004,
+  "child_name": "Sam",
+  "gender": "boy",
+  "exposure": "returning",
+  "condition": "C2",
+  "name": "Sam",
+  "age": "11",
+  "hobbies": "drummen, skateboarden, programmeren",
+  "hobby_fav": "programmeren",
+  "sports_enjoys": "ja",
+  "sports_fav_play": "skateboarden",
+  "books_enjoys": "ja",
+  "books_fav_title": "De waanzinnige boomhut",
+  "music_enjoys": "ja",
+  "animals_enjoys": "ja",
+  "animal_fav": "wolf",
+  "has_pet": "ja",
+  "pet_type": "hond",
+  "pet_name": "Pixel",
+  "freetime_fav": "kleine games maken",
+  "fav_food": "sushi",
+  "fav_subject": "techniek",
+  "school_strength": "programmeren",
+  "school_difficulty": "begrijpend lezen",
+  "aspiration": "game-ontwerper worden",
+  "role_model": "zijn oudere zus",
+  "interest": "robots en games",
+  "has_best_friend": "ja",
+  "script_plan": {
+    "used_fields": [
+      "name",
+      "age",
+      "hobbies",
+      "hobby_fav",
+      "freetime_fav",
+      "sports_enjoys",
+      "sports_fav_play",
+      "pet_name",
+      "pet_type",
+      "animal_fav",
+      "has_pet",
+      "fav_food"
+    ],
+    "mistakes": [
+      {
+        "id": "M1",
+        "phase": 6,
+        "field": "hobby_fav",
+        "type": "related-but-wrong",
+        "wrong_value": "drummen"
+      },
+      {
+        "id": "M2",
+        "phase": 8,
+        "field": "fav_food",
+        "type": "completely-wrong",
+        "wrong_value": "pizza"
+      }
+    ]
+  }
+}
