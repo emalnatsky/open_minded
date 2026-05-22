@@ -1,0 +1,139 @@
+{
+  "_comment": "CRI scenarios matching full walkthrough structure (v6 May 2026). Load via: python scripts/load_scenarios.py data/test_scenarios.json",
+  "_utterance_ids_reference": {
+    "part1": ["p1_hobby_bridge_comment", "p1_sport_recall", "p1_sport_open", "p1_sport_followup", "p1_music_open", "p1_music_ack", "p1_music_followup", "p1_animals_open", "p1_animals_followup", "p1_books_open", "p1_books_ack", "p1_books_followup", "p1_m1_wrong_hobby_opener", "p1_m1_followup_wrong_hobby", "p1_followup_postcorrection_true_hobby", "p1_m2_followup_wrong_food", "p1_m2_postcorrection_true_food"],
+    "part2": ["p2_fav_subject_comment_subject", "p2_subject_profile_link", "p2_m3_postcorrection_true_strength", "p2_school_wrap_after_difficulty"],
+    "part3": ["p3_future_theme_wrap", "p3_rolemodel_recall", "p3_rolemodel_ack", "p3_norolemodel_ack", "p3_m4_followup_wrong_aspiration", "p3_m4_postcorrection_reflection", "closing"]
+  },
+  "scenarios": [
+    {
+      "child_id": "test_boy_1",
+      "mistakes": [
+        {"id": "M1", "target_field": "hobby_fav", "wrong_value": "gamen", "mistake_type": "related-but-wrong", "spt_level": "orientation", "step": 4},
+        {"id": "M2", "target_field": "fav_food", "wrong_value": "spaghetti", "mistake_type": "completely-wrong", "spt_level": "orientation", "step": 6},
+        {"id": "M3", "target_field": "school_strength", "wrong_value": "taal", "mistake_type": "completely-wrong", "spt_level": "exploratory", "step": 10},
+        {"id": "M4", "target_field": "aspiration", "wrong_value": "politieagent", "mistake_type": "related-but-wrong", "spt_level": "affective", "step": 14}
+      ],
+      "utterances": [
+        {"step_id": "p1_hobby_bridge_comment", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat is echt een actieve mix: voetbal, gamen en buiten spelen. Bewegen en ontspannen, allebei."},
+        {"step_id": "p1_sport_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij zelf voetbal en zwemmen doet."},
+        {"step_id": "p1_sport_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Speel jij in een team? En welke positie vind je het leukst?"},
+        {"step_id": "p1_sport_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ben jij dan meer van de goals scoren, verdedigen, of gewoon lekker rennen?"},
+        {"step_id": "p1_m1_wrong_hobby_opener", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Gamen past daar goed bij, lekker ontspannen na het sporten. Wat voor games speel je het liefst?"},
+        {"step_id": "p1_m1_followup_wrong_hobby", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Wat is jouw allerliefste game om te spelen?"},
+        {"step_id": "p1_followup_postcorrection_true_hobby", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Oh ja, voetbal! Wat vind jij het allerleukste aan voetbal?"},
+        {"step_id": "p1_animals_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij een hond hebt die Buddy heet en een konijn dat Stamper heet. Leuke namen! Buddy klinkt als een echte vriend."},
+        {"step_id": "p1_animals_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Wat voor hond is Buddy eigenlijk? En gaat Stamper goed met hem om?"},
+        {"step_id": "p1_m2_followup_wrong_food", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Spaghetti is best lekker. Doe jij er dan kaas op of juist tomatensaus?"},
+        {"step_id": "p1_m2_postcorrection_true_food", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Shoarma en frietjes! Dat klinkt als een topcombi!"},
+        {"step_id": "p2_fav_subject_comment_subject", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Gym en rekenen, dat snap ik wel. Lekker bewegen en puzzelen met getallen."},
+        {"step_id": "p2_subject_profile_link", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat past bij jou. Jij bent sportief en houdt van actie, en bij gym en rekenen zit dat er allebei in."},
+        {"step_id": "p2_m3_postcorrection_true_strength", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Gym! Dat past echt bij jou. Wat doen jullie bij gym dat jij het leukst vindt?"},
+        {"step_id": "p2_school_wrap_after_difficulty", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Dat snap ik wel. Op school heb je vaak van die dingen die gewoon niet meteen makkelijk gaan."},
+        {"step_id": "p3_future_theme_wrap", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Later voelt soms nog ver weg, maar het is leuk om erover na te denken."},
+        {"step_id": "p3_rolemodel_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet nog dat je vader voor jou iemand is naar wie je echt opkijkt."},
+        {"step_id": "p3_rolemodel_ack", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Dat klinkt als iemand die echt belangrijk voor je is."},
+        {"step_id": "p3_m4_followup_wrong_aspiration", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Politieagent is een stoer beroep. Wat lijkt jou daar dan zo leuk aan?"},
+        {"step_id": "p3_m4_postcorrection_reflection", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Brandweerman! Jij houdt van actie en je bent sportief, en je wilt mensen helpen. Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?"},
+        {"step_id": "closing", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Het was heel leuk om met je te kletsen! Veel plezier met voetbal en met Buddy. Tot de volgende keer!"}
+      ]
+    },
+    {
+      "child_id": "test_girl_1",
+      "mistakes": [
+        {"id": "M1", "target_field": "hobby_fav", "wrong_value": "dansen", "mistake_type": "completely-wrong", "spt_level": "orientation", "step": 4},
+        {"id": "M2", "target_field": "fav_food", "wrong_value": "broccoli", "mistake_type": "completely-wrong", "spt_level": "orientation", "step": 6},
+        {"id": "M3", "target_field": "school_strength", "wrong_value": "rekenen", "mistake_type": "completely-wrong", "spt_level": "exploratory", "step": 10},
+        {"id": "M4", "target_field": "aspiration", "wrong_value": "piloot", "mistake_type": "completely-wrong", "spt_level": "affective", "step": 14}
+      ],
+      "utterances": [
+        {"step_id": "p1_hobby_bridge_comment", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Lezen, tekenen en piano spelen. Dat zijn echt creatieve hobby's, alledrie op hun eigen manier."},
+        {"step_id": "p1_music_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij piano speelt. Wat vind jij daar het leukste aan?"},
+        {"step_id": "p1_music_ack", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Piano heeft iets moois, het klinkt alsof je echt in de muziek zit."},
+        {"step_id": "p1_music_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Speel jij dan meer rustige liedjes of juist snelle, vrolijke stukken?"},
+        {"step_id": "p1_m1_wrong_hobby_opener", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dansen past daar ook bij, lekker bewegen op muziek. Wat voor dans vind jij het leukst?"},
+        {"step_id": "p1_m1_followup_wrong_hobby", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Dans je dan ook op school, of alleen thuis of bij een club?"},
+        {"step_id": "p1_followup_postcorrection_true_hobby", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Lezen! Dat snap ik helemaal. Wat lees je op dit moment?"},
+        {"step_id": "p1_animals_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij een kat hebt die Luna heet. Dat vind ik echt een mooie naam. Luna klinkt alsof ze stiekem de baas is thuis."},
+        {"step_id": "p1_animals_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Wat voor kat is Luna eigenlijk? Is ze lief of juist een beetje eigenwijs?"},
+        {"step_id": "p1_m2_followup_wrong_food", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Broccoli is best gezond! Eet je het dan het liefst gekookt of in een ovenschotel?"},
+        {"step_id": "p1_m2_postcorrection_true_food", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Pannenkoeken! Yum! Met suiker, stroop of toch met kaas?"},
+        {"step_id": "p2_fav_subject_comment_subject", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik trouwens wel. Met taal kun je verhalen maken, grapjes bedenken, en van alles vertellen."},
+        {"step_id": "p2_subject_profile_link", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat past bij jou. Jij houdt van lezen en tekenen en dieren, en met taal kun je daar ook weer over schrijven of iets bij verzinnen."},
+        {"step_id": "p2_m3_postcorrection_true_strength", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Taal en lezen, natuurlijk! Wat vind jij het allerleukste aan taal?"},
+        {"step_id": "p2_school_wrap_after_difficulty", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Dat snap ik wel. Op school heb je vaak van die dingen die gewoon niet meteen blijven hangen."},
+        {"step_id": "p3_future_theme_wrap", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Later voelt soms best spannend, maar ook een beetje leuk om over na te denken."},
+        {"step_id": "p3_rolemodel_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet nog dat je juf en Roald Dahl voor jou mensen zijn naar wie je echt opkijkt."},
+        {"step_id": "p3_rolemodel_ack", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Je juf helpt jou elke dag, en Roald Dahl schreef de mooiste verhalen. Allebei bijzonder."},
+        {"step_id": "p3_m4_followup_wrong_aspiration", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Piloot is een avontuurlijk beroep. Wat lijkt jou daar dan zo leuk aan?"},
+        {"step_id": "p3_m4_postcorrection_reflection", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Dierenarts of schrijver! Jij houdt van dieren en natuur, je bent goed in taal, en je leest heel graag. Dat past echt allemaal bij elkaar. Wat lijkt jou daar het mooiste aan?"},
+        {"step_id": "closing", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik vond het heel gezellig! Veel leesplezier en doe Luna de groeten van mij. Doei!"}
+      ]
+    },
+    {
+      "child_id": "test_boy_2",
+      "mistakes": [
+        {"id": "M1", "target_field": "hobby_fav", "wrong_value": "Lego bouwen", "mistake_type": "related-but-wrong", "spt_level": "orientation", "step": 4},
+        {"id": "M2", "target_field": "fav_food", "wrong_value": "boerenkool", "mistake_type": "completely-wrong", "spt_level": "orientation", "step": 6},
+        {"id": "M3", "target_field": "school_strength", "wrong_value": "taal", "mistake_type": "completely-wrong", "spt_level": "exploratory", "step": 10},
+        {"id": "M4", "target_field": "aspiration", "wrong_value": "leraar", "mistake_type": "completely-wrong", "spt_level": "affective", "step": 14}
+      ],
+      "utterances": [
+        {"step_id": "p1_hobby_bridge_comment", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Gamen en Lego bouwen, dat is een leuke combinatie. Allebei dingen waar je lekker mee bezig kunt zijn."},
+        {"step_id": "p1_sport_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij zelf hockey speelt."},
+        {"step_id": "p1_sport_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Speel jij dan in een team of meer gewoon voor de lol?"},
+        {"step_id": "p1_sport_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ben jij dan meer van verdedigen, aanvallen, of gewoon lekker meedoen?"},
+        {"step_id": "p1_m1_wrong_hobby_opener", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Lego bouwen is ook echt gaaf. Je kunt er van alles mee maken. Wat bouw jij het liefst?"},
+        {"step_id": "p1_m1_followup_wrong_hobby", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Heb je dan ook die grote sets, of bouw je liever je eigen dingen?"},
+        {"step_id": "p1_followup_postcorrection_true_hobby", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Gamen! Welke games speel je het liefst?"},
+        {"step_id": "p1_books_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij strips leest. Dat vind ik ook leuk, strips hebben altijd van die coole tekeningen."},
+        {"step_id": "p1_books_ack", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Strips zijn snel en grappig, en je hoeft niet heel lang te lezen."},
+        {"step_id": "p1_books_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Lees je dan meer grappige strips of juist spannende?"},
+        {"step_id": "p1_m2_followup_wrong_food", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Boerenkool? Echt? Met worst erbij of gewoon zonder?"},
+        {"step_id": "p1_m2_postcorrection_true_food", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Pasta en pizza! Allebei lekker, een goede smaak heb je."},
+        {"step_id": "p2_fav_subject_comment_subject", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Rekenen, dat snap ik wel. Lekker puzzelen met getallen, dat heeft iets."},
+        {"step_id": "p2_subject_profile_link", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat past bij jou. Jij houdt van gamen en Lego, en daar zit ook veel logisch nadenken in, net als bij rekenen."},
+        {"step_id": "p2_m3_postcorrection_true_strength", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Rekenen en gym! Wat vind jij het leukste aan rekenen?"},
+        {"step_id": "p2_school_wrap_after_difficulty", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Dat snap ik wel. Sommige dingen op school gaan gewoon wat minder vanzelf."},
+        {"step_id": "p3_future_theme_wrap", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Later is soms nog best ver weg, maar het is leuk om erover na te denken."},
+        {"step_id": "p3_rolemodel_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet nog dat je grote broer voor jou iemand is naar wie je echt opkijkt."},
+        {"step_id": "p3_rolemodel_ack", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Een grote broer die coole dingen doet, daar kun je veel van leren."},
+        {"step_id": "p3_m4_followup_wrong_aspiration", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Leraar is een leuk beroep. Wat lijkt jou daar dan zo leuk aan?"},
+        {"step_id": "p3_m4_postcorrection_reflection", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Game maker! Jij houdt van gamen en Minecraft, en je bent goed in rekenen. Dat past echt bij elkaar. Wat voor games zou jij dan willen maken?"},
+        {"step_id": "closing", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Bedankt voor het kletsen! Veel plezier met gamen en hockey. Tot snel!"}
+      ]
+    },
+    {
+      "child_id": "test_girl_2",
+      "mistakes": [
+        {"id": "M1", "target_field": "hobby_fav", "wrong_value": "zingen", "mistake_type": "related-but-wrong", "spt_level": "orientation", "step": 4},
+        {"id": "M2", "target_field": "fav_food", "wrong_value": "stamppot", "mistake_type": "completely-wrong", "spt_level": "orientation", "step": 6},
+        {"id": "M3", "target_field": "school_strength", "wrong_value": "rekenen", "mistake_type": "completely-wrong", "spt_level": "exploratory", "step": 10},
+        {"id": "M4", "target_field": "aspiration", "wrong_value": "dokter", "mistake_type": "completely-wrong", "spt_level": "affective", "step": 14}
+      ],
+      "utterances": [
+        {"step_id": "p1_hobby_bridge_comment", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dansen, schilderen, turnen en zingen. Jij bent echt creatief en sportief tegelijk!"},
+        {"step_id": "p1_sport_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij zelf turnt."},
+        {"step_id": "p1_sport_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Doe jij turnen bij een club? En wat vind je het allerleukst om te doen?"},
+        {"step_id": "p1_sport_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ben jij dan meer van de sprong, de brug, of de vloer? Of vind je alles leuk?"},
+        {"step_id": "p1_m1_wrong_hobby_opener", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Zingen past daar goed bij, lekker creatief bezig zijn. Zing je dan ook liedjes die je zelf verzint?"},
+        {"step_id": "p1_m1_followup_wrong_hobby", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Zing je dan het liefst alleen, of samen met anderen?"},
+        {"step_id": "p1_followup_postcorrection_true_hobby", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Dansen! Wat voor dans doe je? Ballet, hiphop, of iets anders?"},
+        {"step_id": "p1_animals_open", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet ook nog dat jij een hond hebt die Bella heet, een kat die Milo heet, en een hamster die Pluisje heet. Drie huisdieren! Gaan ze ook goed met elkaar om?"},
+        {"step_id": "p1_animals_followup", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Wie van de drie is het liefst? En wie is het stoutst?"},
+        {"step_id": "p1_m2_followup_wrong_food", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Stamppot is typisch Nederlands! Met rookworst erbij of zonder?"},
+        {"step_id": "p1_m2_postcorrection_true_food", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Sushi en aardbeien! Wat een bijzondere combinatie, allebei lekker!"},
+        {"step_id": "p2_fav_subject_comment_subject", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Drama en handvaardigheid, dat snap ik helemaal. Daar kun je echt iets moois van maken."},
+        {"step_id": "p2_subject_profile_link", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat past bij jou. Jij houdt van dansen en schilderen en kunst, en bij drama en handvaardigheid komt dat allemaal samen."},
+        {"step_id": "p2_m3_postcorrection_true_strength", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Drama en Engels! Doe je ook wel eens toneelstukjes in het Engels?"},
+        {"step_id": "p2_school_wrap_after_difficulty", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Dat snap ik wel. Sommige dingen voelen gewoon lastiger, dat is heel normaal."},
+        {"step_id": "p3_future_theme_wrap", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Jij hebt al zoveel leuke dingen die je doet, later wordt vast ook mooi."},
+        {"step_id": "p3_rolemodel_recall", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Ik weet nog dat je moeder en Beyonce voor jou mensen zijn naar wie je echt opkijkt."},
+        {"step_id": "p3_rolemodel_ack", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Dat snap ik wel. Je moeder is er altijd voor je, en Beyonce is echt een ster. Allebei op hun eigen manier bijzonder."},
+        {"step_id": "p3_m4_followup_wrong_aspiration", "layer": "L2-pregen", "branch": "not_corrected", "text": "[STUB] Dokter is een heel belangrijk beroep. Wat lijkt jou daar dan zo leuk aan?"},
+        {"step_id": "p3_m4_postcorrection_reflection", "layer": "L2-pregen", "branch": "corrected", "text": "[STUB] Danseres of kunstenaar! Jij houdt van dansen, schilderen en kunst, en je bent goed in drama en Engels. Dat past echt prachtig bij elkaar. Welke past het beste bij jou?"},
+        {"step_id": "closing", "layer": "L2-pregen", "branch": "default", "text": "[STUB] Wat heb jij veel leuke plannen! Doe Bella, Milo en Pluisje de groeten van mij. Doei!"}
+      ]
+    }
+  ]
+}
