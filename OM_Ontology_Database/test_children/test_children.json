@@ -1,0 +1,178 @@
+{
+  "_comment": "4 test children for frontend and CRI testing. Load via API, not Qualtrics loader.",
+  "_usage": "Run: python scripts/load_test_children.py data/test_children.json",
+
+  "children": [
+    {
+      "child_id": "test_boy_1",
+      "age": 9,
+      "scalars": {
+        "sports_enjoys": "ja",
+        "sports_plays": "ja",
+        "sports_talk": "ja",
+        "sports_play_talk": "ja",
+        "music_enjoys": "een beetje",
+        "music_plays_instrument": "nee",
+        "music_talk": "nee",
+        "books_enjoys": "misschien",
+        "books_talk": "nee",
+        "has_best_friend": "ja",
+        "animals_enjoys": "ja",
+        "has_pet": "ja",
+        "animal_talk": "ja",
+        "pet_talk": "ja",
+        "hobby_talk": "ja",
+        "exposure": "new",
+        "condition": "E"
+      },
+      "node_fields": {
+        "hobbies": ["voetbal", "gamen", "buiten spelen"],
+        "hobby_fav": ["voetbal"],
+        "sports_fav": ["voetbal", "basketbal"],
+        "sports_fav_play": ["voetbal", "zwemmen"],
+        "fav_food": ["shoarma", "frietjes"],
+        "animal_fav": ["hond"],
+        "fav_subject": ["gym", "rekenen"],
+        "school_strength": ["gym"],
+        "school_difficulty": ["taal"],
+        "freetime_fav": ["buiten spelen", "gamen"],
+        "books_fav_genre": ["avontuur"],
+        "interest": ["dinosaurussen", "ruimte"],
+        "aspiration": ["brandweerman"],
+        "role_model": ["mijn vader"]
+      },
+      "pets": [
+        {"value": "Hond", "petName": "Buddy"},
+        {"value": "Konijn", "petName": "Stamper"}
+      ]
+    },
+
+    {
+      "child_id": "test_girl_1",
+      "age": 10,
+      "scalars": {
+        "sports_enjoys": "nee",
+        "sports_plays": "nee",
+        "music_enjoys": "ja",
+        "music_plays_instrument": "ja",
+        "music_talk": "ja",
+        "books_enjoys": "ja",
+        "books_talk": "ja",
+        "has_best_friend": "ja",
+        "animals_enjoys": "ja",
+        "has_pet": "ja",
+        "animal_talk": "misschien",
+        "pet_talk": "ja",
+        "hobby_talk": "ja",
+        "exposure": "returning",
+        "condition": "E"
+      },
+      "node_fields": {
+        "hobbies": ["lezen", "tekenen", "piano spelen"],
+        "hobby_fav": ["lezen"],
+        "music_instrument": ["piano"],
+        "books_fav_genre": ["fantasy", "sprookjes"],
+        "books_fav_title": ["Matilda"],
+        "fav_food": ["pannenkoeken"],
+        "animal_fav": ["kat"],
+        "fav_subject": ["taal", "drama"],
+        "school_strength": ["taal", "lezen"],
+        "school_difficulty": ["rekenen"],
+        "freetime_fav": ["lezen", "tekenen"],
+        "interest": ["dieren", "natuur"],
+        "aspiration": ["dierenarts", "schrijver"],
+        "role_model": ["mijn juf", "Roald Dahl"]
+      },
+      "pets": [
+        {"value": "Kat", "petName": "Luna"},
+        {"value": "Vis", "petName": ""}
+      ]
+    },
+
+    {
+      "child_id": "test_boy_2",
+      "age": 8,
+      "scalars": {
+        "sports_enjoys": "een beetje",
+        "sports_plays": "ja",
+        "sports_talk": "misschien",
+        "sports_play_talk": "een beetje",
+        "music_enjoys": "weet niet",
+        "music_plays_instrument": "nee",
+        "books_enjoys": "een beetje",
+        "books_talk": "misschien",
+        "has_best_friend": "ja",
+        "animals_enjoys": "misschien",
+        "has_pet": "nee",
+        "animal_talk": "weet niet",
+        "hobby_talk": "een beetje",
+        "exposure": "new",
+        "condition": "C"
+      },
+      "node_fields": {
+        "hobbies": ["gamen", "Lego bouwen"],
+        "hobby_fav": ["gamen"],
+        "sports_fav": ["hockey"],
+        "sports_fav_play": ["hockey"],
+        "fav_food": ["pasta", "pizza"],
+        "animal_fav": ["slang"],
+        "fav_subject": ["rekenen"],
+        "school_strength": ["rekenen", "gym"],
+        "school_difficulty": ["Engels"],
+        "freetime_fav": ["gamen", "YouTube kijken"],
+        "books_fav_genre": ["strips"],
+        "interest": ["Minecraft"],
+        "aspiration": ["game maker"],
+        "role_model": ["mijn grote broer"]
+      },
+      "pets": []
+    },
+
+    {
+      "child_id": "test_girl_2",
+      "age": 11,
+      "scalars": {
+        "sports_enjoys": "ja",
+        "sports_plays": "ja",
+        "sports_talk": "ja",
+        "sports_play_talk": "ja",
+        "music_enjoys": "ja",
+        "music_plays_instrument": "ja",
+        "music_talk": "een beetje",
+        "books_enjoys": "ja",
+        "books_talk": "misschien",
+        "has_best_friend": "liever niet zeggen",
+        "animals_enjoys": "ja",
+        "has_pet": "ja",
+        "animal_talk": "ja",
+        "pet_talk": "ja",
+        "hobby_talk": "ja",
+        "exposure": "returning",
+        "condition": "C"
+      },
+      "node_fields": {
+        "hobbies": ["dansen", "schilderen", "turnen", "zingen"],
+        "hobby_fav": ["dansen"],
+        "sports_fav": ["turnen", "tennis"],
+        "sports_fav_play": ["turnen"],
+        "music_instrument": ["gitaar", "ukulele"],
+        "books_fav_genre": ["avontuur", "fantasy", "dieren"],
+        "books_fav_title": ["De Kleine Prins"],
+        "fav_food": ["sushi", "aardbeien"],
+        "animal_fav": ["paard", "dolfijn"],
+        "fav_subject": ["drama", "handvaardigheid"],
+        "school_strength": ["drama", "Engels"],
+        "school_difficulty": ["rekenen", "aardrijkskunde"],
+        "freetime_fav": ["dansen", "schilderen", "met vriendinnen spelen"],
+        "interest": ["kunst", "reizen"],
+        "aspiration": ["danseres", "kunstenaar"],
+        "role_model": ["mijn moeder", "Beyonce"]
+      },
+      "pets": [
+        {"value": "Hond", "petName": "Bella"},
+        {"value": "Kat", "petName": "Milo"},
+        {"value": "Hamster", "petName": "Pluisje"}
+      ]
+    }
+  ]
+}
