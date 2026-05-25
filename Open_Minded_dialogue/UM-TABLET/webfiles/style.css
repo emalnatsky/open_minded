@@ -75,10 +75,10 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
    ============================================================ */
 .welcome-book {
   position: absolute;
-  right: 210px;
+  right: 400px;
   top: 48%;
   transform: translateY(-50%);
-  width: 880px; height: 980px;
+  width: 480px; height: 580px;
   z-index: 3;
   cursor: pointer;
   animation: bookFloat 3s ease-in-out infinite;
@@ -93,16 +93,18 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
 .welcome-book:hover .welcome-book-img,
 .welcome-book:active .welcome-book-img { transform: scale(1.06); }
 
-/* Title overlaid on the book cover — "Het Geheugenboek van [name]" */
+/* Title overlaid on the book cover */
 .welcome-book-title {
   position: absolute;
-  top: 45%;
-  left: 54%;
-  transform: translate(-50%, -50%);
+  top: 26%;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 3;
   font-family: 'Press Start 2P', monospace;
+  font-size: 30px;
   color: #fff;
   text-align: center;
+  line-height: 1.5;
   letter-spacing: 1px;
   text-shadow:
     3px 3px 0 #3d2560,
@@ -111,40 +113,7 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
     -2px 2px 0 #3d2560,
     0 6px 12px rgba(0,0,0,0.4);
   pointer-events: none;
-  width: 75%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-}
-.welcome-book-sub {
-  font-size: 26px;
-  line-height: 1.2;
-}
-.welcome-book-van {
-  font-size: 20px;
-  opacity: 0.9;
-  line-height: 1.2;
-}
-.welcome-book-name {
-  font-size: 42px;
-  line-height: 1.2;
-  word-break: break-word;
-  max-width: 100%;
-}
-
-/* Hide "van [name]" until the first broadcast supplies the real name.
-   visibility:hidden keeps the layout slot reserved (no shift on reveal). */
-#welcomeBookTitle .welcome-book-van,
-#welcomeBookTitle .welcome-book-name {
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 350ms ease;
-}
-#welcomeBookTitle.name-ready .welcome-book-van,
-#welcomeBookTitle.name-ready .welcome-book-name {
-  visibility: visible;
-  opacity: 1;
+  width: 70%;
 }
 
 .book-glow {
@@ -415,7 +384,6 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
   color: var(--ink);
   letter-spacing: 0.3px;
   flex-shrink: 0;
-  min-width: 85px;
 }
 .toc-dots {
   flex: 1;
@@ -427,10 +395,6 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
   position: relative;
   top: 4px;
 }
-#tocListRight .toc-dots {
-  max-width: 110px;
-}
-
 .toc-page {
   font-family: 'Press Start 2P', monospace;
   font-size: 11px;
@@ -441,28 +405,6 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
 @keyframes tocItemIn {
   from { opacity: 0; transform: translateX(-20px); }
   to   { opacity: 1; transform: translateX(0); }
-}
-
-/* ── Phase-gated locking ─────────────────────────────────────────── */
-.toc-item .toc-lock-icon {
-  font-size: 16px;
-  display: none;   /* hidden when unlocked */
-  flex-shrink: 0;
-}
-.toc-item.toc-locked {
-  cursor: default;
-  opacity: 0.38;
-  filter: grayscale(80%);
-}
-.toc-item.toc-locked:hover,
-.toc-item.toc-locked:active {
-  background: none;
-  border-color: transparent;
-  box-shadow: none;
-  transform: none;
-}
-.toc-item.toc-locked .toc-lock-icon {
-  display: inline;  /* show padlock when locked */
 }
 
 /* Right decoration page */
@@ -592,11 +534,6 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
   padding-left: 90px;       /* push everything right */
 }
 
-#screen-category .right-page-title {
-  max-width: 300px;
-  margin-left: 60px;
-  margin-top: -90px;    
-}
 
 .cat-header {
   text-align: center;
@@ -772,7 +709,7 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
   white-space: nowrap;
   border-right: 3px solid var(--pill-color);
   max-width: 0;
-  animation: typeIn 1200ms steps(24, end) forwards, caretBlink 400ms steps(2) 6;
+  animation: typeIn 600ms steps(24, end) forwards, caretBlink 350ms steps(2) 4;
 }
 @keyframes typeIn {
   from { max-width: 0; }
@@ -783,48 +720,32 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
 }
 
 /* ============================================================
-   Eraser animation — the eraser wipes text away as it passes
-   2.5s duration so the child can watch it happen.
-
-   How it works:
-     - The pill gets overflow:hidden + position:relative
-     - ::after is the pink eraser sprite (wobbles up/down)
-     - ::before is a solid cover rectangle the same color as the
-       pill background. It follows the eraser's horizontal position
-       exactly, so text vanishes *under* it in real-time.
+   Eraser animation — left-to-right wipe of old value
    ============================================================ */
 .pill.pill-erasing {
   position: relative;
   pointer-events: none;
-  overflow: hidden;
+}
+.pill.pill-erasing .pill-label,
+.pill.pill-erasing .pill-value {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 0%, #000 100%);
+          mask-image: linear-gradient(to right, transparent 0%, #000 0%, #000 100%);
+  -webkit-mask-size: 200% 100%;
+          mask-size: 200% 100%;
+  -webkit-mask-position: 0% 0%;
+          mask-position: 0% 0%;
+  animation: eraseWipe 800ms ease-in forwards;
+}
+@keyframes eraseWipe {
+  0%   { -webkit-mask-position: 0% 0%;   mask-position: 0% 0%; }
+  100% { -webkit-mask-position: -100% 0%; mask-position: -100% 0%; }
 }
 
-/* ── Cover that wipes the text away ────────────────────────────
-   Same horizontal left animation as the eraser, but it's a wide
-   rectangle that fills everything to its right. As it moves from
-   left:-100% to left:0%, it progressively covers the pill text. */
-.pill.pill-erasing::before {
-  content: '';
-  position: absolute;
-  top: -2px; bottom: -2px;
-  /* The cover is as wide as the pill; starts fully off to the left */
-  width: 100%;
-  left: -100%;
-  background: var(--paper-cream);    /* match the book page background */
-  z-index: 3;
-  animation: eraseCover 2500ms linear forwards;
-}
-@keyframes eraseCover {
-  0%   { left: -100%; }
-  100% { left: 0%; }
-}
-
-/* ── The pink eraser sprite ────────────────────────────────────
-   Sits on top of the cover, slaloms up and down like real erasing */
+/* the rubber eraser sprite that travels across */
 .pill.pill-erasing::after {
   content: '';
   position: absolute;
-  top: 2px; bottom: 2px;
+  top: 4px; bottom: 4px;
   width: 30px;
   background:
     linear-gradient(180deg,
@@ -836,27 +757,40 @@ img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rende
   border: 3px solid var(--ink);
   box-shadow: 3px 3px 0 0 rgba(0,0,0,0.3), inset -3px 0 0 rgba(0,0,0,0.15);
   left: -36px;
-  animation: eraserMove 2500ms linear forwards;
+  animation: eraserMove 800ms ease-in forwards;
   z-index: 5;
 }
 @keyframes eraserMove {
-  /* Horizontal: -36px → 100%+6px, linear, synced with the cover.
-     Vertical: slalom wobble ±8px with rotation for that real-erasing feel. */
-  0%   { left: -36px;           transform: rotate(-8deg) translateY(0); }
-  7%   { left: 4%;              transform: rotate(10deg)  translateY(-8px); }
-  14%  { left: 11%;             transform: rotate(-10deg) translateY(9px); }
-  21%  { left: 18%;             transform: rotate(8deg)   translateY(-7px); }
-  28%  { left: 25%;             transform: rotate(-8deg)  translateY(8px); }
-  35%  { left: 32%;             transform: rotate(10deg)  translateY(-9px); }
-  42%  { left: 39%;             transform: rotate(-10deg) translateY(7px); }
-  50%  { left: 47%;             transform: rotate(8deg)   translateY(-8px); }
-  57%  { left: 54%;             transform: rotate(-8deg)  translateY(9px); }
-  64%  { left: 61%;             transform: rotate(10deg)  translateY(-7px); }
-  71%  { left: 68%;             transform: rotate(-10deg) translateY(8px); }
-  78%  { left: 75%;             transform: rotate(8deg)   translateY(-9px); }
-  85%  { left: 82%;             transform: rotate(-8deg)  translateY(7px); }
-  92%  { left: 90%;             transform: rotate(10deg)  translateY(-5px); }
+  0%   { left: -36px; transform: rotate(-6deg) translateY(0); }
+  20%  { transform: rotate(-6deg) translateY(-2px); }
+  40%  { transform: rotate(6deg)  translateY(2px); }
+  60%  { transform: rotate(-6deg) translateY(-2px); }
+  80%  { transform: rotate(6deg)  translateY(2px); }
   100% { left: calc(100% + 6px); transform: rotate(6deg) translateY(0); }
+}
+
+/* eraser shavings — small flecks that puff out behind eraser */
+.pill.pill-erasing::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 6px; height: 6px;
+  background: var(--ink-soft);
+  border-radius: 50%;
+  left: -36px;
+  box-shadow:
+    -10px -8px 0 -1px var(--ink-soft),
+    -16px 4px 0 -2px var(--ink-soft),
+    -22px -2px 0 -1px var(--ink-soft),
+    -8px 8px 0 -2px var(--ink-soft);
+  animation: shavings 800ms ease-in forwards;
+  opacity: 0;
+  z-index: 4;
+}
+@keyframes shavings {
+  0%   { opacity: 0; left: -36px; }
+  15%  { opacity: 0.6; }
+  100% { opacity: 0; left: calc(100% + 6px); }
 }
 
 /* "first-write" pills (no prior value) skip the eraser */
