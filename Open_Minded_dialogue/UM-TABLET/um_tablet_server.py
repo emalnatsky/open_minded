@@ -17,11 +17,13 @@ BUT we need for it:
 """
 
 import os
+import json
 import socket
 import threading
 import time
 import webbrowser
 import urllib.request
+import csv
 
 import requests as http
 
@@ -35,11 +37,13 @@ from sic_framework.services.webserver.webserver_service import (
 
 # ---------------------------------------------------------------------------config-------------------------------------------------------------------------
 
-CHILD_ID        = "610"
+CHILD_ID        = "3"
 UM_API_BASE     = "http://localhost:8000"
 POLL_INTERVAL_S = 2.0
 WEB_PORT        = 8080
 API_TIMEOUT_S   = 3.0
+CONFIG_PATH     = "../conf/test_config.txt"   # roster: id;Naam;gender;past_exposure;condition;Researcher
+SESSION_STATE_PATH = "../session_state.json"  # written by the dialogue (CRI-BRANCH-BASIC4_0.py)
 
 
 class UMTabletServer(SICApplication):
@@ -55,6 +59,7 @@ class UMTabletServer(SICApplication):
         self._child_id = CHILD_ID
         self.set_log_level(sic_logging.INFO)
         self.load_env("../conf/.env")
+        self._children = self._load_children_config()
         self.setup()
 
     # ------------------------------------------------------------------setup---------------------------------------------------------------
@@ -81,6 +86,65 @@ class UMTabletServer(SICApplication):
         self.logger.info("Setup complete.")
 
     # ------------------------------------------------------------------helpers----------------------------------------------------------------
+
+    def _load_children_config(self) -> dict:
+        """
+        Load child roster from CONFIG_PATH.
+
+        File format (semicolon-separated):
+            id;Naam;gender;past_exposure;condition;Researcher
+            700;Helena;girl;0;C;
+            ...
+
+        Returns a dict keyed by id (string) mapping to {name, gender, past_exposure, condition}.
+        Returns an empty dict on any error (server still runs, but no name on book).
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, CONFIG_PATH)
+        children = {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter=";")
+                for row in reader:
+                    cid = (row.get("id") or "").strip()
+                    if not cid:
+                        continue
+                    past = (row.get("past_exposure") or "0").strip()
+                    children[cid] = {
+                        "name":          (row.get("Naam") or "").strip(),
+                        "gender":        (row.get("gender") or "").strip(),
+                        "past_exposure": int(past) if past.isdigit() else 0,
+                        "condition":     (row.get("condition") or "").strip(),
+                    }
+            self.logger.info("Loaded %d children from roster (%s).", len(children), path)
+        except FileNotFoundError:
+            self.logger.warning("Roster file not found at %s — running without it.", path)
+        except Exception as e:
+            self.logger.warning("Failed to load roster: %s", e)
+        return children
+
+    def _current_child(self) -> dict:
+        """Lookup info for the currently-active child id. Returns {} if not found."""
+        return self._children.get(str(self._child_id), {})
+
+    def _read_session_state(self) -> dict:
+        """
+        Read the small JSON file written by the dialogue (CRI-BRANCH-BASIC4_0.py)
+        whenever a new turn starts. Returns {} if the file isn't there yet
+        (dialogue hasn't started, or first turn hasn't fired).
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, SESSION_STATE_PATH)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if isinstance(state, dict):
+                return state
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self.logger.warning("Could not read session_state.json: %s", e)
+        return {}
 
     def _check_api(self):
         time.sleep(1.0)
@@ -186,11 +250,18 @@ class UMTabletServer(SICApplication):
 
     def _broadcast_um(self, um: dict):
         try:
+            info  = self._current_child()
+            state = self._read_session_state()
             self.webserver.send_message(
                 WebInfoMessage("um_update", {
-                    "child_id":  self._child_id,
-                    "fields":    um,
-                    "timestamp": time.strftime("%H:%M:%S"),
+                    "child_id":            self._child_id,
+                    "child_name":          info.get("name") or str(self._child_id),
+                    "condition":           info.get("condition", ""),
+                    "fields":              um,
+                    "unlocked_categories": state.get("unlocked_categories", []),
+                    "current_phase":       state.get("current_phase"),
+                    "current_turn_name":   state.get("current_turn_name"),
+                    "timestamp":           time.strftime("%H:%M:%S"),
                 })
             )
         except Exception as e:
