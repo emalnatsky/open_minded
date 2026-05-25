@@ -129,7 +129,7 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": None,
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
+        "is_talk_preference": False,              # ← consent/preference field
     },
 
     # ══════════════════════════════════════════════════════════════
@@ -249,7 +249,7 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "nee",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
+        "is_talk_preference": False,              # ← consent/preference field
     },
 
     "sports_play_talk": {
@@ -270,7 +270,7 @@ VALID_FIELDS: dict[str, dict] = {
         "declined_sentinel": "nee",
         "mistake_priority": None,
         "stored_cleanly": True,
-        "is_talk_preference": True,              # ← consent/preference field
+        "is_talk_preference": False,              # ← consent/preference field
     },
 
     # ══════════════════════════════════════════════════════════════

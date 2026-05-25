@@ -14,13 +14,57 @@ const CATEGORIES = {
   dieren:     { label: "Dieren",   icon: "🐾", iconImg: "/static/images/icons/dieren.png",      color: "#558b2f" },
   eten:       { label: "Eten",     icon: "🍕", iconImg: "/static/images/icons/eten.png",        color: "#c62828" },
   school:     { label: "School",   icon: "📖", iconImg: "/static/images/icons/school.png",      color: "#37474f" },
-  aspiratie:  { label: "Dromen",   icon: "⭐", iconImg: "/static/images/icons/aspiration.png",  color: "#f57f17" },
+  aspiratie:  { label: "Inspiratie",   icon: "⭐", iconImg: "/static/images/icons/aspiration.png",  color: "#f57f17" },
 };
 
 window.liveUM = {};
 let liveUM = window.liveUM;
 let currentCategory = null;
 let currentScreen = "welcome";
+
+// ── Phase-gated category locking ─────────────────────────────────────
+// Set by the dialogue via session_state.json → um_update broadcast.
+// Empty set = all categories locked (session not yet started).
+// When the dialogue mentions a category, it's added here.
+let unlockedCategories = new Set();
+
+function isCategoryUnlocked(catKey) {
+  // If no state received yet, lock everything
+  if (unlockedCategories.size === 0) return false;
+  return unlockedCategories.has(catKey);
+}
+
+function applyLocking() {
+  // Re-render TOC lock state without full rebuild
+  document.querySelectorAll(".toc-item").forEach(li => {
+    const key = li.dataset.catKey;
+    if (!key) return;
+    const unlocked = isCategoryUnlocked(key);
+    li.classList.toggle("toc-locked", !unlocked);
+    li.setAttribute("aria-disabled", unlocked ? "false" : "true");
+  });
+}
+
+// ── Child identity (populated by um_update broadcasts) ───────────────
+let currentChildName = "";
+
+function setChildName(name) {
+  const clean = (name || "").trim();
+  if (!clean || clean === currentChildName) return;
+  currentChildName = clean;
+
+  // Update the closed-book cover on the welcome screen
+  const nameEl = document.getElementById("welcomeBookName");
+  if (nameEl) nameEl.textContent = clean;
+
+  // Reveal the "van [name]" portion now that we have a real name
+  const titleBlock = document.getElementById("welcomeBookTitle");
+  if (titleBlock) titleBlock.classList.add("name-ready");
+
+  // Accessibility label
+  const book = document.getElementById("welcomeBook");
+  if (book) book.setAttribute("aria-label", `Open ${clean}'s geheugenboek`);
+}
 
 // ── Label-to-key mapping (DO NOT CHANGE) ─────────────────────────────
 const CAT_LABEL_TO_KEY = {
@@ -89,9 +133,34 @@ const FIELD_LABELS = {
   role_model:             "Voorbeeld",
   age:                    "Leeftijd",
   name:                   "Naam",
+  exposure:               "Hebben we al gepraat?",
 };
 function fieldLabel(key) {
   return FIELD_LABELS[key] || key.replace(/_/g, " ");
+}
+
+// Fields that should never be displayed on the tablet
+const HIDDEN_FIELDS = new Set([
+  "hobby_talk",
+  "sports_talk",
+  "sports_play_talk",
+  "music_talk",
+  "books_talk",
+  "animal_talk",
+  "pet_talk",
+]);
+
+const FIELD_VALUE_LABELS = {
+  exposure: {
+    new:      "Het is onze eerste keer",
+    returning: "We hebben al gepraat",
+  },
+};
+
+function fieldValue(field, value) {
+  const mapped = FIELD_VALUE_LABELS[field];
+  if (mapped && mapped[value] !== undefined) return mapped[value];
+  return value;
 }
 
 // =====================================================================
@@ -145,14 +214,20 @@ function buildTOC() {
   entries.forEach(([key, cat], i) => {
     const li = document.createElement("li");
     li.className = "toc-item";
+    li.dataset.catKey = key;
+    if (!isCategoryUnlocked(key)) li.classList.add("toc-locked");
     li.style.animationDelay = (0.4 + i * 0.05) + "s";
     li.innerHTML = `
       <span class="toc-icon">${cat.iconImg ? `<img src="${cat.iconImg}" alt="" />` : cat.icon}</span>
       <span class="toc-label">${cat.label}</span>
+      <span class="toc-lock-icon">🔒</span>
       <span class="toc-dots"></span>
       <span class="toc-page">p.${i + 1}</span>
     `;
-    li.addEventListener("click", () => openCategory(key));
+    li.addEventListener("click", () => {
+      if (!isCategoryUnlocked(key)) return;  // locked — ignore tap
+      openCategory(key);
+    });
     (i < 4 ? left : right).appendChild(li);
   });
 }
@@ -183,7 +258,7 @@ function openCategory(catKey) {
   // document.getElementById("catPageNum").textContent = String(idx + 1).padStart(2, "0");
 
   // Bubble
-  document.getElementById("catBubbleText").textContent = cat.label;
+  document.getElementById("catBubbleText").textContent = "Kijk wat ik weet!";
 
   // Render pills (initial — no eraser, just write-in)
   renderPills(catKey, /*initial*/ true);
@@ -198,7 +273,7 @@ function renderPills(catKey, initial) {
   const data  = liveUM[catKey] || {};
 
   const entries = Object.entries(data).filter(
-    ([, v]) => v && v.value && v.value !== "—"
+    ([field, v]) => !HIDDEN_FIELDS.has(field) && v && v.value && v.value !== "—"
   );
 
   document.getElementById("catCount").textContent = entries.length;
@@ -231,7 +306,7 @@ function buildPill(field, value, color) {
   pill.style.setProperty("--pill-color", dark);
   pill.innerHTML = `
     <span class="pill-label">${fieldLabel(field)}</span>
-    <span class="pill-value">${escapeHTML(value)}</span>
+    <span class="pill-value">${escapeHTML(fieldValue(field, value))}</span>
   `;
   return pill;
 }
@@ -247,6 +322,7 @@ function applyDiffToOpenCategory(catKey, changedFields) {
   const data  = liveUM[catKey] || {};
 
   changedFields.forEach(({ field, oldValue, newValue }) => {
+    if (HIDDEN_FIELDS.has(field)) return;     
     const existing = panel.querySelector(`.pill[data-field="${field}"]`);
 
     if (newValue && newValue !== "—") {
@@ -259,7 +335,7 @@ function applyDiffToOpenCategory(catKey, changedFields) {
           newPill.querySelector(".pill-value").classList.add("writing");
           newPill.classList.add("pill-enter");
           existing.replaceWith(newPill);
-        }, 800);
+        }, 2600);  // synced with the 2.5s erase duration
       } else if (!existing) {
         // ── NEW field appearing ─────────────────────────────────
         const newPill = buildPill(field, newValue, cat.color);
@@ -275,7 +351,7 @@ function applyDiffToOpenCategory(catKey, changedFields) {
     } else if (existing) {
       // Value cleared — erase
       existing.classList.add("pill-erasing");
-      setTimeout(() => existing.remove(), 800);
+      setTimeout(() => existing.remove(), 2600);
     }
   });
 
@@ -284,7 +360,7 @@ function applyDiffToOpenCategory(catKey, changedFields) {
     const visible = panel.querySelectorAll(".pill:not(.pill-erasing)").length;
     document.getElementById("catCount").textContent = visible;
     if (visible === 0) document.getElementById("emptyState").classList.add("show");
-  }, 850);
+  }, 2700);
 }
 
 // =====================================================================
@@ -294,6 +370,15 @@ function handleUMUpdate(data) {
   console.log("handleUMUpdate called with", Object.keys(data.fields || {}).length, "fields");
   const fields    = data.fields    || {};
   const timestamp = data.timestamp || "";
+
+  // Update child name on the closed book cover (Screen 1)
+  if (data.child_name) setChildName(data.child_name);
+
+  // Update phase-gated locking
+  if (Array.isArray(data.unlocked_categories)) {
+    unlockedCategories = new Set(data.unlocked_categories);
+    applyLocking();
+  }
 
   // Group by category & detect per-field changes vs. prior liveUM
   const grouped = {};

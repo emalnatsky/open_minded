@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+venv_sic/
+
+# System files
+.DS_Store
+
+# Your project-specific
+conf/
