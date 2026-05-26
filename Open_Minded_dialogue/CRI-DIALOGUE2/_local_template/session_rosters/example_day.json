@@ -1,0 +1,28 @@
+{
+  "day": "example_day",
+  "researcher_name": "Sander",
+  "default_input_mode": "keyboard",
+  "children": [
+    {
+      "child_id": "test_boy_1",
+      "child_name": "Sam",
+      "start_phase_index": 0
+    },
+    {
+      "child_id": "test_girl_1",
+      "child_name": "Mila",
+      "start_phase_index": 0
+    },
+    {
+      "child_id": "test_boy_2",
+      "child_name": "Finn",
+      "start_phase_index": 0
+    },
+    {
+      "child_id": "test_girl_2",
+      "child_name": "Noor",
+      "start_phase_index": 0
+    }
+  ]
+}
+

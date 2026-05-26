@@ -12,4 +12,23 @@ CRI-DIALOGUE2/
 
 Then rename `.example_env` to `.env` and paste your own OpenAI API key.
 
-Do not upload your real `_local` folder. It can contain API keys, conversation logs, local launchers, and session state.
+For a safe roster example, copy:
+
+```text
+_local_template\session_rosters\example_day.json
+```
+
+to:
+
+```text
+_local\session_rosters\example_day.json
+```
+
+Condition values:
+
+```text
+C = Control: conversational-only memory access
+E = Experiment: transmedial metaphor-supported memory access
+```
+
+Do not upload your real `_local` folder. It can contain API keys, real child rosters, conversation logs, and session state.
