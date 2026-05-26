@@ -62,7 +62,7 @@ The session interface will load the example roster/config from `_local`.
 ```powershell
 python UM-TABLET/um_tablet_server.py
 ```
-BEWARE! TO STOP THE DETCH MESSAGES RUN THIS COMMAND BEFORE THE TABLET SERVER: 
+BEWARE! TO STOP THE FETCH MESSAGES RUN THIS COMMAND BEFORE THE TABLET SERVER: 
 ```powershell
 python -u YOUR_SCRIPT.py 2>&1 | grep -v "PATTERN_TO_IGNORE"
 ```
