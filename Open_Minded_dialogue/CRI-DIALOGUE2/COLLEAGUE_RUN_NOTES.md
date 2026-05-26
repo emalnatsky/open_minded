@@ -59,12 +59,13 @@ python CRI-BRANCH-BASIC4_0.py
 The session interface will load the example roster/config from `_local`.
 
 5. If tablet condition run in new terminal after inputting the interface information for the CRI-BRANCH-BASIC4_0.py
-6. 
 ```powershell
 python UM-TABLET/um_tablet_server.py
 ```
-BEWARE! TO STOP THE DETCH MESSAGES RUN THIS COMMAND BEFORE THE TABLET SERVER: python -u YOUR_SCRIPT.py 2>&1 | grep -v "PATTERN_TO_IGNORE"
-
+BEWARE! TO STOP THE DETCH MESSAGES RUN THIS COMMAND BEFORE THE TABLET SERVER: 
+```powershell
+python -u YOUR_SCRIPT.py 2>&1 | grep -v "PATTERN_TO_IGNORE"
+```
 ## Memory access flow
 
 The child can ask what Leo remembers at any point in the conversation, for example: "Wat weet je over mij?" or "Wat heb je onthouden?" The intent classifier routes that to `um_inspect`.
