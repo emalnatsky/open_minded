@@ -8,9 +8,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% User settings 		    %%%
 userId('000'). % Participant id 
-localVariable(first_name_cri, ""). % First name at session start
-localVariable(first_name_tablet, ""). % Child name displayed on tablet, set at session start
-localVariable(operator_name, ""). % Researcher name, set at session start
+localVariable(first_name_cri, "Unika"). % First name at session start
+localVariable(first_name_tablet, "Eunike"). % Child name displayed on tablet, set at session start
+localVariable(operator_name, "Julianna"). % Researcher name, set at session start
 
 %%% Session settings		    %%%
 multiSessionDesignId(open_minded_memory). % Experimental: open_minded_memory | Control: open_minded_control

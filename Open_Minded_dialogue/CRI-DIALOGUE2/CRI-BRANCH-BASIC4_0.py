@@ -148,6 +148,8 @@ class CRI_ScriptedDialogue(SICApplication):
         self.resume_from_log_path = None
         self.resume_source_log = {}
         self.local_child_name = ""
+        self.local_child_name_cri    = ""   # what NAO TTS pronounces
+        self.local_child_name_tablet = ""   # what appears on the tablet book cover
         self.researcher_name = ""
         self.local_condition = ""
         self.start_phase_index = 0
@@ -212,7 +214,9 @@ class CRI_ScriptedDialogue(SICApplication):
         self.tablet_state = TabletStateWriter(
             state_path=_session_state_path,
             get_child_id_fn=lambda: self.CHILD_ID,
-            get_child_name_fn=lambda: getattr(self, "local_child_name", "") or self.CHILD_ID,
+            get_child_name_fn=lambda: getattr(self, "local_child_name_cri", "") or getattr(self, "local_child_name", "") or self.CHILD_ID,
+            get_tablet_name_fn=lambda: getattr(self, "local_child_name_tablet", "") or getattr(self, "local_child_name", "") or self.CHILD_ID,
+            get_condition_fn=lambda: getattr(self, "local_condition", ""),
             get_mistake_states_fn=lambda: getattr(self, "mistake_states", {}) or {},
             enabled=True,
         )

@@ -17,14 +17,6 @@ import os
 # Where this config file lives — used to resolve roster/persona paths
 # relative to the dialogue project, not the current working directory.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-PACKAGE_ROOT = _HERE
-OUTER_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
-LOCAL_ROOT = os.path.abspath(os.path.join(OUTER_ROOT, "_local"))
-REPO_ROOT = os.path.abspath(os.path.join(OUTER_ROOT, "..", ".."))
-
-# Backwards-compatible alias for older helper code. New code should use
-# PACKAGE_ROOT for shareable files and LOCAL_ROOT for private runtime files.
-DIALOGUE_ROOT = OUTER_ROOT
 
 
 # ── UM connection ────────────────────────────────────────────────────────────
@@ -45,7 +37,7 @@ UM_FIELDS = (
     "books_enjoys", "books_fav_title",
     "music_enjoys",
     "animals_enjoys", "animal_fav",
-    "has_pet", "pets", "pet_type", "pet_name",
+    "has_pet", "pet_type", "pet_name",
     "freetime_fav", "fav_food", "fav_subject",
     "school_strength", "school_difficulty",
     "aspiration", "role_model", "interest", "has_best_friend",
@@ -59,7 +51,7 @@ SCRIPT_TABLE_FIELDS = (
     "books_enjoys", "books_fav_title",
     "freetime_fav",
     "animals_enjoys", "animal_fav",
-    "has_pet", "pets", "pet_type", "pet_name",
+    "has_pet", "pet_type", "pet_name",
     "fav_food",
     "fav_subject", "school_strength", "school_difficulty",
     "aspiration", "role_model", "interest", "has_best_friend",
@@ -81,7 +73,6 @@ FIELD_LABELS = {
     "animals_enjoys":    "of je dieren leuk vindt",
     "animal_fav":        "je lievelingsdier",
     "has_pet":           "of je een huisdier hebt",
-    "pets":              "je huisdieren",
     "pet_type":          "het soort huisdier",
     "pet_name":          "de naam van je huisdier",
     "freetime_fav":      "wat je graag in je vrije tijd doet",
@@ -135,19 +126,20 @@ MEMORY_ACCESS_CONTROL_FIELDS = (
 
 TUTORIAL_CONDITION_FIELD = "condition"
 
-# Canonical condition codes.
-#
-# C = Control: conversational-only memory access
-# E = Experiment: transmedial metaphor-supported memory access
-#
-# Older C1/C2 values are accepted by normalize_condition_value() as legacy
-# inputs, but new fake personas/config/logs should use C/E.
-CONDITION_CONTROL = "C"
-CONDITION_EXPERIMENT = "E"
+CONDITION_CONTROL    = "C1"
+CONDITION_EXPERIMENT = "C2"
 CONDITION_LABELS = {
-    CONDITION_CONTROL: "Control: conversational-only memory access",
-    CONDITION_EXPERIMENT: "Experiment: transmedial metaphor-supported memory access",
+    "C1": "Control (no tablet)",
+    "C2": "Experimental (with tablet)",
 }
+
+# Scenario utterance aliases — maps short pregen keys to UM field names.
+# Empty dict by default; populated if the scenario DB uses aliases.
+SCENARIO_UTTERANCE_ALIASES = {}
+
+# Roster paths — now reads from util/test_config.pl (gitignored)
+SESSION_ROSTER_DIR  = os.path.abspath(os.path.join(_HERE, "..", "util"))
+SESSION_ROSTER_PATH = os.path.abspath(os.path.join(_HERE, "..", "util", "test_config.pl"))
 
 # Fields that should never appear when Leo reads memory back to the child
 MEMORY_ACCESS_EXCLUDED_FIELDS = (
@@ -182,43 +174,6 @@ CASE_MIXED_SEQUENCE         = "mixed_sequence"
 # Prefixes that mark a field as containing a pre-generated utterance
 PREGENERATED_UTTERANCE_PREFIXES = ("pregen_", "script_", "llm_pregen_")
 
-# Dialogue 2's internal L2-pregen keys do not always have the same name as
-# the manually curated CRI scenario step_ids in GraphDB. These aliases let the
-# renderer find the scenario utterance first, then fall back to the local text.
-SCENARIO_UTTERANCE_ALIASES = {
-    "leo_ministory_opening": ("p1_leo_ministory_opening",),
-    "leo_ministory_followup": ("p1_leo_ministory_followup",),
-    "leo_ministory_wrap": ("p1_leo_ministory_wrap",),
-    "hobbies_bridge": ("p1_hobby_bridge_comment",),
-    "sport_recall": ("p1_sport_recall",),
-    "sport_open": ("p1_sport_open",),
-    "sport_followup": ("p1_sport_followup",),
-    "sport_followup_choice": ("p1_sport_followup",),
-    "music_open": ("p1_music_open",),
-    "music_ack": ("p1_music_ack",),
-    "music_followup": ("p1_music_followup",),
-    "animals_open": ("p1_animals_open",),
-    "animals_followup": ("p1_animals_followup",),
-    "books_open": ("p1_books_open",),
-    "books_ack": ("p1_books_ack",),
-    "books_followup": ("p1_books_followup",),
-    "m1_wrong_opener": ("p1_m1_wrong_hobby_opener",),
-    "m1_wrong_followup": ("p1_m1_followup_wrong_hobby",),
-    "m1_corrected_followup": ("p1_followup_postcorrection_true_hobby",),
-    "m2_wrong_followup": ("p1_m2_followup_wrong_food",),
-    "m2_corrected_followup": ("p1_m2_postcorrection_true_food",),
-    "p2_fav_subject_comment": ("p2_fav_subject_comment_subject",),
-    "p2_subject_profile_link": ("p2_subject_profile_link",),
-    "m3_corrected_followup": ("p2_m3_postcorrection_true_strength",),
-    "school_difficulty_wrap": ("p2_school_wrap_after_difficulty",),
-    "p3_rolemodel_recall": ("p3_rolemodel_recall",),
-    "p3_rolemodel_ack": ("p3_rolemodel_ack",),
-    "p3_norolemodel_ack": ("p3_norolemodel_ack",),
-    "p3_m4_followup_wrong_aspiration": ("p3_m4_followup_wrong_aspiration",),
-    "p3_m4_postcorrection_reflection": ("p3_m4_postcorrection_reflection",),
-    "pet_kind_question": ("p1_animals_followup",),
-}
-
 
 # ── Run-mode switches ────────────────────────────────────────────────────────
 
@@ -230,41 +185,37 @@ ASK_RUN_MODE_AT_START         = True
 SIMULATION_MODE               = False
 
 # Where fake-persona JSONs live (used when USE_FAKE_PERSONA_UM=True)
-SIMULATED_PERSONA_DIR  = os.path.abspath(os.path.join(PACKAGE_ROOT, "fake_personas"))
+SIMULATED_PERSONA_DIR  = os.path.abspath(os.path.join(_HERE, "fake_personas"))
 SIMULATED_PERSONA_PATH = os.path.join(SIMULATED_PERSONA_DIR, "noor_1001.json")
 
 # True  → read UM from local fake_personas/*.json files (offline dev)
 # False → pull UM live from Eunike's API (real GraphDB)
-USE_FAKE_PERSONA_UM           = os.environ.get("CRI_USE_FAKE_PERSONA_UM", "false").strip().lower() in (
-    "1", "true", "yes", "y", "fake", "persona", "simulation", "sim"
-)
+USE_FAKE_PERSONA_UM           = False
 SIMULATION_WRITE_PERSONA_FILE = False
-WAIT_FOR_PREVIEW_CONFIRMATION = False
+WAIT_FOR_PREVIEW_CONFIRMATION = True
 REVIEW_TRANSCRIPTS            = True
 POST_PHASE_TEST_CONTROLS      = True
 
-CHILD_INPUT_MODE = "keyboard"     # or "microphone"
+CHILD_INPUT_MODE = "microphone"   # or "keyboard"
 SCRIPT_VERSION   = "CRI-BRANCH-BASIC4.0"
-TOTAL_SCRIPT_PHASES = 21
+TOTAL_SCRIPT_PHASES = 9
 
 ASK_SESSION_INTERFACE_AT_START = True
 
 
 # ── File paths (resolved to absolute paths relative to this config file) ─────
 
-SESSION_CONFIG_PATH = os.path.abspath(os.path.join(LOCAL_ROOT, "session_config.local.json"))
-SESSION_STATE_PATH = os.path.abspath(os.path.join(LOCAL_ROOT, "session_state.json"))
-LOCAL_ENV_PATH = os.path.abspath(os.path.join(LOCAL_ROOT, ".env"))
-SESSION_ROSTER_DIR = os.path.abspath(os.path.join(LOCAL_ROOT, "session_rosters"))
-SESSION_ROSTER_PATH = os.path.join(SESSION_ROSTER_DIR, "active.json")
+SESSION_CONFIG_PATH = os.path.abspath(os.path.join(_HERE, "session_config.local.json"))
+SESSION_STATE_PATH  = os.path.abspath(os.path.join(_HERE, "..", "_local", "session_state.json"))
+LOCAL_ENV_PATH      = os.path.abspath(os.path.join(_HERE, "..", "conf", ".env"))
 
-# Roster of children — read on session start to look up name + condition by ID.
-# Format (semicolon-separated): id;Naam;gender;past_exposure;condition;Researcher
-# Lives in Open_Minded_dialogue/conf/, shared with the tablet server.
-ROSTER_PATH = os.path.abspath(os.path.join(LOCAL_ROOT, "test_config.txt"))
+# Config file for session — Prolog-style, lives in util/ (gitignored).
+# Contains child ID, CRI name (for NAO TTS), tablet name (for book cover),
+# researcher name, and condition. Edit this before each session.
+ROSTER_PATH = os.path.abspath(os.path.join(_HERE, "..", "util", "test_config.pl"))
 
 
 # ── Conversation logging ─────────────────────────────────────────────────────
 
 CONVERSATION_LOG_ENABLED = True
-CONVERSATION_LOG_ROOT    = os.path.abspath(os.path.join(LOCAL_ROOT, "conversations"))
+CONVERSATION_LOG_ROOT    = os.path.abspath(os.path.join(_HERE, "conversations"))

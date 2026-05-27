@@ -97,21 +97,27 @@ class TabletStateWriter:
         state_path: str,
         get_child_id_fn=None,
         get_child_name_fn=None,
+        get_tablet_name_fn=None,
+        get_condition_fn=None,
         get_mistake_states_fn=None,
         enabled: bool = True,
     ):
         """
         Args:
-            state_path:           Absolute path to session_state.json
-            get_child_id_fn:      callable() → str
-            get_child_name_fn:    callable() → str
+            state_path:            Absolute path to session_state.json
+            get_child_id_fn:       callable() → str
+            get_child_name_fn:     callable() → str  (TTS/CRI name, fallback)
+            get_tablet_name_fn:    callable() → str  (display name on tablet book cover)
+            get_condition_fn:      callable() → str  (C1 or C2, written to session_state)
             get_mistake_states_fn: callable() → dict of mistake state dicts
-            enabled:              False → no-op (e.g. when tablet isn't connected)
+            enabled:               False → no-op (e.g. when tablet isn't connected)
         """
         self.state_path = state_path
         self.enabled = enabled
         self._get_child_id = get_child_id_fn or (lambda: "")
         self._get_child_name = get_child_name_fn or (lambda: "")
+        self._get_tablet_name = get_tablet_name_fn or get_child_name_fn or (lambda: "")
+        self._get_condition = get_condition_fn or (lambda: "")
         self._get_mistake_states = get_mistake_states_fn or (lambda: {})
 
         # Tracks which categories have been unlocked so far this session.
@@ -150,13 +156,14 @@ class TabletStateWriter:
     def _write_state(self, phase=None):
         mistake_summary = self._build_mistake_summary()
         state = {
-            "child_id": self._get_child_id(),
-            "child_name": self._get_child_name(),
-            "phase": phase,
+            "child_id":            self._get_child_id(),
+            "child_name":          self._get_tablet_name() or self._get_child_name(),
+            "condition":           self._get_condition(),
+            "phase":               phase,
             "unlocked_categories": sorted(self._unlocked_categories),
             "memory_access_active": self._memory_access_active,
-            "visible_fields": list(self._visible_fields),
-            "mistakes": mistake_summary,
+            "visible_fields":      list(self._visible_fields),
+            "mistakes":            mistake_summary,
         }
 
         try:

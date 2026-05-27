@@ -23,8 +23,6 @@ import threading
 import time
 import webbrowser
 import urllib.request
-import csv
-
 import requests as http
 
 from sic_framework.core import sic_logging
@@ -37,13 +35,15 @@ from sic_framework.services.webserver.webserver_service import (
 
 # ---------------------------------------------------------------------------config-------------------------------------------------------------------------
 
-CHILD_ID        = "625"                          # fallback — overridden by session_state.json once dialogue starts
+CHILD_ID        = "3"                          # fallback — overridden by session_state.json once dialogue starts
 UM_API_BASE     = "http://localhost:8000"
 POLL_INTERVAL_S = 2.0
 WEB_PORT        = 8080
 API_TIMEOUT_S   = 3.0
-CONFIG_PATH     = "../conf/test_config.txt"    # roster: id;Naam;gender;past_exposure;condition;Researcher
 SESSION_STATE_PATH = "../_local/session_state.json"  # written by CRI-DIALOGUE/tablet_state.py
+# Note: child name + ID now come from session_state.json (written by the dialogue).
+# No separate roster file needed — the dialogue reads util/test_config.pl and
+# writes the resolved names into session_state.json.
 
 
 class UMTabletServer(SICApplication):
@@ -59,7 +59,6 @@ class UMTabletServer(SICApplication):
         self._child_id = CHILD_ID
         self.set_log_level(sic_logging.INFO)
         self.load_env("../conf/.env")
-        self._children = self._load_children_config()
         self.setup()
 
     # ------------------------------------------------------------------setup---------------------------------------------------------------
@@ -86,34 +85,6 @@ class UMTabletServer(SICApplication):
         self.logger.info("Setup complete.")
 
     # ------------------------------------------------------------------helpers----------------------------------------------------------------
-
-    def _load_children_config(self) -> dict:
-        here = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(here, CONFIG_PATH)
-        children = {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f, delimiter=";")
-                for row in reader:
-                    cid = (row.get("id") or "").strip()
-                    if not cid:
-                        continue
-                    past = (row.get("past_exposure") or "0").strip()
-                    children[cid] = {
-                        "name":          (row.get("Naam") or "").strip(),
-                        "gender":        (row.get("gender") or "").strip(),
-                        "past_exposure": int(past) if past.isdigit() else 0,
-                        "condition":     (row.get("condition") or "").strip(),
-                    }
-            self.logger.info("Loaded %d children from roster (%s).", len(children), path)
-        except FileNotFoundError:
-            self.logger.warning("Roster file not found at %s — running without it.", path)
-        except Exception as e:
-            self.logger.warning("Failed to load roster: %s", e)
-        return children
-
-    def _current_child(self) -> dict:
-        return self._children.get(str(self._child_id), {})
 
     def _read_session_state(self) -> dict:
         """
@@ -238,13 +209,16 @@ class UMTabletServer(SICApplication):
 
     def _broadcast_um(self, um: dict):
         try:
-            info  = self._current_child()
             state = self._read_session_state()
+            # child_name comes from session_state.json (written by tablet_state.py
+            # using first_name_tablet from util/test_config.pl)
+            child_name = state.get("child_name") or str(self._child_id)
+            condition  = state.get("condition", "")
             self.webserver.send_message(
                 WebInfoMessage("um_update", {
                     "child_id":            self._child_id,
-                    "child_name":          info.get("name") or str(self._child_id),
-                    "condition":           info.get("condition", ""),
+                    "child_name":          child_name,
+                    "condition":           condition,
                     "fields":              um,
                     "unlocked_categories": state.get("unlocked_categories", []),
                     "current_phase":       state.get("phase"),
