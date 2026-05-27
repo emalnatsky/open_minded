@@ -37,13 +37,13 @@ from sic_framework.services.webserver.webserver_service import (
 
 # ---------------------------------------------------------------------------config-------------------------------------------------------------------------
 
-CHILD_ID        = "3"
+CHILD_ID        = "625"                          # fallback — overridden by session_state.json once dialogue starts
 UM_API_BASE     = "http://localhost:8000"
 POLL_INTERVAL_S = 2.0
 WEB_PORT        = 8080
 API_TIMEOUT_S   = 3.0
-CONFIG_PATH     = "../conf/test_config.txt"   # roster: id;Naam;gender;past_exposure;condition;Researcher
-SESSION_STATE_PATH = "../session_state.json"  # written by the dialogue (CRI-BRANCH-BASIC4_0.py)
+CONFIG_PATH     = "../conf/test_config.txt"    # roster: id;Naam;gender;past_exposure;condition;Researcher
+SESSION_STATE_PATH = "../_local/session_state.json"  # written by CRI-DIALOGUE/tablet_state.py
 
 
 class UMTabletServer(SICApplication):
@@ -88,17 +88,6 @@ class UMTabletServer(SICApplication):
     # ------------------------------------------------------------------helpers----------------------------------------------------------------
 
     def _load_children_config(self) -> dict:
-        """
-        Load child roster from CONFIG_PATH.
-
-        File format (semicolon-separated):
-            id;Naam;gender;past_exposure;condition;Researcher
-            700;Helena;girl;0;C;
-            ...
-
-        Returns a dict keyed by id (string) mapping to {name, gender, past_exposure, condition}.
-        Returns an empty dict on any error (server still runs, but no name on book).
-        """
         here = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(here, CONFIG_PATH)
         children = {}
@@ -124,14 +113,13 @@ class UMTabletServer(SICApplication):
         return children
 
     def _current_child(self) -> dict:
-        """Lookup info for the currently-active child id. Returns {} if not found."""
         return self._children.get(str(self._child_id), {})
 
     def _read_session_state(self) -> dict:
         """
-        Read the small JSON file written by the dialogue (CRI-BRANCH-BASIC4_0.py)
-        whenever a new turn starts. Returns {} if the file isn't there yet
-        (dialogue hasn't started, or first turn hasn't fired).
+        Read session_state.json written by the dialogue's TabletStateWriter.
+        Also updates self._child_id automatically from the file so the tablet
+        server tracks whichever child the dialogue is talking to.
         """
         here = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(here, SESSION_STATE_PATH)
@@ -139,6 +127,13 @@ class UMTabletServer(SICApplication):
             with open(path, "r", encoding="utf-8") as f:
                 state = json.load(f)
             if isinstance(state, dict):
+                session_child_id = str(state.get("child_id") or "").strip()
+                if session_child_id and session_child_id != self._child_id:
+                    self.logger.info(
+                        "Child ID updated from session_state: %s → %s",
+                        self._child_id, session_child_id,
+                    )
+                    self._child_id = session_child_id
                 return state
         except FileNotFoundError:
             pass
@@ -184,11 +179,6 @@ class UMTabletServer(SICApplication):
         self.logger.info("=" * 55)
 
     def _fetch_um(self) -> dict:
-        """
-        Fetch the full UM from Eunike's /inspect endpoint.
-        Sends category SHORT KEY (e.g. "hobby", "dieren") so
-        index.html can match it directly without label mapping.
-        """
         try:
             url      = f"{UM_API_BASE}/api/um/{self._child_id}/inspect"
             response = http.get(url, timeout=API_TIMEOUT_S)
@@ -209,8 +199,6 @@ class UMTabletServer(SICApplication):
 
             flat: dict = {}
             for cat_key, cat_data in categories.items():
-                # Use the short key directly ("hobby", "dieren" etc.)
-                # NOT the Dutch label — so index.html matches trivially
                 category_id = cat_key
 
                 for field, meta in cat_data.get("scalars", {}).items():
@@ -259,7 +247,7 @@ class UMTabletServer(SICApplication):
                     "condition":           info.get("condition", ""),
                     "fields":              um,
                     "unlocked_categories": state.get("unlocked_categories", []),
-                    "current_phase":       state.get("current_phase"),
+                    "current_phase":       state.get("phase"),
                     "current_turn_name":   state.get("current_turn_name"),
                     "timestamp":           time.strftime("%H:%M:%S"),
                 })
@@ -277,10 +265,6 @@ class UMTabletServer(SICApplication):
         try:
             while not self.shutdown_event.is_set():
                 um = self._fetch_um()
-
-                # Always broadcast every poll so late-connecting browsers
-                # (tablet opened after server started) get the data immediately
-                # within 2 seconds — not only when something changes.
                 self._broadcast_um(um)
 
                 if um != last_um:

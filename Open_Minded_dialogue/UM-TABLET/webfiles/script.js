@@ -138,10 +138,14 @@ const FIELD_LABELS = {
 function fieldLabel(key) {
   return FIELD_LABELS[key] || key.replace(/_/g, " ");
 }
-
-// Fields that should never be displayed on the tablet
 const HIDDEN_FIELDS = new Set([
-  "is_talk_preference",
+  "hobby_talk",
+  "sports_talk",
+  "sports_play_talk",
+  "music_talk",
+  "books_talk",
+  "pet_talk",
+  "animal_talk",
 ]);
 
 const FIELD_VALUE_LABELS = {
