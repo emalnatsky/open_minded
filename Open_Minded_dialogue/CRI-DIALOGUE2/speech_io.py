@@ -108,6 +108,9 @@ class SpeechIO:
 
         logger.info("Listening...")
         try:
+            # Green eyes = Leo is listening
+            self._set_eyes("green")
+
             from sic_framework.services.openai_whisper_stt.whisper_stt import GetTranscript
             result = self.whisper.request(
                 GetTranscript(
@@ -116,10 +119,15 @@ class SpeechIO:
                 )
             )
             transcript = result.transcript.strip() if result and result.transcript else ""
+
+            # Back to white = Leo is done listening
+            self._set_eyes("white")
+
             logger.info("Child: %s", transcript or "(nothing)")
             self._log_event("utterance", speaker="CHILD", text=transcript or "(nothing)", input_mode="microphone")
             return transcript
         except Exception as e:
+            self._set_eyes("white")  # always restore on error
             logger.error("STT error: %s", e)
             self._log_event("stt_error", error=str(e))
             return ""
@@ -152,6 +160,24 @@ class SpeechIO:
         return self.review_transcript(self.listen())
 
     # ── Utility ───────────────────────────────────────────────────────────────
+
+    def _set_eyes(self, color: str):
+        """Change NAO eye LED color. Silently ignored in desktop/simulation mode."""
+        if not self.nao or self.use_desktop_mic or self.simulation_mode:
+            return
+        try:
+            from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
+            colors = {
+                "green": (0, 1, 0),
+                "white": (1, 1, 1),
+                "blue":  (0, 0, 1),
+                "red":   (1, 0, 0),
+                "off":   (0, 0, 0),
+            }
+            r, g, b = colors.get(color, (1, 1, 1))
+            self.nao.leds.request(NaoFadeRGBRequest("FaceLeds", r, g, b, 0))
+        except Exception as e:
+            logger.debug("Could not set eye LEDs: %s", e)
 
     @staticmethod
     def strip_non_bmp(text: str) -> str:
