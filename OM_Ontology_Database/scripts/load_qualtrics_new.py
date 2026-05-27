@@ -336,7 +336,7 @@ def _clean(val) -> str | None:
     if not val:
         return None
     val = str(val).strip()
-    if val.lower() in ("", "n/a", "nvt", "geen", "not specified"):
+    if val.lower() in ("", "n/a", "nvt", "not specified"):
         return None
     return val if val else None
 
