@@ -17,12 +17,12 @@ BUT we need for it:
 """
 
 import os
+import json
 import socket
 import threading
 import time
 import webbrowser
 import urllib.request
-
 import requests as http
 
 from sic_framework.core import sic_logging
@@ -35,11 +35,15 @@ from sic_framework.services.webserver.webserver_service import (
 
 # ---------------------------------------------------------------------------config-------------------------------------------------------------------------
 
-CHILD_ID        = "610"
+CHILD_ID        = "3"                          # fallback — overridden by session_state.json once dialogue starts
 UM_API_BASE     = "http://localhost:8000"
 POLL_INTERVAL_S = 2.0
 WEB_PORT        = 8080
 API_TIMEOUT_S   = 3.0
+SESSION_STATE_PATH = "../_local/session_state.json"  # written by CRI-DIALOGUE/tablet_state.py
+# Note: child name + ID now come from session_state.json (written by the dialogue).
+# No separate roster file needed — the dialogue reads util/test_config.pl and
+# writes the resolved names into session_state.json.
 
 
 class UMTabletServer(SICApplication):
@@ -82,6 +86,32 @@ class UMTabletServer(SICApplication):
 
     # ------------------------------------------------------------------helpers----------------------------------------------------------------
 
+    def _read_session_state(self) -> dict:
+        """
+        Read session_state.json written by the dialogue's TabletStateWriter.
+        Also updates self._child_id automatically from the file so the tablet
+        server tracks whichever child the dialogue is talking to.
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, SESSION_STATE_PATH)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if isinstance(state, dict):
+                session_child_id = str(state.get("child_id") or "").strip()
+                if session_child_id and session_child_id != self._child_id:
+                    self.logger.info(
+                        "Child ID updated from session_state: %s → %s",
+                        self._child_id, session_child_id,
+                    )
+                    self._child_id = session_child_id
+                return state
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self.logger.warning("Could not read session_state.json: %s", e)
+        return {}
+
     def _check_api(self):
         time.sleep(1.0)
         try:
@@ -120,11 +150,6 @@ class UMTabletServer(SICApplication):
         self.logger.info("=" * 55)
 
     def _fetch_um(self) -> dict:
-        """
-        Fetch the full UM from Eunike's /inspect endpoint.
-        Sends category SHORT KEY (e.g. "hobby", "dieren") so
-        index.html can match it directly without label mapping.
-        """
         try:
             url      = f"{UM_API_BASE}/api/um/{self._child_id}/inspect"
             response = http.get(url, timeout=API_TIMEOUT_S)
@@ -145,8 +170,6 @@ class UMTabletServer(SICApplication):
 
             flat: dict = {}
             for cat_key, cat_data in categories.items():
-                # Use the short key directly ("hobby", "dieren" etc.)
-                # NOT the Dutch label — so index.html matches trivially
                 category_id = cat_key
 
                 for field, meta in cat_data.get("scalars", {}).items():
@@ -186,11 +209,21 @@ class UMTabletServer(SICApplication):
 
     def _broadcast_um(self, um: dict):
         try:
+            state = self._read_session_state()
+            # child_name comes from session_state.json (written by tablet_state.py
+            # using first_name_tablet from util/test_config.pl)
+            child_name = state.get("child_name") or str(self._child_id)
+            condition  = state.get("condition", "")
             self.webserver.send_message(
                 WebInfoMessage("um_update", {
-                    "child_id":  self._child_id,
-                    "fields":    um,
-                    "timestamp": time.strftime("%H:%M:%S"),
+                    "child_id":            self._child_id,
+                    "child_name":          child_name,
+                    "condition":           condition,
+                    "fields":              um,
+                    "unlocked_categories": state.get("unlocked_categories", []),
+                    "current_phase":       state.get("phase"),
+                    "current_turn_name":   state.get("current_turn_name"),
+                    "timestamp":           time.strftime("%H:%M:%S"),
                 })
             )
         except Exception as e:
@@ -206,10 +239,6 @@ class UMTabletServer(SICApplication):
         try:
             while not self.shutdown_event.is_set():
                 um = self._fetch_um()
-
-                # Always broadcast every poll so late-connecting browsers
-                # (tablet opened after server started) get the data immediately
-                # within 2 seconds — not only when something changes.
                 self._broadcast_um(um)
 
                 if um != last_um:

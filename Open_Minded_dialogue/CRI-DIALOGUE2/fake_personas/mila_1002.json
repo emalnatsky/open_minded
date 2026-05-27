@@ -1,0 +1,62 @@
+{
+  "child_id": 1002,
+  "child_name": "Mila",
+  "gender": "girl",
+  "exposure": "new",
+  "condition": "E",
+  "name": "Mila",
+  "age": "10",
+  "hobbies": "hockey, bakken, fotografie",
+  "hobby_fav": "bakken",
+  "sports_enjoys": "ja",
+  "sports_fav_play": "hockey",
+  "books_enjoys": "ja",
+  "books_fav_title": "Dog Man",
+  "music_enjoys": "nee",
+  "animals_enjoys": "ja",
+  "animal_fav": "paard",
+  "has_pet": "ja",
+  "pet_type": "kat",
+  "pet_name": "Luna",
+  "freetime_fav": "cupcakes bakken",
+  "fav_food": "pasta pesto",
+  "fav_subject": "taal",
+  "school_strength": "presenteren",
+  "school_difficulty": "topografie",
+  "aspiration": "bakker worden",
+  "role_model": "haar tante",
+  "interest": "recepten en foto's maken",
+  "has_best_friend": "ja",
+  "script_plan": {
+    "used_fields": [
+      "name",
+      "age",
+      "hobbies",
+      "hobby_fav",
+      "freetime_fav",
+      "sports_enjoys",
+      "sports_fav_play",
+      "pet_name",
+      "pet_type",
+      "animal_fav",
+      "has_pet",
+      "fav_food"
+    ],
+    "mistakes": [
+      {
+        "id": "M1",
+        "phase": 6,
+        "field": "hobby_fav",
+        "type": "related-but-wrong",
+        "wrong_value": "hockey"
+      },
+      {
+        "id": "M2",
+        "phase": 8,
+        "field": "fav_food",
+        "type": "completely-wrong",
+        "wrong_value": "pizza"
+      }
+    ]
+  }
+}
