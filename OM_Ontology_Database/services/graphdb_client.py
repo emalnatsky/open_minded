@@ -610,12 +610,14 @@ def _write_node(
     {_PREFIXES}
     DELETE {{
         <{new_node_uri}> um:{node_prop} ?oldProp .
+        <{new_node_uri}> um:active ?oldActive .
         <{new_node_uri}> um:source ?oldSrc .
         <{new_node_uri}> um:timestamp ?oldTs .
         <{new_node_uri}> um:sessionId ?oldSid .
     }}
     WHERE {{
         OPTIONAL {{ <{new_node_uri}> um:{node_prop} ?oldProp }}
+        OPTIONAL {{ <{new_node_uri}> um:active ?oldActive }}
         OPTIONAL {{ <{new_node_uri}> um:source ?oldSrc }}
         OPTIONAL {{ <{new_node_uri}> um:timestamp ?oldTs }}
         OPTIONAL {{ <{new_node_uri}> um:sessionId ?oldSid }}
@@ -927,11 +929,16 @@ def swap_node_field_value(
     safe_sess    = _escape_sparql_string(session_id)
     safe_new_val = _escape_sparql_string(new_value)
 
-    # Verify old node exists and is active
-    old_actual = _get_node_prop_value(old_node_uri, node_prop)
-    if old_actual is None:
-        raise HTTPException(404, f"Value '{old_value}' not found for field '{field_name}'.")
-
+    # Verify old node exists AND is active
+    is_active = sparql_ask(f"""
+            {_PREFIXES}
+            ASK {{
+                <{old_node_uri}> um:{node_prop} ?v .
+                <{old_node_uri}> um:active "true"^^xsd:string .
+            }}
+        """)
+    if not is_active:
+        raise HTTPException(404, f"Value '{old_value}' not found (or already inactive) for field '{field_name}'.")
     # Log single clean history entry
     _log_history(child_id, field_name, old_value, new_value, source, session_id)
 
