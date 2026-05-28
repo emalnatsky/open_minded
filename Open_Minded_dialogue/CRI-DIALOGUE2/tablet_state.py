@@ -213,8 +213,10 @@ class TabletStateWriter:
         summary = {}
         for mistake_id, state in (self._get_mistake_states() or {}).items():
             summary[mistake_id] = {
-                "field":     state.get("field"),
-                "wrong":     state.get("wrong"),
-                "corrected": bool(state.get("corrected", False)),
+                "field":       state.get("field"),
+                "field_label": state.get("field_label"),
+                "actual":      state.get("actual"),
+                "wrong":       state.get("wrong"),
+                "corrected":   bool(state.get("corrected", False)),
             }
         return summary

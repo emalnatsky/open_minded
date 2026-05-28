@@ -27,6 +27,32 @@ let currentScreen = "welcome";
 // Empty set = all categories locked (session not yet started).
 // When the dialogue mentions a category, it's added here.
 let unlockedCategories = new Set();
+let memoryAccessActive = false;
+let visibleFields = new Set();
+let currentMistakes = {};
+
+function shouldShowFieldInMemoryAccess(field) {
+  return !memoryAccessActive || visibleFields.has(field);
+}
+
+function unresolvedMistakeForField(field) {
+  if (!memoryAccessActive) return null;
+  for (const mistake of Object.values(currentMistakes || {})) {
+    if (!mistake || mistake.corrected) continue;
+    if (mistake.field === field && mistake.wrong) return mistake;
+  }
+  return null;
+}
+
+function displayValueForField(field, meta) {
+  const mistake = unresolvedMistakeForField(field);
+  if (mistake) return mistake.wrong;
+  return meta.value || "\u2014";
+}
+
+function hasDisplayValue(value) {
+  return value && value !== "\u2014" && value !== "â€”";
+}
 
 function isCategoryUnlocked(catKey) {
   // If no state received yet, lock everything
@@ -271,7 +297,7 @@ function renderPills(catKey, initial) {
   const data  = liveUM[catKey] || {};
 
   const entries = Object.entries(data).filter(
-    ([field, v]) => !HIDDEN_FIELDS.has(field) && v && v.value && v.value !== "—"
+    ([field, v]) => !HIDDEN_FIELDS.has(field) && shouldShowFieldInMemoryAccess(field) && v && hasDisplayValue(v.value)
   );
 
   document.getElementById("catCount").textContent = entries.length;
@@ -323,8 +349,8 @@ function applyDiffToOpenCategory(catKey, changedFields) {
     if (HIDDEN_FIELDS.has(field)) return;     
     const existing = panel.querySelector(`.pill[data-field="${field}"]`);
 
-    if (newValue && newValue !== "—") {
-      if (existing && oldValue && oldValue !== "—" && oldValue !== newValue) {
+    if (hasDisplayValue(newValue)) {
+      if (existing && hasDisplayValue(oldValue) && oldValue !== newValue) {
         // ── UPDATE: erase then write ─────────────────────────────
         existing.classList.add("pill-erasing");
         setTimeout(() => {
@@ -368,6 +394,9 @@ function handleUMUpdate(data) {
   console.log("handleUMUpdate called with", Object.keys(data.fields || {}).length, "fields");
   const fields    = data.fields    || {};
   const timestamp = data.timestamp || "";
+  memoryAccessActive = Boolean(data.memory_access_active);
+  visibleFields = new Set(Array.isArray(data.visible_fields) ? data.visible_fields : []);
+  currentMistakes = data.mistakes || {};
 
   // Update child name on the closed book cover (Screen 1)
   if (data.child_name) setChildName(data.child_name);
@@ -383,6 +412,8 @@ function handleUMUpdate(data) {
   const diffsByCategory = {}; // { catKey: [{field, oldValue, newValue}, ...] }
 
   Object.entries(fields).forEach(([field, meta]) => {
+    if (!shouldShowFieldInMemoryAccess(field)) return;
+
     const rawCat = meta.category || "";
     const catKey = mapCategory(rawCat);
 
@@ -391,11 +422,11 @@ function handleUMUpdate(data) {
 
     const prevMeta  = liveUM[catKey] && liveUM[catKey][field];
     const prevValue = prevMeta ? prevMeta.value : null;
-    const newValue  = meta.value || "—";
+    const newValue  = displayValueForField(field, meta);
 
     grouped[catKey][field] = {
       value:   newValue,
-      updated: prevValue !== null && prevValue !== newValue && newValue !== "—",
+      updated: prevValue !== null && prevValue !== newValue && hasDisplayValue(newValue),
     };
 
     if (prevValue !== newValue) {
@@ -403,7 +434,9 @@ function handleUMUpdate(data) {
     }
   });
 
-  // Commit to liveUM
+  // Commit to liveUM. Replace category maps so memory-access filtering can
+  // hide fields that were visible in a previous tablet update.
+  Object.keys(liveUM).forEach(catKey => delete liveUM[catKey]);
   Object.assign(liveUM, grouped);
 
   // Connection / status indicator
@@ -411,6 +444,10 @@ function handleUMUpdate(data) {
 
   // If a category screen is open, apply per-field eraser/write diffs
   if (currentScreen === "category" && currentCategory) {
+    if (memoryAccessActive) {
+      renderPills(currentCategory, true);
+      return;
+    }
     const diffs = diffsByCategory[currentCategory] || [];
     if (diffs.length > 0) {
       applyDiffToOpenCategory(currentCategory, diffs);

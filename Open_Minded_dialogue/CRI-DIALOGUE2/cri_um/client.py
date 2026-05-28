@@ -42,6 +42,10 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+class MissingUMProfileError(RuntimeError):
+    """Raised when the UM API says the child profile does not exist."""
+
+
 class UMClient:
     """All UM reads + writes against Eunike's API or fake-persona JSON."""
 
@@ -202,6 +206,8 @@ class UMClient:
         """Fetch all UM fields in one request using GET /api/um/{child_id}."""
         url = f"{self.d.UM_API_BASE}/api/um/{self.d.CHILD_ID}"
         resp = requests.get(url, timeout=8)
+        if resp.status_code == 404:
+            raise MissingUMProfileError(f"UM profile returned 404 for child '{self.d.CHILD_ID}'")
         if resp.status_code != 200:
             raise RuntimeError(f"UM profile returned {resp.status_code}")
 
@@ -225,6 +231,18 @@ class UMClient:
                 self.d.logger.info("UM[%s] = %s", field, value)
         return um
 
+    def empty_um_profile(self) -> dict:
+        """Return a complete unknown-value profile without hitting every field endpoint."""
+        um = {field: self.d.UNKNOWN_VALUE for field in self.d.UM_FIELDS}
+        local_name = str(
+            getattr(self.d, "local_child_name_cri", "")
+            or getattr(self.d, "local_child_name", "")
+            or ""
+        ).strip()
+        if local_name:
+            um["name"] = local_name
+        return um
+
     def pull_um(self) -> dict:
         """Fetch all UM fields used by the 4.0 early interaction flow."""
         if self.d.use_fake_persona_um():
@@ -239,6 +257,9 @@ class UMClient:
 
         try:
             um = self.pull_um_bulk()
+        except MissingUMProfileError as e:
+            self.d.logger.warning("%s; using empty UM fallback.", e)
+            um = self.empty_um_profile()
         except Exception as e:
             self.d.logger.warning("UM bulk profile pull failed (%s); falling back to per-field reads.", e)
             um = {field: self.get_field(field) for field in self.d.UM_FIELDS}
