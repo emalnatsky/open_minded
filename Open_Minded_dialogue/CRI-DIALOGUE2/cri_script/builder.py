@@ -35,6 +35,135 @@ class ScriptBuilder:
             "count": len(values),
         }
 
+    def subject_phase_topic(self, um: dict, subject_phrase: dict = None) -> dict:
+        subject_phrase = subject_phrase or self.subject_memory_phrase(um)
+        field_label = "je twee lievelingsvakken" if subject_phrase["count"] >= 2 else "je lievelingsvak"
+        return {
+            "domain": "school_subject",
+            "label": subject_phrase["fav_subject"],
+            "fields": ["fav_subject"],
+            "field_labels": {"fav_subject": field_label},
+            "current_values": {"fav_subject": subject_phrase["fav_subject"]},
+            "expected_value_count": {"fav_subject": min(subject_phrase["count"], 2) or 1},
+            "correct_values": [
+                f"{subject_phrase['fav_subject']} jouw {subject_phrase['subject_noun']} {subject_phrase['subject_verb']}"
+            ],
+            "memory_link": (
+                f"{subject_phrase['fav_subject']} jouw "
+                f"{subject_phrase['subject_noun']} {subject_phrase['subject_verb']}"
+            ),
+            "options": [subject_phrase["fav_subject"]],
+            "reground": (
+                f"Ik onthoud dat {subject_phrase['fav_subject']} jouw "
+                f"{subject_phrase['subject_noun']} {subject_phrase['subject_verb']}."
+            ),
+        }
+
+    def subject_comment_fallback(self, subject: str) -> str:
+        clean = str(subject or "").strip().lower()
+        if "taal" in clean:
+            return "Dat snap ik trouwens wel. Met taal kun je verhalen maken, grapjes bedenken, en van alles vertellen."
+        if "rekenen" in clean and "gym" in clean:
+            return "Dat snap ik trouwens wel. Rekenen is puzzelen met je hoofd, en bij gym ben je juist lekker in beweging."
+        if "rekenen" in clean:
+            return "Dat snap ik trouwens wel. Rekenen is best als een puzzel: je zoekt steeds de oplossing."
+        if "gym" in clean:
+            return "Dat snap ik trouwens wel. Bij gym kun je bewegen, proberen en meteen merken wat lukt."
+        if "natuur" in clean:
+            return "Dat snap ik trouwens wel. Bij natuur kun je ontdekken hoe dingen werken en waarom ze zo zijn."
+        return f"Dat snap ik trouwens wel. Met {subject} kun je vast op jouw manier iets leuks ontdekken."
+
+    def subject_profile_link_fallback(self, um: dict, subject: str) -> str:
+        hobbies = self.d.known(um, "hobbies")
+        interest = self.d.known(um, "interest")
+        parts = []
+        if hobbies:
+            parts.append(hobbies)
+        if interest:
+            parts.append(interest)
+        profile = self.d.format_dutch_list(parts, "")
+        clean = str(subject or "").strip().lower()
+        if profile:
+            if "taal" in clean:
+                return (
+                    f"Dat past ook best bij jou, vind ik. Jij houdt van {profile}, "
+                    "en met taal kun je daar ook weer over vertellen of iets bij verzinnen."
+                )
+            if "rekenen" in clean:
+                return (
+                    f"Dat past ook best bij jou, vind ik. Jij houdt van {profile}, "
+                    "en bij rekenen kun je ook goed nadenken en uitzoeken hoe iets werkt."
+                )
+            if "gym" in clean:
+                return (
+                    f"Dat past ook best bij jou, vind ik. Jij houdt van {profile}, "
+                    "en bij gym kun je ook lekker actief bezig zijn."
+                )
+            return f"Dat past ook best bij jou, vind ik. Jij houdt van {profile}, en {subject} kan daar best mooi bij passen."
+        return f"Dat past ook best bij jou, vind ik. {subject} kan op allerlei manieren leuk zijn."
+
+    def subject_phase_segments(self, um: dict, topic: dict = None) -> list:
+        local_um = dict(um or {})
+        if isinstance(topic, dict):
+            value = (topic.get("current_values") or {}).get("fav_subject") or topic.get("label")
+            if self.d.is_known(value):
+                local_um["fav_subject"] = value
+        subject_phrase = self.subject_memory_phrase(local_um)
+        fav_subject = subject_phrase["fav_subject"]
+        return [
+            {
+                "content_plan": self.d.l2_slot(
+                    "Ik weet ook nog dat {fav_subject} jouw {subject_noun} {subject_verb}.",
+                    {
+                        "fav_subject": fav_subject,
+                        "subject_noun": subject_phrase["subject_noun"],
+                        "subject_verb": subject_phrase["subject_verb"],
+                    },
+                ),
+                "expects_response": True,
+                "response_mode": "listen_only",
+                "used_fields": {"fav_subject": fav_subject},
+            },
+            {
+                "content_plan": self.d.l2_pregen(
+                    "p2_fav_subject_comment",
+                    self.subject_comment_fallback(fav_subject),
+                    ["fav_subject"],
+                    topic_sensitive=True,
+                ),
+                "expects_response": False,
+                "used_fields": {"fav_subject": fav_subject},
+            },
+            {
+                "content_plan": self.d.l2_pregen(
+                    "p2_subject_profile_link",
+                    self.subject_profile_link_fallback(local_um, fav_subject),
+                    ["hobbies", "interest", "fav_subject"],
+                    topic_sensitive=True,
+                ),
+                "expects_response": False,
+                "used_fields": {
+                    "hobbies": self.d.known(local_um, "hobbies"),
+                    "interest": self.d.known(local_um, "interest"),
+                    "fav_subject": fav_subject,
+                },
+            },
+            {
+                "content_plan": self.d.l1(
+                    "Vind jij dat ook, of zie ik dat een beetje robot-raar?"
+                ),
+                "expects_response": True,
+                "response_mode": "listen_only",
+                "used_fields": {},
+            },
+            {
+                "content_plan": self.d.l1(
+                    "Dat snap ik. Ik vind het altijd leuk als dingen een beetje bij elkaar passen."
+                ),
+                "expects_response": False,
+            },
+        ]
+
     def school_difficulty_phrase(self, um: dict) -> dict:
         raw = self.d.known(um, "school_difficulty")
         values = self.d.split_memory_values(raw)
@@ -352,6 +481,7 @@ class ScriptBuilder:
             options=[m3_actual, "iets anders op school"],
             reground=f"Ik weet zeker dat {m3_actual} iets is waar je goed in bent op school.",
         )
+        m3_topic["expected_value_count"] = {"school_strength": 1}
 
         m4_plan = self.d.script_plan_mistake("M4")
         m4_field = m4_plan.get("field") or "aspiration"
@@ -397,6 +527,35 @@ class ScriptBuilder:
         tutorial_condition = self.d.tutorial_condition(um)
         subject_phrase = self.subject_memory_phrase(um)
         difficulty_phrase = self.school_difficulty_phrase(um)
+        m3_wrong_values = {value.lower() for value in self.d.split_memory_values(m3_wrong)}
+        school_difficulty_values = {
+            value.lower()
+            for value in self.d.split_memory_values(self.d.known(um, "school_difficulty"))
+        }
+        m3_wrong_conflicts_with_school_difficulty = bool(m3_wrong_values & school_difficulty_values)
+        school_difficulty_followup_plan = self.d.l2_slot(
+            (
+                "Ik weet nog dat {fav_subject} jouw {subject_noun} {subject_verb}. "
+                "Maar ik weet ook nog dat {school_difficulty} voor jou soms wat lastiger {difficulty_verb}. "
+                "Waar zit dat voor jou in, denk je?"
+            ),
+            {
+                "fav_subject": subject_phrase["fav_subject"],
+                "subject_noun": subject_phrase["subject_noun"],
+                "subject_verb": subject_phrase["subject_verb"],
+                "school_difficulty": difficulty_phrase["school_difficulty"],
+                "difficulty_verb": difficulty_phrase["difficulty_verb"],
+            },
+        )
+        school_difficulty_followup_used_fields = {
+            "fav_subject": subject_phrase["fav_subject"],
+            "school_difficulty": difficulty_phrase["school_difficulty"],
+        }
+        school_difficulty_followup_relevant_fields = ["fav_subject", "school_difficulty"]
+        school_difficulty_followup_context = (
+            "Part 2 no-correction branch. Leo asked what makes the stored "
+            "school difficulty feel hard for the child."
+        )
         aspiration_reflection_profile = self.aspiration_reflection_profile_summary(um)
         memory_review_segments, memory_review_fields = self.memory_review_group_segments(um)
         part2_next_school_line = (
@@ -521,8 +680,7 @@ class ScriptBuilder:
                         ["hobbies"],
                     ),
                 ),
-                "expects_response": True,
-                "response_mode": "listen_only",
+                "expects_response": False,
                 "used_fields": {
                     "hobbies": self.d.known(um, "hobbies"),
                     "hobby_fav": self.d.known(um, "hobby_fav"),
@@ -579,14 +737,12 @@ class ScriptBuilder:
                         "defer_corrected_response": True,
                     },
                     {
-                        "content_plan": self.d.sequence(
-                            self.d.l1("Oeps, dan had ik dat verkeerd."),
-                            self.d.l2_pregen(
-                                "m1_corrected_followup",
-                                "Wat vind jij het leukste aan {hobby_fav}?",
-                                [m1_field],
-                                require_input_values=True,
-                            ),
+                        "content_plan": self.d.l2_pregen(
+                            "m1_corrected_followup",
+                            "Wat vind jij het leukste aan {hobby_fav}?",
+                            [m1_field],
+                            require_input_values=True,
+                            branch="corrected",
                         ),
                         "expects_response": True,
                         "response_mode": "listen_only",
@@ -598,6 +754,7 @@ class ScriptBuilder:
                             "m1_wrong_followup",
                             f"Wat vind jij het leukste om te {m1_wrong}?",
                             [m1_field],
+                            branch="not_corrected",
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
@@ -653,6 +810,7 @@ class ScriptBuilder:
                                 "m2_wrong_followup",
                                 f"Rond, warm, handig. Wat vind jij daar eigenlijk zo lekker aan?",
                                 [m2_field],
+                                branch="not_corrected",
                             ),
                         ),
                         "expects_response": True,
@@ -661,13 +819,12 @@ class ScriptBuilder:
                         "defer_corrected_response": True,
                     },
                     {
-                        "content_plan": self.d.sequence(
-                            self.d.l1("Oeps, goed dat je het zegt. Dan pas ik het aan."),
-                            self.d.l2_pregen(
-                                "m2_corrected_followup",
-                                f"{m2_actual[:1].upper() + m2_actual[1:]} klinkt eerlijk gezegd ook meteen gezellig.",
-                                [m2_field],
-                            ),
+                        "content_plan": self.d.l2_pregen(
+                            "m2_corrected_followup",
+                            "Dan houden we het bij {fav_food}. Dat klinkt eerlijk gezegd ook meteen gezellig.",
+                            [m2_field],
+                            require_input_values=True,
+                            branch="corrected",
                         ),
                         "expects_response": False,
                         "response_mode": "listen_only",
@@ -710,13 +867,7 @@ class ScriptBuilder:
                             "school is vast ook jouw allergrootste hobby ooit, toch?"
                         ),
                         "expects_response": True,
-                        "response_mode": "listen_only",
-                    },
-                    {
-                        "content_plan": self.d.l1(
-                            "Haha, dat dacht ik al een beetje. Ik maak maar een grapje hoor."
-                        ),
-                        "expects_response": False,
+                        "response_mode": "school_joke_transition",
                     },
                 ],
                 "used_fields": {},
@@ -747,8 +898,7 @@ class ScriptBuilder:
                             ),
                         ),
                         "expects_response": True,
-                        "response_mode": "acknowledge",
-                        "llm_turn": True,
+                        "response_mode": "robot_school_guess",
                         "used_fields": {},
                         "l3": {
                             "script_phase": "part2_school",
@@ -780,55 +930,8 @@ class ScriptBuilder:
                 "name": "Correct fav_subject + connection to interests",
                 "layer": "L1 + L2-slot + L2-pregen",
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
-                "segments": [
-                    {
-                        "content_plan": self.d.sequence(
-                            self.d.l2_slot(
-                                "Ik weet ook nog dat {fav_subject} jouw {subject_noun} {subject_verb}.",
-                                {
-                                    "fav_subject": subject_phrase["fav_subject"],
-                                    "subject_noun": subject_phrase["subject_noun"],
-                                    "subject_verb": subject_phrase["subject_verb"],
-                                },
-                            ),
-                            self.d.l2_pregen(
-                                "p2_fav_subject_comment",
-                                "Dat snap ik trouwens wel. Daar kun je van alles mee doen.",
-                                ["fav_subject"],
-                            ),
-                        ),
-                        "expects_response": True,
-                        "response_mode": "listen_only",
-                        "used_fields": {"fav_subject": subject_phrase["fav_subject"]},
-                    },
-                    {
-                        "content_plan": self.d.l2_pregen(
-                            "p2_subject_profile_link",
-                            "Dat past best bij jou, vind ik. Daar kun je ook weer iets bij verzinnen.",
-                            ["hobbies", "interest", "fav_subject"],
-                        ),
-                        "expects_response": True,
-                        "response_mode": "listen_only",
-                        "used_fields": {
-                            "hobbies": self.d.known(um, "hobbies"),
-                            "interest": self.d.known(um, "interest"),
-                            "fav_subject": subject_phrase["fav_subject"],
-                        },
-                    },
-                    {
-                        "content_plan": self.d.l1(
-                            "Vind jij dat ook, of zie ik dat een beetje robot-raar?"
-                        ),
-                        "expects_response": True,
-                        "response_mode": "listen_only",
-                    },
-                    {
-                        "content_plan": self.d.l1(
-                            "Dat snap ik. Ik vind het altijd leuk als dingen een beetje bij elkaar passen."
-                        ),
-                        "expects_response": False,
-                    },
-                ],
+                "topic": self.subject_phase_topic(um, subject_phrase),
+                "segments": self.subject_phase_segments(um, self.subject_phase_topic(um, subject_phrase)),
                 "used_fields": {
                     "fav_subject": subject_phrase["fav_subject"],
                     "hobbies": self.d.known(um, "hobbies"),
@@ -850,6 +953,7 @@ class ScriptBuilder:
                 "mistake_actual": m3_actual,
                 "mistake_wrong": m3_wrong,
                 "mistake_topic": m3_topic,
+                "m3_requires_school_difficulty_resolution": m3_wrong_conflicts_with_school_difficulty,
                 "response_mode": "mistake_interpretation",
                 "segments": [
                     {
@@ -863,13 +967,12 @@ class ScriptBuilder:
                         "defer_corrected_response": True,
                     },
                     {
-                        "content_plan": self.d.sequence(
-                            self.d.l1("Oeps, goed dat je het zegt. Dan pas ik het aan."),
-                            self.d.l2_pregen(
-                                "m3_corrected_followup",
-                                f"{m3_actual[:1].upper() + m3_actual[1:]}! Wat vind jij daar het leukste aan?",
-                                [m3_field],
-                            ),
+                        "content_plan": self.d.l2_pregen(
+                            "m3_corrected_followup",
+                            "Dan houden we het bij {school_strength}. Wat vind jij daar het leukste aan?",
+                            [m3_field],
+                            require_input_values=True,
+                            branch="corrected",
                         ),
                         "expects_response": True,
                         "response_mode": "listen_only",
@@ -883,11 +986,11 @@ class ScriptBuilder:
                                 "wat makkelijk voelt en wat lastig voelt."
                             ),
                             self.d.l2_slot(
-                                "{school_strength} vond ik altijd al moeilijk, dat weet ik nog wel. "
+                                "Gym vond ik altijd al moeilijk, dat weet ik nog wel. "
                                 "Maar eerlijk gezegd vond ik onthouden ook niet altijd makkelijk. "
                                 "Mijn robotgeheugen was toen nog een beetje rommelig, "
                                 "dus soms liep alles in mijn hoofd door elkaar.",
-                                {"school_strength": m3_actual[:1].upper() + m3_actual[1:]},
+                                {},
                             ),
                             self.d.l1(
                                 "Heb jij op school ook wel eens dat iets gewoon niet zo makkelijk blijft hangen?"
@@ -897,7 +1000,7 @@ class ScriptBuilder:
                         "response_mode": "acknowledge",
                         "llm_turn": True,
                         "skip_if_phase_confirmed_change": True,
-                        "used_fields": {m3_field: m3_actual},
+                        "used_fields": {},
                         "l3": {
                             "script_phase": "part2_school",
                             "topic": "school",
@@ -912,38 +1015,20 @@ class ScriptBuilder:
                         },
                     },
                     {
-                        "content_plan": self.d.l2_slot(
-                            (
-                                "Ik weet nog dat {fav_subject} jouw {subject_noun} {subject_verb}. "
-                                "Maar ik weet ook nog dat {school_difficulty} voor jou soms wat lastiger {difficulty_verb}. "
-                                "Waar zit dat voor jou in, denk je?"
-                            ),
-                            {
-                                "fav_subject": subject_phrase["fav_subject"],
-                                "subject_noun": subject_phrase["subject_noun"],
-                                "subject_verb": subject_phrase["subject_verb"],
-                                "school_difficulty": difficulty_phrase["school_difficulty"],
-                                "difficulty_verb": difficulty_phrase["difficulty_verb"],
-                            },
-                        ),
+                        "content_plan": school_difficulty_followup_plan,
                         "expects_response": True,
                         "response_mode": "acknowledge",
                         "llm_turn": True,
                         "skip_if_phase_confirmed_change": True,
-                        "used_fields": {
-                            "fav_subject": subject_phrase["fav_subject"],
-                            "school_difficulty": difficulty_phrase["school_difficulty"],
-                        },
+                        "used_fields": school_difficulty_followup_used_fields,
+                        "m3_school_difficulty_resolution": m3_wrong_conflicts_with_school_difficulty,
                         "l3": {
                             "script_phase": "part2_school",
                             "topic": "school",
                             "response_function": "bridge",
                             "question_allowed": False,
-                            "relevant_um_fields": ["fav_subject", "school_difficulty"],
-                            "local_context": (
-                                "Part 2 no-correction branch. Leo asked what makes the stored "
-                                "school difficulty feel hard for the child."
-                            ),
+                            "relevant_um_fields": school_difficulty_followup_relevant_fields,
+                            "local_context": school_difficulty_followup_context,
                             "next_script_line": "Denk jij daar wel eens over na, over later?",
                             "fallback": "Dat snap ik. Op school voelt niet alles elke dag even makkelijk.",
                         },
@@ -951,7 +1036,7 @@ class ScriptBuilder:
                 ],
                 "used_fields": {m3_field: m3_wrong},
                 "example_child": f"Nee, {m3_wrong} klopt niet.",
-                "example_leo_after": "Oeps, waar ben jij dan vooral goed in op school?",
+                "example_leo_after": "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
             },
             {
                 "phase": 14,
@@ -1086,6 +1171,7 @@ class ScriptBuilder:
                             "p3_m4_followup_wrong_aspiration",
                             f"En volgens mij wil jij later {m4_wrong}.",
                             [m4_field, "interest", "fav_subject", "school_strength"],
+                            branch="not_corrected",
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
@@ -1093,9 +1179,7 @@ class ScriptBuilder:
                         "used_fields": {m4_field: m4_wrong},
                     },
                     {
-                        "content_plan": self.d.l1(
-                            "Oeps, dan had ik dat verkeerd. Dan pas ik het aan."
-                        ),
+                        "content_plan": self.d.l1(""),
                         "expects_response": False,
                         "response_mode": "listen_only",
                         "run_if_phase_confirmed_change": True,

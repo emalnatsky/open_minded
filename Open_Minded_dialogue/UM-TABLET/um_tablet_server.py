@@ -231,6 +231,7 @@ class UMTabletServer(SICApplication):
                     "memory_access_active": bool(state.get("memory_access_active", False)),
                     "visible_fields":       state.get("visible_fields", []),
                     "mistakes":             state.get("mistakes", {}),
+                    "tablet_reveal":        state.get("tablet_reveal"),
                     "current_phase":       state.get("phase"),
                     "current_turn_name":   state.get("current_turn_name"),
                     "timestamp":           time.strftime("%H:%M:%S"),

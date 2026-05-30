@@ -51,6 +51,8 @@ class ContentPlan:
         fallback: str,
         input_fields: list = None,
         require_input_values: bool = False,
+        branch: str = "default",
+        topic_sensitive: bool = False,
     ) -> dict:
         return {
             "type": self.d.CASE_LLM_PREGENERATED,
@@ -59,6 +61,8 @@ class ContentPlan:
             "input_fields": input_fields or [],
             "fallback": fallback,
             "require_input_values": bool(require_input_values),
+            "branch": branch or "default",
+            "topic_sensitive": bool(topic_sensitive),
         }
 
     def sequence(self, *parts) -> dict:
@@ -103,21 +107,24 @@ class ContentPlan:
         require_input_values: bool = False,
     ) -> str:
         """Read an L2-pregen utterance from the CRI scenario or UM profile."""
-        scenario_text = self.d.scenario_utterance(key, branch=branch, fallback="")
-        if self.d.is_known(scenario_text) and (
-            not require_input_values
-            or self.text_mentions_input_values(scenario_text, input_fields or [])
-        ):
-            return scenario_text
-
-        for prefix in self.d.PREGENERATED_UTTERANCE_PREFIXES:
-            field = f"{prefix}{key}"
-            value = self.d.last_um_preview.get(field)
-            if self.d.is_known(value) and (
+        scenario_keys = self.d.um.scenario_keys_for(key)
+        for scenario_key in scenario_keys:
+            scenario_text = self.d.scenario_utterance(scenario_key, branch=branch, fallback="")
+            if self.d.is_known(scenario_text) and (
                 not require_input_values
-                or self.text_mentions_input_values(value, input_fields or [])
+                or self.text_mentions_input_values(scenario_text, input_fields or [])
             ):
-                return str(value)
+                return scenario_text
+
+        for scenario_key in scenario_keys:
+            for prefix in self.d.PREGENERATED_UTTERANCE_PREFIXES:
+                field = f"{prefix}{scenario_key}"
+                value = self.d.last_um_preview.get(field)
+                if self.d.is_known(value) and (
+                    not require_input_values
+                    or self.text_mentions_input_values(value, input_fields or [])
+                ):
+                    return str(value)
         return self.render_template_text(fallback, {})
 
     def render_content_plan(self, plan, turn: dict = None) -> str:
@@ -146,6 +153,8 @@ class ContentPlan:
             return self.render_template_text(plan.get("template", ""), plan.get("values", {}))
 
         if plan_type == self.d.CASE_LLM_PREGENERATED:
+            if turn.get("force_topic_fallback") and plan.get("topic_sensitive"):
+                return self.render_template_text(plan.get("fallback", ""), {})
             return self.pregenerated_utterance(
                 plan.get("key", ""),
                 plan.get("fallback", ""),

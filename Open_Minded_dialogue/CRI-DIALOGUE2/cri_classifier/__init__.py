@@ -9,7 +9,7 @@ Public surface (import from here, not from sub-modules):
 
 from .intent_result import IntentResult, REPEAT_SENTINEL, VALID_INTENTS
 from .stub import StubIntentClassifier
-from .gpt import GPTIntentClassifier
+from .gpt_newer import GPTIntentClassifier
 
 __all__ = [
     "IntentResult",

@@ -29,14 +29,16 @@ let currentScreen = "welcome";
 let unlockedCategories = new Set();
 let memoryAccessActive = false;
 let visibleFields = new Set();
+let lastMemoryAccessPromptId = null;
 let currentMistakes = {};
+let lastTabletRevealId = null;
+const TABLET_REVEAL_MAX_AGE_SECONDS = 30;
 
 function shouldShowFieldInMemoryAccess(field) {
   return !memoryAccessActive || visibleFields.has(field);
 }
 
 function unresolvedMistakeForField(field) {
-  if (!memoryAccessActive) return null;
   for (const mistake of Object.values(currentMistakes || {})) {
     if (!mistake || mistake.corrected) continue;
     if (mistake.field === field && mistake.wrong) return mistake;
@@ -335,6 +337,33 @@ function buildPill(field, value, color) {
   return pill;
 }
 
+function runTabletReveal(reveal) {
+  if (!reveal || reveal.id === undefined || reveal.id === lastTabletRevealId) return false;
+
+  const field = reveal.field;
+  const catKey = reveal.category;
+  const oldValue = reveal.old_value;
+  const newValue = reveal.new_value;
+  const createdAt = Number(reveal.created_at || 0);
+  const cat = CATEGORIES[catKey];
+  if (!field || !catKey || !cat || !createdAt || !hasDisplayValue(oldValue) || !hasDisplayValue(newValue)) return false;
+  if ((Date.now() / 1000) - createdAt > TABLET_REVEAL_MAX_AGE_SECONDS) return false;
+
+  lastTabletRevealId = reveal.id;
+
+  if (!liveUM[catKey]) liveUM[catKey] = {};
+  liveUM[catKey][field] = { value: oldValue, updated: false };
+
+  openCategory(catKey);
+
+  setTimeout(() => {
+    liveUM[catKey][field] = { value: newValue, updated: true };
+    applyDiffToOpenCategory(catKey, [{ field, oldValue, newValue }]);
+  }, 700);
+
+  return true;
+}
+
 // =====================================================================
 // LIVE UM UPDATES — eraser → write-in
 // =====================================================================
@@ -394,9 +423,23 @@ function handleUMUpdate(data) {
   console.log("handleUMUpdate called with", Object.keys(data.fields || {}).length, "fields");
   const fields    = data.fields    || {};
   const timestamp = data.timestamp || "";
+  const previousMemoryAccessActive = memoryAccessActive;
+  const previousVisibleFieldsKey = [...visibleFields].sort().join("|");
+  const incomingMemoryAccessPromptId = data.memory_access_prompt_id || null;
   memoryAccessActive = Boolean(data.memory_access_active);
   visibleFields = new Set(Array.isArray(data.visible_fields) ? data.visible_fields : []);
   currentMistakes = data.mistakes || {};
+  const isNewMemoryAccessPrompt =
+    memoryAccessActive &&
+    incomingMemoryAccessPromptId &&
+    incomingMemoryAccessPromptId !== lastMemoryAccessPromptId;
+  if (incomingMemoryAccessPromptId) {
+    lastMemoryAccessPromptId = incomingMemoryAccessPromptId;
+  }
+  const currentVisibleFieldsKey = [...visibleFields].sort().join("|");
+  const memoryAccessShapeChanged =
+    previousMemoryAccessActive !== memoryAccessActive ||
+    previousVisibleFieldsKey !== currentVisibleFieldsKey;
 
   // Update child name on the closed book cover (Screen 1)
   if (data.child_name) setChildName(data.child_name);
@@ -410,12 +453,14 @@ function handleUMUpdate(data) {
   // Group by category & detect per-field changes vs. prior liveUM
   const grouped = {};
   const diffsByCategory = {}; // { catKey: [{field, oldValue, newValue}, ...] }
+  const instantUpdatesByCategory = {}; // category changed without eraser animation
 
   Object.entries(fields).forEach(([field, meta]) => {
     if (!shouldShowFieldInMemoryAccess(field)) return;
 
     const rawCat = meta.category || "";
     const catKey = mapCategory(rawCat);
+    const unresolvedMistake = unresolvedMistakeForField(field);
 
     if (!grouped[catKey]) grouped[catKey] = {};
     if (!diffsByCategory[catKey]) diffsByCategory[catKey] = [];
@@ -429,7 +474,9 @@ function handleUMUpdate(data) {
       updated: prevValue !== null && prevValue !== newValue && hasDisplayValue(newValue),
     };
 
-    if (prevValue !== newValue) {
+    if (prevValue !== newValue && unresolvedMistake) {
+      instantUpdatesByCategory[catKey] = true;
+    } else if (prevValue !== newValue) {
       diffsByCategory[catKey].push({ field, oldValue: prevValue, newValue });
     }
   });
@@ -439,18 +486,28 @@ function handleUMUpdate(data) {
   Object.keys(liveUM).forEach(catKey => delete liveUM[catKey]);
   Object.assign(liveUM, grouped);
 
+  if (isNewMemoryAccessPrompt) {
+    showScreen("welcome");
+  }
+
   // Connection / status indicator
   setConn("connected", "Live ✓ " + (timestamp || ""));
 
+  if (runTabletReveal(data.tablet_reveal)) {
+    return;
+  }
+
   // If a category screen is open, apply per-field eraser/write diffs
   if (currentScreen === "category" && currentCategory) {
-    if (memoryAccessActive) {
+    if (memoryAccessShapeChanged) {
       renderPills(currentCategory, true);
       return;
     }
     const diffs = diffsByCategory[currentCategory] || [];
     if (diffs.length > 0) {
       applyDiffToOpenCategory(currentCategory, diffs);
+    } else if (instantUpdatesByCategory[currentCategory]) {
+      renderPills(currentCategory, true);
     } else {
       // No diffs for current category, but ensure pills exist (first poll)
       const panel = document.getElementById("pillsContainer");

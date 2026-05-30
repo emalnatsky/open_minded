@@ -686,6 +686,11 @@ class InteractionEvent(BaseModel):
     event_type: str       # "correction" | "no_correction" | "nudge_triggered" | "nudge_correction"
     mistake_id: Optional[str] = None
     field: Optional[str] = None
+    outcome: Optional[str] = None
+    real_value: Optional[str] = None
+    mistake_value: Optional[str] = None
+    leo_memory_key: Optional[str] = None
+    leo_memory_value: Optional[str] = None
     wrong_value: Optional[str] = None
     child_response: Optional[str] = None
     corrected: bool = False
@@ -789,6 +794,11 @@ def log_event(child_id: str, body: InteractionEvent):
         event_type=body.event_type,
         mistake_id=body.mistake_id,
         field=body.field,
+        outcome=body.outcome,
+        real_value=body.real_value,
+        mistake_value=body.mistake_value,
+        leo_memory_key=body.leo_memory_key,
+        leo_memory_value=body.leo_memory_value,
         wrong_value=body.wrong_value,
         child_response=body.child_response,
         corrected=body.corrected,

@@ -22,6 +22,7 @@ Contract: output always matches intent_classification_contract.json v3.0.0.
 import os
 import json
 import logging
+import re
 from typing import Optional
 
 from .intent_result import IntentResult, REPEAT_SENTINEL, VALID_INTENTS, EMBEDDED_VALID_FIELDS
@@ -33,6 +34,20 @@ CONFIDENCE_THRESHOLD  = 0.7
 GPT_INTENT_MODEL      = "gpt-4o-mini"
 GPT_INTENT_MAX_TOKENS = 150
 GPT_INTENT_TEMPERATURE = 0.0
+
+MEMORY_ACCESS_PATTERN = re.compile(
+    r"\b("
+    r"wat weet je|wat weet jij|weet je nog|wat heb je onthouden|wat onthoud je|"
+    r"wat herinner je|wat staat er in je geheugen|wat staat er in jouw geheugen|"
+    r"geheugenboek|geheugen boek|"
+    r"kan ik je geheugen|kan ik jouw geheugen|mag ik je geheugen|mag ik jouw geheugen|"
+    r"kan ik in je geheugen|kan ik in jouw geheugen|mag ik in je geheugen|mag ik in jouw geheugen|"
+    r"je geheugen zien|jouw geheugen zien|geheugen zien|"
+    r"geheugenboek zien|geheugen boek zien|"
+    r"laat je geheugen zien|laat jouw geheugen zien|laat eens zien wat je onthoudt"
+    r")\b",
+    re.IGNORECASE,
+)
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 # This is the core identity + task definition. Turn-specific context is
@@ -57,7 +72,7 @@ Intent definitions:
 - um_add: Child provides NEW information to store. ("Mijn lievelingseten is pizza")
 - um_update: Child CORRECTS something Leo said or something already stored. ("Nee, niet bakken, tekenen!")
 - um_delete: Child wants Leo to FORGET something. ("Vergeet wat ik zei over mijn huisdier")
-- um_inspect: Child asks what Leo REMEMBERS. ("Wat weet je over mij?", "Wat heb je onthouden?")
+- um_inspect: Child asks what Leo REMEMBERS or asks to see/open/read/hear Leo's memory or memory book. ("Wat weet je over mij?", "Wat heb je onthouden?", "Kan ik je geheugen zien?")
 - dialogue_update: Child corrects THEMSELVES mid-turn (not correcting Leo). ("Pizza... nee wacht, sushi")
 - dialogue_answer: Child answers Leo's question normally. ("Voetbal", "Ja", "Negen jaar")
 - dialogue_question: Child asks Leo a question. ("Waarom wil je dat weten?", "Ben jij echt een robot?")
@@ -67,10 +82,19 @@ Intent definitions:
 Critical classification rules:
 - If Leo just stated something WRONG about the child (e.g., "Volgens mij is bakken jouw lievelingshobby") and the child disagrees or provides a different value, that is um_update — the child is correcting Leo's memory.
 - If the child says "Nee" or "Klopt niet" after Leo stated a memory value, that is um_update (rejection of stored value), even without a new value.
+- If the user message includes "Expected correction field", Leo has just asked for the replacement value for that exact field. A short answer like "Gym" or "hockey" should be um_update for that field with the child's answer as value.
 - If the child says "Ja" or "Klopt" after Leo stated a memory value, that is dialogue_answer (confirmation).
-- Memory-access phrases like "wat weet je nog over mij", "wat heb je onthouden", "kun je vertellen wat je weet" are always um_inspect.
+- Memory-access phrases like "wat weet je nog over mij", "wat heb je onthouden", "kun je vertellen wat je weet", "kan ik je geheugen zien", "mag ik je geheugenboek zien", and "kan ik in je geheugen kijken" are always um_inspect.
+- Do NOT classify memory/geheugen/geheugenboek requests as dialogue_question just because they start with "kan ik", "mag ik", or "kun je".
 - Only return um_add/um_update if the child explicitly states information. Never invent values.
 - Use Leo's previous utterance to determine which field the child is talking about.
+- If Response mode is school_joke_transition, do NOT return a UM-changing intent. Return intent="dialogue_answer", field=null, and put exactly one of these labels in value:
+  plays_along_yes, rejects_joke_no, likes_school, dislikes_school, mixed_or_depends, unclear.
+  Use plays_along_yes when the child accepts the joke or jokes along; use likes_school only when they really say school is fun or nice.
+  Use rejects_joke_no when they simply reject the joke; use dislikes_school when they clearly say school is bad, boring, stupid, or unpleasant.
+- If Response mode is robot_school_guess, do NOT return a UM-changing intent. Return intent="dialogue_answer", field=null, and put exactly one of these labels in value:
+  correct_listening, wrong_guess, unclear.
+  Use correct_listening only when the child guesses listening/hearing/paying attention. Use unclear for "weet ik niet", no idea, silence, or no real guess. Use wrong_guess for any other guess.
 
 Output: Return ONLY a valid JSON object with exactly these four keys:
   intent (string from the list above)
@@ -151,6 +175,21 @@ INTENT_FEW_SHOT_EXAMPLES = [
         "child": "Wat weet je over mijn lievelingshobby?",
         "result": {"intent": "um_inspect", "field": "hobby_fav", "value": None, "confidence": 0.96},
     },
+    {
+        "leo": "Ik weet ook nog dat jij zelf basketbal doet.",
+        "child": "Kan ik je geheugen zien?",
+        "result": {"intent": "um_inspect", "field": None, "value": None, "confidence": 0.96},
+    },
+    {
+        "leo": "Ik probeer alles goed te onthouden.",
+        "child": "Mag ik je geheugenboek zien?",
+        "result": {"intent": "um_inspect", "field": None, "value": None, "confidence": 0.96},
+    },
+    {
+        "leo": "We hebben al veel besproken vandaag.",
+        "child": "Kan ik in je geheugen kijken?",
+        "result": {"intent": "um_inspect", "field": None, "value": None, "confidence": 0.96},
+    },
 
     # === dialogue_update (child corrects themselves) ===
     {
@@ -174,6 +213,50 @@ INTENT_FEW_SHOT_EXAMPLES = [
         "leo": "Doe jij dat ook wel eens?",
         "child": "Ja soms wel",
         "result": {"intent": "dialogue_answer", "field": None, "value": None, "confidence": 0.88},
+    },
+
+    # === school_joke_transition categories ===
+    {
+        "leo": "School is vast ook jouw allergrootste hobby ooit, toch?",
+        "child": "Ja dat klopt",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "plays_along_yes", "confidence": 0.92},
+    },
+    {
+        "leo": "School is vast ook jouw allergrootste hobby ooit, toch?",
+        "child": "Nee echt niet",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "rejects_joke_no", "confidence": 0.94},
+    },
+    {
+        "leo": "School is vast ook jouw allergrootste hobby ooit, toch?",
+        "child": "Ik vind school eigenlijk best leuk",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "likes_school", "confidence": 0.93},
+    },
+    {
+        "leo": "School is vast ook jouw allergrootste hobby ooit, toch?",
+        "child": "School is stom",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "dislikes_school", "confidence": 0.93},
+    },
+    {
+        "leo": "School is vast ook jouw allergrootste hobby ooit, toch?",
+        "child": "Soms wel, hangt ervan af",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "mixed_or_depends", "confidence": 0.91},
+    },
+
+    # === robot_school_guess categories ===
+    {
+        "leo": "Kun jij raden waar ik op robotschool juist goed in was?",
+        "child": "Luisteren?",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "correct_listening", "confidence": 0.94},
+    },
+    {
+        "leo": "Kun jij raden waar ik op robotschool juist goed in was?",
+        "child": "Rekenen?",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "wrong_guess", "confidence": 0.93},
+    },
+    {
+        "leo": "Kun jij raden waar ik op robotschool juist goed in was?",
+        "child": "Weet ik niet",
+        "result": {"intent": "dialogue_answer", "field": None, "value": "unclear", "confidence": 0.95},
     },
 
     # === dialogue_question ===
@@ -276,6 +359,8 @@ class GPTIntentClassifier:
                 - script_phase:      Current script phase
                 - relevant_fields:   List of UM fields in scope for this turn
                 - response_mode:     e.g., "mistake_interpretation"
+                - expected_correction_field: UM field Leo is explicitly asking the child to correct
+                - correction_question: The correction question Leo just asked
         """
         if not text or not text.strip():
             return IntentResult(intent="dialogue_none", field=None, value=None, confidence=1.0)
@@ -285,7 +370,7 @@ class GPTIntentClassifier:
             logger.warning("GPT hard failure on first attempt; using stub.")
             return self.stub.classify(text)
 
-        intent, field, value, confidence = result
+        intent, field, value, confidence = self._coerce_result(*result, text=text.strip())
         if confidence >= CONFIDENCE_THRESHOLD:
             return IntentResult(intent=intent, field=field, value=value, confidence=confidence)
 
@@ -300,13 +385,38 @@ class GPTIntentClassifier:
         if result is None:
             return self.stub.classify(text)
 
-        intent, field, value, confidence = result
+        intent, field, value, confidence = self._coerce_result(*result, text=text.strip())
         if confidence < CONFIDENCE_THRESHOLD:
             return self.stub.classify(text)
 
         return IntentResult(intent=intent, field=field, value=value, confidence=confidence)
 
     # ── Internals ─────────────────────────────────────────────────────────────
+
+    def _is_filler_only(self, text: str) -> bool:
+        tokens = re.findall(r"[a-zA-Z]+", str(text or "").lower())
+        if not tokens:
+            return True
+        filler = {"um", "uh", "eh", "hm", "hmm", "ah", "ahh", "uhh"}
+        filler_with_backchannels = filler | {"ja", "nee"}
+        return all(token in filler for token in tokens) or (
+            tokens[0] in filler and all(token in filler_with_backchannels for token in tokens)
+        )
+
+    def _looks_like_memory_access(self, text: str) -> bool:
+        return bool(MEMORY_ACCESS_PATTERN.search(str(text or "")))
+
+    def _coerce_result(self, intent: str, field, value, confidence: float, text: str) -> tuple:
+        if self._looks_like_memory_access(text) and intent not in {
+            "um_add",
+            "um_update",
+            "um_delete",
+            "dialogue_update",
+        }:
+            return "um_inspect", field, None, max(confidence, 0.95)
+        if intent == "dialogue_none" and not self._is_filler_only(text):
+            return "dialogue_answer", None, None, max(confidence, 0.85)
+        return intent, field, value, confidence
 
     def _format_user_message(
         self,
@@ -315,6 +425,8 @@ class GPTIntentClassifier:
         topic: str = None,
         relevant_fields: list = None,
         response_mode: str = None,
+        expected_correction_field: str = None,
+        correction_question: str = None,
     ) -> str:
         """Build the user message with as much context as available."""
         parts = []
@@ -331,6 +443,16 @@ class GPTIntentClassifier:
         if relevant_fields:
             parts.append(f"Fields in scope: {', '.join(relevant_fields)}")
 
+        if expected_correction_field:
+            parts.append(f"Expected correction field: {expected_correction_field}")
+            if correction_question:
+                parts.append(f"Correction question Leo asked: \"{correction_question}\"")
+            parts.append(
+                "Correction instruction: interpret the child answer as the replacement value "
+                f"for {expected_correction_field}, unless the child clearly refuses, says they do not know, "
+                "or asks to inspect memory."
+            )
+
         parts.append(f"Child said: \"{child_text}\"")
 
         return "\n".join(parts)
@@ -344,6 +466,8 @@ class GPTIntentClassifier:
                 topic=ctx.get("topic"),
                 relevant_fields=ctx.get("relevant_fields"),
                 response_mode=ctx.get("response_mode"),
+                expected_correction_field=ctx.get("expected_correction_field"),
+                correction_question=ctx.get("correction_question"),
             )
 
             messages = [

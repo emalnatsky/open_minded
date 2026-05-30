@@ -317,6 +317,14 @@ class UMClient:
         return self.pull_cri_scenario()
 
     def scenario_keys_for(self, key: str) -> list:
+        if isinstance(key, (list, tuple)):
+            keys = []
+            for item in key:
+                for candidate in self.scenario_keys_for(item):
+                    if candidate not in keys:
+                        keys.append(candidate)
+            return keys
+
         keys = [str(key or "").strip()]
         aliases = getattr(self.d, "SCENARIO_UTTERANCE_ALIASES", {}).get(keys[0], ())
         keys.extend(str(alias).strip() for alias in aliases if alias)
@@ -328,6 +336,25 @@ class UMClient:
         for marker in ("[STUB]", "[stub]"):
             if clean.startswith(marker):
                 return clean[len(marker):].strip()
+        return clean
+
+    def clean_corrected_scenario_text(self, text: str) -> str:
+        """Let the action handler own the correction acknowledgement."""
+        clean = self.clean_scenario_text(text)
+        prefixes = (
+            "Oeps, goed dat je het zegt. Dan pas ik het aan.",
+            "Oeps, dan had ik dat verkeerd. Dan pas ik het aan.",
+            "Oeps, dan had ik dat verkeerd.",
+            "Oeps, goed dat je het zegt.",
+            "Dan pas ik het aan.",
+        )
+        changed = True
+        while changed:
+            changed = False
+            for prefix in prefixes:
+                if clean.startswith(prefix):
+                    clean = clean[len(prefix):].strip()
+                    changed = True
         return clean
 
     def scenario_utterance(self, key: str, branch: str = "default", fallback: str = "") -> str:
@@ -345,11 +372,18 @@ class UMClient:
             if not isinstance(branches, dict) or not branches:
                 continue
             if wanted_branch in branches:
+                if wanted_branch == "corrected":
+                    return self.clean_corrected_scenario_text(branches[wanted_branch])
                 return self.clean_scenario_text(branches[wanted_branch])
             if "default" in branches:
+                if wanted_branch == "corrected":
+                    return self.clean_corrected_scenario_text(branches["default"])
                 return self.clean_scenario_text(branches["default"])
             if len(branches) == 1:
-                return self.clean_scenario_text(next(iter(branches.values())))
+                value = next(iter(branches.values()))
+                if wanted_branch == "corrected":
+                    return self.clean_corrected_scenario_text(value)
+                return self.clean_scenario_text(value)
 
         return fallback
 
@@ -400,6 +434,47 @@ class UMClient:
         if self.is_known(value):
             return str(value)
         return self.get_field(field)
+
+    # ── CRI interaction events ────────────────────────────────────────────────
+
+    def log_cri_interaction_event(self, payload: dict) -> bool:
+        """Write a CRI event to GraphDB without changing canonical UM fields."""
+        if self.d.use_fake_persona_um():
+            self.d.log_conversation_event(
+                "cri_interaction_event_write",
+                success=True,
+                status_code="fake_persona",
+                payload=dict(payload or {}),
+            )
+            return True
+
+        url = f"{self.d.UM_API_BASE}/api/um/{self.d.CHILD_ID}/scenario/event"
+        try:
+            response = requests.post(url, json=payload, timeout=3)
+            ok = response.status_code in (200, 201, 202, 204)
+            self.d.log_conversation_event(
+                "cri_interaction_event_write",
+                logged_event_type=(payload or {}).get("event_type"),
+                mistake_id=(payload or {}).get("mistake_id"),
+                field=(payload or {}).get("field"),
+                success=ok,
+                status_code=response.status_code,
+            )
+            if not ok:
+                self.d.logger.warning("Could not log CRI interaction event: %s", response.text[:200])
+            return ok
+        except Exception as e:
+            self.d.logger.warning("Could not reach UM API to log CRI interaction event: %s", e)
+            self.d.log_conversation_event(
+                "cri_interaction_event_write",
+                logged_event_type=(payload or {}).get("event_type"),
+                mistake_id=(payload or {}).get("mistake_id"),
+                field=(payload or {}).get("field"),
+                success=False,
+                status_code=None,
+                error=str(e),
+            )
+            return False
 
     # ── writes / deletes ─────────────────────────────────────────────────────
 
@@ -467,6 +542,60 @@ class UMClient:
                 "fields": {field: change["new_value"]},
                 "source": "cri_4_topic_confirmation",
             }
+            if change.get("replace_field"):
+                replace_timeout = getattr(self.d, "UM_REPLACE_TIMEOUT_SECONDS", 15)
+                dry_response = requests.post(url, json={**payload, "dry_run": True}, timeout=replace_timeout)
+                dry_ok = dry_response.status_code in (200, 201, 202, 204)
+                try:
+                    dry_data = dry_response.json().get("data", {})
+                    dry_skipped = dry_data.get("skipped") or []
+                except Exception:
+                    dry_skipped = []
+                if not dry_ok or dry_skipped:
+                    self.d.log_conversation_event(
+                        "um_write",
+                        action="replace",
+                        field=field,
+                        old_value=change.get("old_value"),
+                        new_value=change.get("new_value"),
+                        success=False,
+                        status_code=dry_response.status_code,
+                        error=f"dry_run skipped fields: {dry_skipped}" if dry_skipped else "dry_run failed",
+                    )
+                    return False
+
+                delete_url = f"{self.d.UM_API_BASE}/api/um/{self.d.CHILD_ID}/field/{field}"
+                delete_response = requests.delete(delete_url, timeout=replace_timeout)
+                delete_ok = delete_response.status_code in (200, 202, 204, 404)
+                if not delete_ok:
+                    self.d.log_conversation_event(
+                        "um_write",
+                        action="replace",
+                        field=field,
+                        old_value=change.get("old_value"),
+                        new_value=change.get("new_value"),
+                        success=False,
+                        status_code=delete_response.status_code,
+                        error="delete before replace failed",
+                    )
+                    return False
+
+                response = requests.post(url, json=payload, timeout=replace_timeout)
+                ok = response.status_code in (200, 201, 202, 204)
+                if ok:
+                    self.d.last_um_preview[field] = change["new_value"]
+                self.d.log_conversation_event(
+                    "um_write",
+                    action="replace",
+                    field=field,
+                    old_value=change.get("old_value"),
+                    new_value=change.get("new_value"),
+                    success=ok,
+                    status_code=response.status_code,
+                    delete_status_code=delete_response.status_code,
+                )
+                return ok
+
             response = requests.post(url, json=payload, timeout=3)
             ok = response.status_code in (200, 201, 202, 204)
             if ok:
