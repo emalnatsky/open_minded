@@ -104,6 +104,7 @@ class CRI_ScriptedDialogue(SICApplication):
     SCENARIO_UTTERANCE_ALIASES = config.SCENARIO_UTTERANCE_ALIASES
 
     USE_DESKTOP_MIC               = config.USE_DESKTOP_MIC
+    CONNECT_NAO = config.CONNECT_NAO
     ASK_RUN_MODE_AT_START         = config.ASK_RUN_MODE_AT_START
     SIMULATION_MODE               = config.SIMULATION_MODE
     SIMULATED_PERSONA_DIR         = config.SIMULATED_PERSONA_DIR
@@ -597,7 +598,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.logger.info("Child input mode: %s", self.child_input_mode)
 
         # NAO
-        if not self.USE_DESKTOP_MIC:
+        if self.CONNECT_NAO:
             self.logger.info("Connecting to NAO at %s...", self.nao_ip)
             self.nao = Nao(ip=self.nao_ip)
             self.logger.info("NAO connected.")
@@ -632,7 +633,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.speech = SpeechIO(
             nao=self.nao,
             whisper=self.whisper,
-            use_desktop_mic=self.USE_DESKTOP_MIC,
+            use_desktop_mic=not self.CONNECT_NAO,
             simulation_mode=self.simulation_mode,
             use_keyboard_input_fn=self.use_keyboard_input,
             stt_timeout=self.STT_TIMEOUT,
@@ -2119,8 +2120,8 @@ class CRI_ScriptedDialogue(SICApplication):
         self.print_prestart_preview(script)
         self.print_resume_context_before_interaction()
 
-        try:
-            if not self.simulation_mode and not self.USE_DESKTOP_MIC:
+        try: 
+            if not self.simulation_mode and self.CONNECT_NAO:
                 self.nao.autonomous.request(NaoWakeUpRequest())
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
@@ -2172,7 +2173,7 @@ class CRI_ScriptedDialogue(SICApplication):
             self.logger.error("Error: %s", e)
         finally:
             try:
-                if not self.simulation_mode and not self.USE_DESKTOP_MIC:
+                if not self.simulation_mode and self.CONNECT_NAO:
                     self.nao.autonomous.request(NaoRestRequest())
             except Exception:
                 pass
