@@ -87,7 +87,7 @@ class SpeechIO:
             print(f"\n[LEO]: {text}\n")
         else:
             from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
-            self.nao.tts.request(NaoqiTextToSpeechRequest(text))
+            self.nao.tts.request(NaoqiTextToSpeechRequest(text, language="Dutch"))
             # ~0.01s per character is a safe estimate for NAO's TTS speed.
             time.sleep(len(text) * 0.01)
 

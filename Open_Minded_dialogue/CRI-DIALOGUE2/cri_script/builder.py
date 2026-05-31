@@ -121,7 +121,9 @@ class ScriptBuilder:
                     },
                 ),
                 "expects_response": True,
-                "response_mode": "listen_only",
+                "response_mode": "topic_interpretation",
+                "memory_correction_requested": True,
+                "memory_correction_field": "fav_subject",
                 "used_fields": {"fav_subject": fav_subject},
             },
             {

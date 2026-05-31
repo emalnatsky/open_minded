@@ -639,7 +639,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase23["script_phase"], "part2_correct_fav_subject_connection")
         self.assertEqual(len(phase23["segments"]), 5)
         self.assertIn("Ik weet ook nog dat natuur jouw lievelingsvak is.", app.turn_text(phase23["segments"][0]))
-        self.assertEqual(phase23["segments"][0]["response_mode"], "listen_only")
+        self.assertEqual(phase23["segments"][0]["response_mode"], "topic_interpretation")
+        self.assertTrue(phase23["segments"][0]["memory_correction_requested"])
+        self.assertEqual(phase23["segments"][0]["memory_correction_field"], "fav_subject")
         self.assertTrue(phase23["segments"][0]["expects_response"])
         self.assertFalse(phase23["segments"][1]["expects_response"])
         self.assertFalse(phase23["segments"][2]["expects_response"])
@@ -1051,7 +1053,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         turn = {
             "phase": 12,
             "phase_id": "2.3",
-            "response_mode": "listen_only",
+            "response_mode": "topic_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "fav_subject",
             "used_fields": {"fav_subject": "Rekenen en Gym"},
             "topic": {
                 "domain": "school_subject",
@@ -1119,7 +1123,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         turn = {
             "phase": 12,
             "phase_id": "2.3",
-            "response_mode": "listen_only",
+            "response_mode": "topic_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "fav_subject",
             "used_fields": {"fav_subject": "Rekenen en Gym"},
             "topic": {
                 "domain": "school_subject",
@@ -1153,7 +1159,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         turn = {
             "phase": 12,
             "phase_id": "2.3",
-            "response_mode": "listen_only",
+            "response_mode": "topic_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "fav_subject",
             "used_fields": {"fav_subject": "Rekenen en Gym"},
             "topic": {
                 "domain": "school_subject",
