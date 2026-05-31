@@ -193,6 +193,25 @@ def sample_um():
 
 
 class CRIDialogue2Tests(unittest.TestCase):
+    def test_pull_um_missing_child_skips_per_field_fallback(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.CHILD_ID = "000"
+        app.local_child_name_cri = "Unika"
+
+        response = SimpleNamespace(status_code=404)
+        with patch("cri_um.client.requests.get", return_value=response) as requests_get:
+            with patch.object(app.um, "get_field", side_effect=AssertionError("per-field fallback should be skipped")) as get_field:
+                um = app.um.pull_um()
+
+        requests_get.assert_called_once_with("http://localhost:8000/api/um/000", timeout=8)
+        get_field.assert_not_called()
+        self.assertEqual(um["name"], "Unika")
+        self.assertEqual(app.last_um_preview, um)
+        for field in CRI.UM_FIELDS:
+            if field != "name":
+                self.assertEqual(um[field], CRI.UNKNOWN_VALUE)
+
     def test_shareable_paths_point_to_inner_package_and_local_folder(self):
         config = cri_module.config
 
@@ -1630,6 +1649,41 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("eten", state["unlocked_categories"])
         self.assertIn("aspiratie", state["unlocked_categories"])
         self.assertTrue(state["mistakes"]["M4"]["corrected"])
+        self.assertEqual(state["mistakes"]["M4"]["wrong"], "juf worden")
+
+    def test_tablet_state_carries_all_unresolved_mistake_overlays(self):
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_state_mistakes_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        state_path = Path(temp_dir) / "session_state.json"
+        writer = cri_module.TabletStateWriter(
+            state_path=str(state_path),
+            get_child_id_fn=lambda: "701",
+            get_child_name_fn=lambda: "Ali",
+            get_mistake_states_fn=lambda: {
+                "M1": {"field": "hobby_fav", "actual": "voetbal", "wrong": "padel", "corrected": False},
+                "M2": {"field": "fav_food", "actual": "cag kebabi", "wrong": "frietjes", "corrected": False},
+                "M3": {"field": "school_strength", "actual": "Rekenen", "wrong": "begrijpend lezen", "corrected": False},
+                "M4": {"field": "aspiration", "actual": "dokter", "wrong": "kok", "corrected": False},
+            },
+        )
+
+        writer.activate_memory_access(
+            ["hobby_fav", "fav_food", "school_strength", "aspiration"],
+            phase=12,
+        )
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertTrue(state["memory_access_active"])
+        self.assertEqual(
+            state["visible_fields"],
+            ["hobby_fav", "fav_food", "school_strength", "aspiration"],
+        )
+        self.assertEqual(state["mistakes"]["M1"]["wrong"], "padel")
+        self.assertEqual(state["mistakes"]["M2"]["wrong"], "frietjes")
+        self.assertEqual(state["mistakes"]["M3"]["wrong"], "begrijpend lezen")
+        self.assertEqual(state["mistakes"]["M4"]["wrong"], "kok")
+        self.assertEqual(state["mistakes"]["M1"]["actual"], "voetbal")
+        self.assertEqual(state["mistakes"]["M4"]["actual"], "dokter")
 
     def test_action_handler_logs_already_correct_mistake_without_um_write(self):
         app = make_app()
