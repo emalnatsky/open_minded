@@ -1359,6 +1359,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase6["phase_id"], "1.6")
         self.assertEqual(phase6["mistake_field"], "hobby_fav")
         self.assertEqual(phase6["mistake_wrong"], "bakken")
+        self.assertEqual(phase6["mistake_topic"]["expected_value_count"], {"hobby_fav": 1})
         self.assertEqual(len(segments), 4)
         self.assertEqual(
             app.turn_text(segments[0]),
@@ -2272,6 +2273,171 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(context["memory_review_fields"], ["sports_enjoys", "sports_fav_play"])
         self.assertEqual(set(app.allowed_change_fields(context)), {"sports_enjoys", "sports_fav_play"})
 
+    def test_memory_access_change_to_already_stored_value_is_acknowledged(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["hobby_fav"] = "gamen"
+        action = {
+            "visible_fields": ["hobbies", "hobby_fav", "freetime_fav"],
+            "memory_scope": ["hobbies", "hobby_fav", "freetime_fav"],
+        }
+        source_turn = {"phase": 6, "phase_id": "1.6", "name": "Mistake 1 - hobby_fav"}
+        context = app.memory_access_change_context(action, source_turn)
+
+        result = IntentResult(intent="um_update", field="hobby_fav", value="gamen", confidence=0.95)
+        handled = app.action_handler(result, "Mijn lievelingshobby naar gamen", context)
+
+        self.assertEqual(handled["action"], "memory_access_change_already_stored")
+        self.assertTrue(handled["handled"])
+        self.assertEqual(handled["change"]["field"], "hobby_fav")
+        self.assertEqual(handled["change"]["new_value"], "gamen")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Dat staat al zo in mijn geheugen. Ik heb al onthouden dat je favoriete hobby gamen is.",
+        )
+
+    def test_memory_access_change_from_visible_mistake_to_stored_value_is_correction(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["hobby_fav"] = "gamen"
+        app.mistake_states = {
+            "M1": {
+                "id": "M1",
+                "mentioned": True,
+                "field": "hobby_fav",
+                "actual": "gamen",
+                "wrong": "padel",
+                "corrected": False,
+            }
+        }
+        action = {
+            "visible_fields": ["hobbies", "hobby_fav", "freetime_fav"],
+            "memory_scope": ["hobbies", "hobby_fav", "freetime_fav"],
+        }
+        source_turn = {"phase": 6, "phase_id": "1.6", "name": "Memory access"}
+        context = app.memory_access_change_context(action, source_turn)
+
+        self.assertEqual(context["topic"]["current_values"]["hobby_fav"], "padel")
+        self.assertEqual(context["topic"]["stored_values"]["hobby_fav"], "gamen")
+
+        result = IntentResult(intent="um_update", field="hobby_fav", value="gamen", confidence=0.95)
+        change = app.actions.change_from_intent_result(result, context, "Mijn lievelingshobby naar gamen")
+
+        self.assertEqual(change["action"], "update")
+        self.assertEqual(change["old_value"], "padel")
+        self.assertEqual(change["new_value"], "gamen")
+        self.assertEqual(change["visible_mistake_id"], "M1")
+        self.assertTrue(change["replace_field"])
+
+        app.handle_confirmed_mistake_related_change(change, context)
+
+        self.assertTrue(app.mistake_states["M1"]["corrected"])
+
+    def test_memory_access_change_in_mistake_phase_reroutes_to_corrected_branch(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "E"
+        app.last_um_preview["hobby_fav"] = "gamen"
+        app.simulated_persona = dict(app.last_um_preview)
+        app.speech = FakeSpeech([
+            "Kan ik je geheugen zien?",
+            "favoriete hobby naar spelletjes spelen",
+            "ja",
+        ])
+        app.log_action_handler_result = lambda action: None
+
+        class SequenceClassifier:
+            def __init__(self):
+                self.results = [
+                    IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95),
+                    IntentResult(intent="um_update", field="hobby_fav", value="spelletjes spelen", confidence=0.95),
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95),
+                ]
+
+            def classify(self, text, turn_context=None):
+                return self.results.pop(0)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = SequenceClassifier()
+        phase = {
+            "phase": 6,
+            "phase_id": "1.6",
+            "name": "Mistake 1 - hobby_fav",
+            "layer": "L2-slot WRONG + L2-pregen",
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "gamen",
+            "mistake_wrong": "padel",
+            "mistake_topic": {
+                "fields": ["hobby_fav"],
+                "field_labels": {"hobby_fav": "je favoriete hobby"},
+                "current_values": {"hobby_fav": "gamen"},
+                "domain": "hobby",
+            },
+            "used_fields": {"hobby_fav": "padel"},
+            "segments": [
+                {
+                    "content_plan": app.l2_slot(
+                        "En volgens mij is {wrong_hobby} jouw allerliefste hobby.",
+                        {"wrong_hobby": "padel"},
+                        wrong=True,
+                    ),
+                    "expects_response": True,
+                    "response_mode": "mistake_interpretation",
+                },
+                {
+                    "content_plan": app.sequence(
+                        app.l1("Dat snap ik trouwens wel."),
+                        app.l2_pregen(
+                            "m1_wrong_opener",
+                            "Leuk, padel! Wat vind je er het allerleukst aan?",
+                            ["hobby_fav"],
+                        ),
+                    ),
+                    "expects_response": True,
+                    "response_mode": "mistake_interpretation",
+                    "skip_if_phase_confirmed_change": True,
+                },
+                {
+                    "content_plan": app.l2_pregen(
+                        "m1_corrected_followup",
+                        "Wat vind jij het leukste aan {hobby_fav}?",
+                        ["hobby_fav"],
+                        require_input_values=True,
+                        branch="corrected",
+                    ),
+                    "expects_response": True,
+                    "response_mode": "listen_only",
+                    "run_if_phase_confirmed_change": True,
+                    "used_fields": {"hobby_fav": "gamen"},
+                },
+            ],
+        }
+        app.register_mistake_phase(phase)
+
+        with patch("builtins.input", side_effect=["c", ""]), patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, phase["segments"][1], 2)
+
+        wrong_followup = "Dat snap ik trouwens wel. Leuk, padel! Wat vind je er het allerleukst aan?"
+        self.assertEqual(app.speech.spoken.count(wrong_followup), 1)
+        self.assertEqual(action["action"], "memory_access_change_confirmed")
+        self.assertTrue(action["change_confirmed"])
+        self.assertFalse(action["stop_phase_after_change"])
+        self.assertIn(6, app.phases_with_confirmed_change)
+        self.assertTrue(app.mistake_states["M1"]["corrected"])
+        self.assertEqual(app.mistake_states["M1"]["actual"], "spelletjes spelen")
+        self.assertEqual(app.last_um_preview["hobby_fav"], "spelletjes spelen")
+        self.assertEqual(phase["mistake_actual"], "spelletjes spelen")
+        self.assertEqual(phase["segments"][2]["used_fields"]["hobby_fav"], "spelletjes spelen")
+
+        corrected_context = app.segment_context(phase, phase["segments"][2], 3)
+        self.assertEqual(
+            app.turn_text(corrected_context),
+            "Wat vind jij het leukste aan spelletjes spelen?",
+        )
+
     def test_tablet_state_writes_visible_fields_for_memory_access(self):
         temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_state_test_")
         self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
@@ -2293,11 +2459,18 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(state["phase"], 19)
         self.assertTrue(state["memory_access_active"])
         self.assertEqual(state["memory_access_prompt_id"], 1)
+        self.assertEqual(state["tablet_command"]["type"], "memory_access_home")
         self.assertEqual(state["visible_fields"], ["name", "fav_food", "aspiration"])
         self.assertIn("eten", state["unlocked_categories"])
         self.assertIn("aspiratie", state["unlocked_categories"])
         self.assertTrue(state["mistakes"]["M4"]["corrected"])
         self.assertEqual(state["mistakes"]["M4"]["wrong"], "juf worden")
+        first_command_id = state["tablet_command"]["id"]
+
+        writer.activate_memory_access(["fav_food"], phase=20)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["tablet_command"]["type"], "memory_access_home")
+        self.assertNotEqual(state["tablet_command"]["id"], first_command_id)
 
     def test_tablet_state_writes_reveal_command_for_corrected_value(self):
         temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_reveal_test_")
@@ -2324,6 +2497,44 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(state["tablet_reveal"]["new_value"], "gamen")
         self.assertIsInstance(state["tablet_reveal"]["created_at"], float)
 
+    def test_tablet_state_writes_pending_reveal_and_clears_on_reveal(self):
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_pending_reveal_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        state_path = Path(temp_dir) / "session_state.json"
+        writer = cri_module.TabletStateWriter(
+            state_path=str(state_path),
+            get_child_id_fn=lambda: "701",
+            get_child_name_fn=lambda: "Ali",
+        )
+
+        writer.prepare_reveal_change(
+            field="hobbies",
+            old_value="voetbal, schaatsen",
+            new_value="fietsen, zwemmen",
+            phase=6,
+        )
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIn("hobby", state["unlocked_categories"])
+        self.assertIsNone(state["tablet_reveal"])
+        self.assertEqual(state["tablet_reveal_pending"]["field"], "hobbies")
+        self.assertEqual(state["tablet_reveal_pending"]["category"], "hobby")
+        self.assertEqual(state["tablet_reveal_pending"]["old_value"], "voetbal, schaatsen")
+        self.assertEqual(state["tablet_reveal_pending"]["new_value"], "fietsen, zwemmen")
+
+        writer.reveal_change(
+            field="hobbies",
+            old_value="voetbal, schaatsen",
+            new_value="fietsen, zwemmen",
+            phase=6,
+        )
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIsNone(state["tablet_reveal_pending"])
+        self.assertEqual(state["tablet_reveal"]["field"], "hobbies")
+        self.assertEqual(state["tablet_reveal"]["old_value"], "voetbal, schaatsen")
+        self.assertEqual(state["tablet_reveal"]["new_value"], "fietsen, zwemmen")
+
     def test_tablet_state_reset_clears_stale_reveal_file(self):
         temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_reset_test_")
         self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
@@ -2343,6 +2554,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(state["memory_access_prompt_id"], 0)
         self.assertEqual(state["visible_fields"], [])
         self.assertIsNone(state["tablet_reveal"])
+        self.assertIsNone(state["tablet_reveal_pending"])
+        self.assertIsNone(state["tablet_command"])
 
     def test_tablet_state_carries_all_unresolved_mistake_overlays(self):
         temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_state_mistakes_test_")
@@ -3322,6 +3535,76 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
 
+    def test_mistake1_inline_multiple_favorite_hobbies_asks_for_one_hobby(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["gamen", "ja"]
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "padel",
+            "response_mode": "mistake_interpretation",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "defer_corrected_response": True,
+        }
+        turn["mistake_topic"]["expected_value_count"] = {"hobby_fav": 1}
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="rejects_joke_no", confidence=0.92),
+            "nee dat is gamen en tekenen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "hobby_fav")
+        self.assertEqual(action["change"]["new_value"], "gamen")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier één favoriete hobby onthouden. Wat is jouw allerliefste hobby? Noem één ding.",
+        )
+        self.assertEqual(app.speech.spoken[1], "Wil je dat ik je favoriete hobby verander naar gamen?")
+        self.assertEqual(app.last_um_preview["hobby_fav"], "gamen")
+
+    def test_mistake1_correction_detail_multiple_favorite_hobbies_asks_for_one_hobby(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["tekenen", "ja"]
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "padel",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "hobby_fav",
+            "last_correction_question": "Oeps, wat is dan je favoriete hobby?",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "defer_corrected_response": True,
+        }
+        turn["mistake_topic"]["expected_value_count"] = {"hobby_fav": 1}
+        app.current_turn_context = turn
+        app.mistake_states = {"M1": {"id": "M1", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="hobby_fav", value="gamen en tekenen", confidence=0.94),
+            "gamen en tekenen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "hobby_fav")
+        self.assertEqual(action["change"]["new_value"], "tekenen")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier één favoriete hobby onthouden. Wat is jouw allerliefste hobby? Noem één ding.",
+        )
+        self.assertEqual(app.speech.spoken[1], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertEqual(app.last_um_preview["hobby_fav"], "tekenen")
+
     def test_mistake_rejection_phrase_is_not_repaired_into_fake_value(self):
         app = make_app()
         app.last_um_preview = sample_um()
@@ -3531,6 +3814,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.speech = EventSpeech(["ja"])
         app.tablet_state = SimpleNamespace(
             refresh=lambda phase=None: events.append(("refresh", phase)),
+            prepare_reveal_change=lambda **kwargs: events.append(("prepare", kwargs)),
             reveal_change=lambda **kwargs: events.append(("reveal", kwargs)),
         )
         change = {
@@ -3548,10 +3832,22 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby verander naar playmobiel spelen?"))
         self.assertEqual(
             events[1],
-            ("say", "Dankjewel, ik heb dat aangepast. Kijk maar op de tablet, daar zie je het veranderen."),
+            (
+                "prepare",
+                {
+                    "field": "hobby_fav",
+                    "old_value": "padel",
+                    "new_value": "playmobiel spelen",
+                    "phase": 6,
+                },
+            ),
         )
         self.assertEqual(
             events[2],
+            ("say", "Dankjewel, ik heb dat aangepast. Kijk maar op de tablet, daar zie je het veranderen."),
+        )
+        self.assertEqual(
+            events[3],
             (
                 "reveal",
                 {

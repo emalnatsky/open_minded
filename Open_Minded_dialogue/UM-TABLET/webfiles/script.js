@@ -32,6 +32,8 @@ let visibleFields = new Set();
 let lastMemoryAccessPromptId = null;
 let currentMistakes = {};
 let lastTabletRevealId = null;
+let pendingTabletReveal = null;
+let lastTabletCommandId = null;
 const TABLET_REVEAL_MAX_AGE_SECONDS = 30;
 
 function shouldShowFieldInMemoryAccess(field) {
@@ -54,6 +56,12 @@ function displayValueForField(field, meta) {
 
 function hasDisplayValue(value) {
   return value && value !== "\u2014" && value !== "â€”";
+}
+
+function pendingRevealForField(field) {
+  if (!pendingTabletReveal || pendingTabletReveal.field !== field) return null;
+  if (!hasDisplayValue(pendingTabletReveal.old_value) || !hasDisplayValue(pendingTabletReveal.new_value)) return null;
+  return pendingTabletReveal;
 }
 
 function isCategoryUnlocked(catKey) {
@@ -350,6 +358,7 @@ function runTabletReveal(reveal) {
   if ((Date.now() / 1000) - createdAt > TABLET_REVEAL_MAX_AGE_SECONDS) return false;
 
   lastTabletRevealId = reveal.id;
+  pendingTabletReveal = null;
 
   if (!liveUM[catKey]) liveUM[catKey] = {};
   liveUM[catKey][field] = { value: oldValue, updated: false };
@@ -416,6 +425,18 @@ function applyDiffToOpenCategory(catKey, changedFields) {
   }, 2700);
 }
 
+function runTabletCommand(command) {
+  if (!command || command.id === undefined || command.id === lastTabletCommandId) return false;
+  lastTabletCommandId = command.id;
+
+  if (command.type === "memory_access_home") {
+    showScreen("welcome");
+    return true;
+  }
+
+  return false;
+}
+
 // =====================================================================
 // handleUMUpdate — CRITICAL: signature & socket contract unchanged
 // =====================================================================
@@ -429,6 +450,7 @@ function handleUMUpdate(data) {
   memoryAccessActive = Boolean(data.memory_access_active);
   visibleFields = new Set(Array.isArray(data.visible_fields) ? data.visible_fields : []);
   currentMistakes = data.mistakes || {};
+  pendingTabletReveal = data.tablet_reveal_pending || null;
   const isNewMemoryAccessPrompt =
     memoryAccessActive &&
     incomingMemoryAccessPromptId &&
@@ -450,6 +472,8 @@ function handleUMUpdate(data) {
     applyLocking();
   }
 
+  runTabletCommand(data.tablet_command);
+
   // Group by category & detect per-field changes vs. prior liveUM
   const grouped = {};
   const diffsByCategory = {}; // { catKey: [{field, oldValue, newValue}, ...] }
@@ -461,19 +485,23 @@ function handleUMUpdate(data) {
     const rawCat = meta.category || "";
     const catKey = mapCategory(rawCat);
     const unresolvedMistake = unresolvedMistakeForField(field);
+    const pendingReveal = pendingRevealForField(field);
 
     if (!grouped[catKey]) grouped[catKey] = {};
     if (!diffsByCategory[catKey]) diffsByCategory[catKey] = [];
 
     const prevMeta  = liveUM[catKey] && liveUM[catKey][field];
     const prevValue = prevMeta ? prevMeta.value : null;
-    const newValue  = displayValueForField(field, meta);
+    const newValue  = pendingReveal ? pendingReveal.old_value : displayValueForField(field, meta);
 
     grouped[catKey][field] = {
       value:   newValue,
       updated: prevValue !== null && prevValue !== newValue && hasDisplayValue(newValue),
     };
 
+    if (pendingReveal) {
+      return;
+    }
     if (prevValue !== newValue && unresolvedMistake) {
       instantUpdatesByCategory[catKey] = true;
     } else if (prevValue !== newValue) {

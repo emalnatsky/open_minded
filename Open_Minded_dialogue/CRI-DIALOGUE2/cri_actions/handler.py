@@ -206,24 +206,30 @@ class ActionHandler:
         fields = list(topic.get("fields", []) or [])
         field_labels = dict(topic.get("field_labels", {}) or {})
         current_values = dict(topic.get("current_values", {}) or {})
+        stored_values = dict(topic.get("stored_values", {}) or {})
+        visible_mistakes = dict(topic.get("visible_mistakes", {}) or {})
 
         for field in self.mentioned_um_fields(turn):
             if field not in fields:
                 fields.insert(0, field)
             field_labels.setdefault(field, self.d.field_label(field))
             current_values[field] = (turn.get("used_fields") or {}).get(field)
+            stored_values[field] = self.d.memory_value(field)
 
         for field in turn.get("memory_review_fields") or []:
             if field not in fields:
                 fields.append(field)
             field_labels.setdefault(field, self.d.field_label(field))
-            current_values[field] = self.d.memory_value(field)
+            current_values.setdefault(field, self.d.memory_value(field))
+            stored_values[field] = self.d.memory_value(field)
 
         return {
             "topic": topic,
             "fields": fields,
             "field_labels": field_labels,
             "current_values": current_values,
+            "stored_values": stored_values,
+            "visible_mistakes": visible_mistakes,
         }
 
     def mentioned_um_fields(self, turn: dict) -> list:
@@ -634,6 +640,9 @@ class ActionHandler:
 
     def value_limit_question(self, field: str, existing_values: list = None, retry: bool = False) -> str:
         existing_values = existing_values or []
+        if field == "hobby_fav":
+            prefix = "Dat zijn er nog te veel. " if retry else ""
+            return f"{prefix}Ik kan hier één favoriete hobby onthouden. Wat is jouw allerliefste hobby? Noem één ding."
         if field == "fav_subject" and existing_values:
             existing = self.d.format_dutch_list(existing_values)
             prefix = "Dat zijn er nog te veel. " if retry else ""
@@ -829,6 +838,37 @@ class ActionHandler:
         self.reveal_tablet_change(change, turn)
         time.sleep(getattr(self.d, "TABLET_REVEAL_WAIT_SECONDS", 5.0))
 
+    def tablet_reveal_payload(self, change: dict, turn: dict = None) -> dict:
+        field = change.get("field")
+        new_value = change.get("new_value")
+        old_value = change.get("old_value")
+        if turn and turn.get("mistake_field") == field and self.d.is_known(turn.get("mistake_wrong")):
+            old_value = turn.get("mistake_wrong")
+        phase = self.d.turn_phase(turn or getattr(self.d, "current_turn_context", {}) or {})
+        return {
+            "field": field,
+            "old_value": old_value,
+            "new_value": new_value,
+            "phase": phase,
+        }
+
+    def prepare_tablet_change_reveal(self, change: dict, turn: dict = None) -> None:
+        if not self.should_gate_tablet_reveal(change):
+            return
+        tablet_state = getattr(self.d, "tablet_state", None)
+        prepare_reveal_change = getattr(tablet_state, "prepare_reveal_change", None)
+        if not callable(prepare_reveal_change):
+            return
+        prepare_reveal_change(**self.tablet_reveal_payload(change, turn))
+
+    def clear_pending_tablet_reveal(self, turn: dict = None) -> None:
+        tablet_state = getattr(self.d, "tablet_state", None)
+        clear_pending_reveal = getattr(tablet_state, "clear_pending_reveal", None)
+        if not callable(clear_pending_reveal):
+            return
+        phase = self.d.turn_phase(turn or getattr(self.d, "current_turn_context", {}) or {})
+        clear_pending_reveal(phase=phase)
+
     def reveal_tablet_change(self, change: dict, turn: dict = None) -> None:
         tablet_state = getattr(self.d, "tablet_state", None)
         reveal_change = getattr(tablet_state, "reveal_change", None)
@@ -836,13 +876,7 @@ class ActionHandler:
             self.refresh_tablet_state_after_change(turn)
             return
 
-        field = change.get("field")
-        new_value = change.get("new_value")
-        old_value = change.get("old_value")
-        if turn and turn.get("mistake_field") == field and self.d.is_known(turn.get("mistake_wrong")):
-            old_value = turn.get("mistake_wrong")
-        phase = self.d.turn_phase(turn or getattr(self.d, "current_turn_context", {}) or {})
-        reveal_change(field=field, old_value=old_value, new_value=new_value, phase=phase)
+        reveal_change(**self.tablet_reveal_payload(change, turn))
 
     def change_from_intent_result(self, result, turn: dict, transcript: str) -> dict:
         intent = result.intent
@@ -916,6 +950,12 @@ class ActionHandler:
             or self.d.last_um_preview.get(field)
             or self.d.UNKNOWN_VALUE
         )
+        stored_value = (
+            context.get("stored_values", {}).get(field)
+            or self.d.last_um_preview.get(field)
+            or self.d.UNKNOWN_VALUE
+        )
+        visible_mistake = (context.get("visible_mistakes") or {}).get(field) or {}
         replaces_mistake_field = (
             turn.get("response_mode") == "mistake_interpretation"
             and bool(turn.get("mistake_id"))
@@ -1001,6 +1041,17 @@ class ActionHandler:
                     "reason": "Child corrected Leo by restating the already-correct UM value.",
                     "source_text": transcript,
                 }
+            if turn.get("response_mode") == "memory_access_change":
+                return {
+                    "action": "already_stored",
+                    "field": field,
+                    "field_label": field_label,
+                    "old_value": str(old_value),
+                    "new_value": str(value),
+                    "confidence": result.confidence,
+                    "reason": "Child requested a memory change, but the requested value was already stored.",
+                    "source_text": transcript,
+                }
             return {}
 
         change = {
@@ -1016,6 +1067,19 @@ class ActionHandler:
         }
         if replaces_mistake_field or replaces_spoken_field:
             change["replace_field"] = True
+        if visible_mistake:
+            change["visible_mistake_id"] = visible_mistake.get("id")
+            change["visible_mistake_field"] = visible_mistake.get("field")
+            change["visible_mistake_wrong"] = visible_mistake.get("wrong")
+            change["visible_mistake_actual"] = visible_mistake.get("actual")
+            change["replace_field"] = True
+        if (
+            turn.get("response_mode") == "memory_access_change"
+            and visible_mistake
+            and self.d.is_known(stored_value)
+            and self.field_values_match(field, stored_value, value)
+        ):
+            change["reason"] = "Child corrected the child-visible memory value back to the stored UM value."
         if is_topic_correction:
             change["topic_correction"] = True
         return change
@@ -1755,6 +1819,20 @@ class ActionHandler:
                     leo_response=response,
                 )
 
+            if change.get("action") == "already_stored":
+                response = (
+                    f"Dat staat al zo in mijn geheugen. Ik heb al onthouden dat "
+                    f"{change['field_label']} {change['new_value']} is."
+                )
+                self.d.speech.say(response)
+                return self.action_result(
+                    "memory_access_change_already_stored",
+                    True,
+                    "Child requested a visible memory change to the value already stored.",
+                    change=change,
+                    leo_response=response,
+                )
+
             if change.get("direct_mistake_correction"):
                 self.d.corrections_seen += 1
                 self.d.mark_current_mistake_corrected()
@@ -1987,6 +2065,7 @@ class ActionHandler:
                 self.d.corrections_seen += 1
                 self.d.handle_confirmed_mistake_related_change(change, self.d.current_turn_context)
                 self.remember_confirmed_change_locally(change)
+                self.prepare_tablet_change_reveal(change, self.d.current_turn_context)
                 written = self.d.write_um_change(change)
                 if self.d.current_turn_context:
                     self.d.phases_with_confirmed_change.add(self.d.current_turn_context.get("phase"))
@@ -1994,6 +2073,7 @@ class ActionHandler:
                     self.d.speech.say(self.successful_change_acknowledgement(change))
                     self.reveal_tablet_change_after_operator(change, self.d.current_turn_context)
                 else:
+                    self.clear_pending_tablet_reveal(self.d.current_turn_context)
                     self.d.speech.say("Dankjewel, ik heb dat genoteerd, maar opslaan lukte nu niet.")
                 self.d.pending_change = None
                 return True

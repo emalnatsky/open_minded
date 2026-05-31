@@ -564,14 +564,19 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def handle_confirmed_mistake_related_change(self, change: dict, turn: dict = None) -> bool:
         context = turn or self.current_turn_context or {}
-        mistake_id = context.get("mistake_id")
+        mistake_id = context.get("mistake_id") or change.get("visible_mistake_id")
         if not mistake_id:
             return False
 
         state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
         field = change.get("field")
-        if field == context.get("mistake_field"):
-            self.mark_current_mistake_corrected()
+        mistake_field = context.get("mistake_field") or change.get("visible_mistake_field")
+        if field == mistake_field:
+            if context.get("mistake_id"):
+                self.mark_current_mistake_corrected()
+            else:
+                state["corrected"] = True
+                state["corrected_at_phase"] = self.turn_phase(context)
             return True
 
         if (
@@ -585,6 +590,41 @@ class CRI_ScriptedDialogue(SICApplication):
             state["school_difficulty_changed_from"] = change.get("old_value")
             state["school_difficulty_changed_to"] = change.get("new_value")
         return False
+
+    def visible_mistake_state_for_field(self, field: str, turn: dict = None) -> dict:
+        """Return the unresolved mistake whose wrong value is child-visible for a field."""
+        if not field:
+            return {}
+        turn = turn or {}
+        mistake_id = turn.get("mistake_id")
+        if turn.get("mistake_field") == field and self.is_known(turn.get("mistake_wrong")):
+            state = (self.mistake_states or {}).get(mistake_id, {}) if mistake_id else {}
+            if not state.get("corrected"):
+                visible = dict(state)
+                visible.setdefault("id", mistake_id)
+                visible.setdefault("field", field)
+                visible.setdefault("actual", turn.get("mistake_actual"))
+                visible.setdefault("wrong", turn.get("mistake_wrong"))
+                return visible
+
+        for state_id, state in (self.mistake_states or {}).items():
+            if state.get("field") != field:
+                continue
+            if not state.get("mentioned") or state.get("corrected"):
+                continue
+            if not self.is_known(state.get("wrong")):
+                continue
+            visible = dict(state)
+            visible.setdefault("id", state_id)
+            return visible
+        return {}
+
+    def visible_memory_value(self, field: str, turn: dict = None) -> str:
+        """Memory value as the child currently sees/hears it, including active mistakes."""
+        visible_mistake = self.visible_mistake_state_for_field(field, turn)
+        if visible_mistake and self.is_known(visible_mistake.get("wrong")):
+            return str(visible_mistake["wrong"])
+        return self.memory_value(field)
 
     def mistake_field_label(self, turn):
         return self.nudge.mistake_field_label(turn)
@@ -2342,7 +2382,13 @@ class CRI_ScriptedDialogue(SICApplication):
     def memory_access_change_context(self, action: dict, source_turn: dict) -> dict:
         fields = list(dict.fromkeys(action.get("visible_fields") or action.get("memory_scope") or []))
         field_labels = {field: self.field_label(field) for field in fields}
-        current_values = {field: self.memory_value(field) for field in fields}
+        current_values = {field: self.visible_memory_value(field, source_turn) for field in fields}
+        stored_values = {field: self.memory_value(field) for field in fields}
+        visible_mistakes = {}
+        for field in fields:
+            mistake = self.visible_mistake_state_for_field(field, source_turn)
+            if mistake:
+                visible_mistakes[field] = mistake
         return {
             "phase": self.turn_phase(source_turn),
             "phase_id": source_turn.get("phase_id"),
@@ -2355,6 +2401,8 @@ class CRI_ScriptedDialogue(SICApplication):
                 "fields": fields,
                 "field_labels": field_labels,
                 "current_values": current_values,
+                "stored_values": stored_values,
+                "visible_mistakes": visible_mistakes,
             },
             "used_fields": {},
         }
@@ -2396,13 +2444,18 @@ class CRI_ScriptedDialogue(SICApplication):
             )
         return change_action
 
-    def memory_access_interrupt_control(self, action: dict) -> str:
+    def memory_access_interrupt_control(self, action: dict) -> dict:
         """Researcher checkpoint after memory access, then resume the same phase."""
         if not self.POST_PHASE_TEST_CONTROLS:
-            return "continue"
+            return self.action_result(
+                "memory_access_continue",
+                True,
+                "Memory access completed; continue the current phase.",
+            )
 
         leo_response = action.get("leo_response") or ""
         source_turn = self.current_turn_context or {}
+        pending_resume_action = None
         while True:
             print("\n" + "=" * 72)
             choice = input(
@@ -2414,10 +2467,19 @@ class CRI_ScriptedDialogue(SICApplication):
 
             if choice == "":
                 self.log_conversation_event("tester_control", action="continue_after_memory_access")
-                return "continue"
+                return pending_resume_action or self.action_result(
+                    "memory_access_continue",
+                    True,
+                    "Memory access completed without a confirmed memory change.",
+                )
             if choice in ("c", "change", "change memory", "verander", "wijzig"):
                 self.log_conversation_event("tester_control", action="memory_access_change")
-                self.memory_access_change_control(action, source_turn)
+                change_action = self.memory_access_change_control(action, source_turn)
+                if change_action.get("change_confirmed") and change_action.get("change"):
+                    pending_resume_action = dict(change_action)
+                    pending_resume_action["action"] = "memory_access_change_confirmed"
+                    pending_resume_action["memory_access_change_confirmed"] = True
+                    pending_resume_action["stop_phase_after_change"] = False
                 continue
             if choice in ("m", "memory", "repeat", "r"):
                 self.log_conversation_event("tester_control", action="repeat_memory_access")
@@ -2429,6 +2491,50 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def is_memory_access_action(self, action: dict) -> bool:
         return action.get("action") in ("memory_access", "memory_access_tablet")
+
+    def should_reroute_after_memory_change(self, action: dict) -> bool:
+        return bool(action and action.get("memory_access_change_confirmed") and action.get("change"))
+
+    def apply_memory_access_change_to_phase(self, phase: dict, action: dict) -> None:
+        change = action.get("change") or {}
+        field = change.get("field")
+        new_value = change.get("new_value")
+        if not (field and self.is_known(new_value)):
+            return
+
+        def update_used_fields(container: dict) -> None:
+            used_fields = container.get("used_fields")
+            if isinstance(used_fields, dict) and field in used_fields:
+                used_fields[field] = new_value
+
+        update_used_fields(phase)
+        for segment in phase.get("segments") or []:
+            update_used_fields(segment)
+
+        for topic_key in ("topic", "mistake_topic"):
+            topic = phase.get(topic_key)
+            if not isinstance(topic, dict):
+                continue
+            current_values = topic.get("current_values")
+            if isinstance(current_values, dict) and field in current_values:
+                current_values[field] = new_value
+            if field in self.topic_label_fields_for_domain(topic.get("domain")):
+                topic["label"] = new_value
+
+        if phase.get("mistake_field") == field:
+            phase["mistake_actual"] = new_value
+            state = self.mistake_states.get(phase.get("mistake_id"))
+            if state is not None:
+                state["actual"] = new_value
+                state["corrected_value"] = new_value
+
+        topic = phase.get("topic")
+        if isinstance(topic, dict) and field in (topic.get("fields") or []):
+            action["continue_phase_after_change"] = True
+            action["stop_phase_after_change"] = False
+        else:
+            action["continue_phase_after_change"] = False
+            action["stop_phase_after_change"] = False
 
     def should_skip_phase(self, turn: dict) -> bool:
         condition = turn.get("condition")
@@ -2533,8 +2639,11 @@ class CRI_ScriptedDialogue(SICApplication):
             self.log_action_handler_result(action)
 
             if self.is_memory_access_action(action):
-                self.memory_access_interrupt_control(action)
+                memory_action = self.memory_access_interrupt_control(action)
                 self.current_turn_context = context
+                if self.should_reroute_after_memory_change(memory_action):
+                    self.apply_memory_access_change_to_phase(phase, memory_action)
+                    return memory_action
                 self.speech.say(self.turn_text(context))
                 continue
 

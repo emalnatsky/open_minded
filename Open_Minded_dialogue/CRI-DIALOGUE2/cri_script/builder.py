@@ -442,6 +442,7 @@ class ScriptBuilder:
         m1_actual = m1_topic.get("current_values", {}).get(m1_field) or m1_topic.get("label")
         m1_wrong = m1_plan.get("wrong_value") or self.d.related_wrong_hobby_value(um)
         m1_type = m1_plan.get("type") or "related-but-wrong"
+        m1_topic["expected_value_count"] = {m1_field: 1}
 
         m2_plan = self.d.script_plan_mistake("M2")
         m2_field = m2_plan.get("field") or "fav_food"

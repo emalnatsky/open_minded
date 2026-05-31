@@ -128,7 +128,11 @@ class TabletStateWriter:
         self._visible_fields = []
         self._memory_access_prompt_id = 0
         self._tablet_reveal = None
+        self._tablet_reveal_pending = None
         self._tablet_reveal_id = 0
+        self._tablet_command = None
+        self._tablet_command_counter = 0
+        self._tablet_command_session_id = time.time_ns()
 
     def update(self, turn: dict):
         """
@@ -141,6 +145,7 @@ class TabletStateWriter:
             return
 
         self._tablet_reveal = None
+        self._tablet_reveal_pending = None
         self._unlock_from_turn(turn)
 
         self._write_state(turn.get("phase"))
@@ -151,8 +156,10 @@ class TabletStateWriter:
             return
 
         self._tablet_reveal = None
+        self._tablet_reveal_pending = None
         self._memory_access_active = True
         self._memory_access_prompt_id += 1
+        self._issue_tablet_command("memory_access_home")
         self._visible_fields = list(dict.fromkeys(fields or []))
         for field in self._visible_fields:
             category = FIELD_TO_CATEGORY.get(field)
@@ -176,6 +183,7 @@ class TabletStateWriter:
             self._unlocked_categories.add(category)
 
         self._tablet_reveal_id += 1
+        self._tablet_reveal_pending = None
         self._tablet_reveal = {
             "id": self._tablet_reveal_id,
             "field": field,
@@ -184,6 +192,32 @@ class TabletStateWriter:
             "new_value": new_value,
             "created_at": time.time(),
         }
+        self._write_state(phase)
+
+    def prepare_reveal_change(self, *, field: str, old_value: str, new_value: str, phase=None):
+        """Tell the tablet a field is waiting for an operator-controlled reveal."""
+        if not self.enabled:
+            return
+
+        category = FIELD_TO_CATEGORY.get(field)
+        if category:
+            self._unlocked_categories.add(category)
+
+        self._tablet_reveal = None
+        self._tablet_reveal_pending = {
+            "field": field,
+            "category": category,
+            "old_value": old_value,
+            "new_value": new_value,
+            "created_at": time.time(),
+        }
+        self._write_state(phase)
+
+    def clear_pending_reveal(self, phase=None):
+        """Clear a reveal that was queued but should no longer be held back."""
+        if not self.enabled:
+            return
+        self._tablet_reveal_pending = None
         self._write_state(phase)
 
     def _write_state(self, phase=None):
@@ -199,6 +233,8 @@ class TabletStateWriter:
             "visible_fields":      list(self._visible_fields),
             "mistakes":            mistake_summary,
             "tablet_reveal":       self._tablet_reveal,
+            "tablet_reveal_pending": self._tablet_reveal_pending,
+            "tablet_command":      self._tablet_command,
         }
 
         try:
@@ -220,10 +256,23 @@ class TabletStateWriter:
         self._visible_fields = []
         self._memory_access_prompt_id = 0
         self._tablet_reveal = None
+        self._tablet_reveal_pending = None
         self._tablet_reveal_id = 0
+        self._tablet_command = None
+        self._tablet_command_counter = 0
+        self._tablet_command_session_id = time.time_ns()
         self._write_state(None)
 
     # â”€â”€ internals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    def _issue_tablet_command(self, command_type: str):
+        """Create a one-shot command for the browser UI."""
+        self._tablet_command_counter += 1
+        self._tablet_command = {
+            "id": f"{self._tablet_command_session_id}:{self._tablet_command_counter}",
+            "type": command_type,
+            "created_at": time.time(),
+        }
 
     def _unlock_from_turn(self, turn: dict):
         """Add categories for all fields mentioned in this turn."""
