@@ -125,7 +125,7 @@ class CRI_ScriptedDialogue(SICApplication):
     CONVERSATION_LOG_ENABLED = config.CONVERSATION_LOG_ENABLED
     CONVERSATION_LOG_ROOT    = config.CONVERSATION_LOG_ROOT
 
-    def __init__(self, openai_env_path=None, nao_ip="10.0.0.165"):
+    def __init__(self, openai_env_path=None, nao_ip="10.0.0.241"):
         super(CRI_ScriptedDialogue, self).__init__()
         self.nao_ip = nao_ip
         self.openai_env_path = openai_env_path
@@ -2184,6 +2184,6 @@ class CRI_ScriptedDialogue(SICApplication):
 if __name__ == "__main__":
     dialogue_app = CRI_ScriptedDialogue(
         openai_env_path=config.LOCAL_ENV_PATH,
-        nao_ip="10.0.0.165",  # Replace with your NAO's IP.
+        nao_ip="10.0.0.241",  # Replace with your NAO's IP.
     )
     dialogue_app.run()

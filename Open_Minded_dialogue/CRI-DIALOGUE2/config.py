@@ -179,7 +179,7 @@ PREGENERATED_UTTERANCE_PREFIXES = ("pregen_", "script_", "llm_pregen_")
 
 # True when NAO is not connected (use laptop mic + print Leo's lines).
 # Flip to False for production sessions with the robot.
-USE_DESKTOP_MIC = True
+USE_DESKTOP_MIC = False
 
 ASK_RUN_MODE_AT_START         = True
 SIMULATION_MODE               = False

@@ -7,7 +7,7 @@
 %%% SESSION SETTINGS		    %%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% User settings 		    %%%
-userId('000'). % Participant id 
+userId('3'). % Participant id
 localVariable(first_name_cri, "Unika"). % First name at session start
 localVariable(first_name_tablet, "Eunike"). % Child name displayed on tablet, set at session start
 localVariable(operator_name, "Julianna"). % Researcher name, set at session start

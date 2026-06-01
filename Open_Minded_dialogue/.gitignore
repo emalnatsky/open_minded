@@ -12,3 +12,8 @@ venv_sic/
 
 # Your project-specific
 conf/
+
+# .gitignore
+.env
+.env.local
+.env.*.local
