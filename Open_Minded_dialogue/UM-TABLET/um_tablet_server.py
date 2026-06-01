@@ -57,14 +57,15 @@ class UMTabletServer(SICApplication):
         super(UMTabletServer, self).__init__()
         self.webserver = None
         self._child_id = CHILD_ID
-        self.set_log_level(sic_logging.INFO)
+        self._last_missing_child_warning_id = None
+        self.set_log_level(sic_logging.WARNING)
         self.load_env("../conf/.env")
         self.setup()
 
     # ------------------------------------------------------------------setup---------------------------------------------------------------
 
     def setup(self):
-        self.logger.info("Setting up UM Tablet Server …")
+        self.logger.debug("Setting up UM Tablet Server …")
 
         current_dir  = os.path.dirname(os.path.abspath(__file__))
         webfiles_dir = os.path.join(current_dir, "webfiles")
@@ -82,7 +83,7 @@ class UMTabletServer(SICApplication):
         threading.Thread(target=lambda: self._open_when_ready(f"http://localhost:{WEB_PORT}"), daemon=True).start()
         threading.Thread(target=self._log_tablet_url, daemon=True).start()
 
-        self.logger.info("Setup complete.")
+        self.logger.debug("Setup complete.")
 
     # ------------------------------------------------------------------helpers----------------------------------------------------------------
 
@@ -100,7 +101,7 @@ class UMTabletServer(SICApplication):
             if isinstance(state, dict):
                 session_child_id = str(state.get("child_id") or "").strip()
                 if session_child_id and session_child_id != self._child_id:
-                    self.logger.info(
+                    self.logger.debug(
                         "Child ID updated from session_state: %s → %s",
                         self._child_id, session_child_id,
                     )
@@ -117,7 +118,7 @@ class UMTabletServer(SICApplication):
         try:
             r = http.get(f"{UM_API_BASE}/", timeout=API_TIMEOUT_S)
             if r.status_code == 200:
-                self.logger.info("Eunike's UM API reachable at %s ✓", UM_API_BASE)
+                self.logger.debug("Eunike's UM API reachable at %s ✓", UM_API_BASE)
             else:
                 self.logger.warning("UM API returned status %s.", r.status_code)
         except Exception:
@@ -144,10 +145,10 @@ class UMTabletServer(SICApplication):
         except Exception:
             lan_ip = "YOUR_LAPTOP_IP"
         time.sleep(1.5)
-        self.logger.info("=" * 55)
-        self.logger.info("  Open this on the tablet (same WiFi):")
-        self.logger.info("  http://%s:%s", lan_ip, WEB_PORT)
-        self.logger.info("=" * 55)
+        self.logger.debug("=" * 55)
+        self.logger.debug("  Open this on the tablet (same WiFi):")
+        self.logger.debug("  http://%s:%s", lan_ip, WEB_PORT)
+        self.logger.debug("=" * 55)
 
     def _fetch_um(self) -> dict:
         try:
@@ -155,14 +156,20 @@ class UMTabletServer(SICApplication):
             response = http.get(url, timeout=API_TIMEOUT_S)
 
             if response.status_code == 404:
-                self.logger.warning(
-                    "Child '%s' not found. Has Eunike loaded the data?", self._child_id
-                )
+                if self._child_id != self._last_missing_child_warning_id:
+                    self.logger.warning(
+                        "Child '%s' not found. Has Eunike loaded the data?", self._child_id
+                    )
+                    self._last_missing_child_warning_id = self._child_id
+                else:
+                    self.logger.debug("Child '%s' still not found.", self._child_id)
                 return {}
 
             if response.status_code != 200:
                 self.logger.warning("UM API returned %s.", response.status_code)
                 return {}
+
+            self._last_missing_child_warning_id = None
 
             data          = response.json().get("data", {})
             categories    = data.get("categories", {})
@@ -194,7 +201,7 @@ class UMTabletServer(SICApplication):
                             "changes":  change_counts.get(field, 0),
                         }
 
-            self.logger.info(
+            self.logger.debug(
                 "Fetched %d fields across %d categories for child '%s'.",
                 len(flat), len(categories), self._child_id
             )
@@ -221,6 +228,9 @@ class UMTabletServer(SICApplication):
                     "condition":           condition,
                     "fields":              um,
                     "unlocked_categories": state.get("unlocked_categories", []),
+                    "memory_access_active": bool(state.get("memory_access_active", False)),
+                    "visible_fields":       state.get("visible_fields", []),
+                    "mistakes":             state.get("mistakes", {}),
                     "current_phase":       state.get("phase"),
                     "current_turn_name":   state.get("current_turn_name"),
                     "timestamp":           time.strftime("%H:%M:%S"),
@@ -232,7 +242,7 @@ class UMTabletServer(SICApplication):
     # -----------------------------------------------------------------Main loop---------------------------------------------------------------
 
     def run(self):
-        self.logger.info(
+        self.logger.debug(
             "Starting UM Tablet Server — polling every %.1fs …", POLL_INTERVAL_S
         )
         last_um = None
@@ -242,15 +252,15 @@ class UMTabletServer(SICApplication):
                 self._broadcast_um(um)
 
                 if um != last_um:
-                    self.logger.info("UM changed — broadcasting to tablet.")
+                    self.logger.debug("UM changed — broadcasting to tablet.")
                     last_um = um
 
                 time.sleep(POLL_INTERVAL_S)
 
         except KeyboardInterrupt:
-            self.logger.info("Interrupted.")
+            self.logger.debug("Interrupted.")
         finally:
-            self.logger.info("Shutting down UM Tablet Server.")
+            self.logger.debug("Shutting down UM Tablet Server.")
             self.shutdown()
 
 
