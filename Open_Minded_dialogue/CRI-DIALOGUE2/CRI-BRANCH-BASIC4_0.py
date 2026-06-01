@@ -28,6 +28,7 @@ from sic_framework.devices import Nao
 from sic_framework.devices.common_naoqi.naoqi_autonomous import (
     NaoRestRequest,
     NaoWakeUpRequest,
+    NaoSetAutonomousLifeRequest,
 )
 from sic_framework.services.openai_whisper_stt.whisper_stt import (
     SICWhisper,
@@ -2720,6 +2721,7 @@ class CRI_ScriptedDialogue(SICApplication):
         try:
             if not self.simulation_mode and self.CONNECT_NAO:
                 self.nao.autonomous.request(NaoWakeUpRequest())
+                self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
             while i < len(script):
@@ -2772,6 +2774,7 @@ class CRI_ScriptedDialogue(SICApplication):
         finally:
             try:
                 if not self.simulation_mode and self.CONNECT_NAO:
+                    self.nao.autonomous.request(NaoSetAutonomousLifeRequest("disabled"))
                     self.nao.autonomous.request(NaoRestRequest())
             except Exception:
                 pass
