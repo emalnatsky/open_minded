@@ -26,8 +26,8 @@ from cri_script import ContentPlan, Segments, ScriptBuilder
 
 from sic_framework.devices import Nao
 from sic_framework.devices.common_naoqi.naoqi_autonomous import (
-    NaoRestRequest,
     NaoWakeUpRequest,
+    NaoRestRequest,
     NaoSetAutonomousLifeRequest,
 )
 from sic_framework.services.openai_whisper_stt.whisper_stt import (

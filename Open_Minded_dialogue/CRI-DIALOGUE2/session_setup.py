@@ -262,7 +262,8 @@ class SessionSetup:
         if child_id:
             self.d.CHILD_ID = child_id
 
-        # NAO IP override from test_config.pl, when present.
+        # NAO IP override from test_config.pl (only if provided, otherwise
+        # keep whatever default was passed to __init__).
         nao_ip_from_config = str(self.d.session_config.get("nao_ip") or "").strip()
         if nao_ip_from_config:
             self.d.nao_ip = nao_ip_from_config
@@ -399,7 +400,7 @@ class SessionSetup:
         print(f"  Condition:     {self.condition_display(condition) if condition else '(not set)'}")
         print(f"  Start phase:   {self.start_phase_display(start_phase_index)}")
         if nao_ip:
-            print(f"  NAO IP:        {nao_ip}  <- from test_config.pl")
+            print(f"  NAO IP:        {nao_ip}  ← from test_config.pl")
         print("-" * 56)
         input("\nPress Enter to continue...")
 
