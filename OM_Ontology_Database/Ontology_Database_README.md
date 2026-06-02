@@ -1,8 +1,12 @@
 # Quick instruction (Draft version 1) (In Progress)
 
-For this to work:
-- 
+### For this to work (If already populated):
+- Open GraphDB desktop application and activate the repository for the project (e.g. open-memory-robot).
+- Start main.py in OM_Ontology_Database.
+- Open `http://localhost:8000/docs` if you want to interact with the FastAPI endpoints manually.
 
+If starting from scratch:
+- 
 
 
 ## What is still not yet implemented:
