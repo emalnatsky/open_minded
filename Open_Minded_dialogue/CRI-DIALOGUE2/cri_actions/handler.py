@@ -196,6 +196,9 @@ class ActionHandler:
         if change["action"] == "delete":
             return f"Wil je dat ik {change['field_label']} vergeet?"
 
+        if change["action"] == "multi_update":
+            return "Wil je dat ik dit zo verander?"
+
         new_value = change.get("new_value")
         return f"Wil je dat ik {change['field_label']} verander naar {new_value}?"
 
@@ -278,6 +281,148 @@ class ActionHandler:
     def field_values_match(self, field: str, left: str, right: str) -> bool:
         return self.normalized_field_value(field, left) == self.normalized_field_value(field, right)
 
+    def is_explicit_memory_rejection(self, transcript: str) -> bool:
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if text in {"nee", "nee hoor", "nope"}:
+            return False
+        return any(
+            phrase in text
+            for phrase in (
+                "klopt niet",
+                "niet klopt",
+                "niet waar",
+                "verkeerd",
+                "fout",
+                "het is geen",
+                "dat is geen",
+                "is geen",
+                "heet niet",
+            )
+        )
+
+    def has_explicit_memory_change_cue(self, transcript: str) -> bool:
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if self.is_explicit_memory_rejection(text):
+            return True
+        return any(
+            phrase in text
+            for phrase in (
+                "verander",
+                "pas aan",
+                "aanpassen",
+                "onthoud",
+                "moet je onthouden",
+                "vergeet",
+                "mijn huisdier",
+                "mijn favoriete",
+                "mijn lievelings",
+                "het is een",
+                "dat is een",
+                "heet",
+                "ik doe",
+                "ik speel",
+            )
+        )
+
+    def is_plain_memory_acknowledgement(self, transcript: str) -> bool:
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        return text in {
+            "ja",
+            "ja hoor",
+            "ja dat klopt",
+            "ja klopt",
+            "dat klopt",
+            "klopt",
+            "jawel",
+            "zeker",
+            "ja zeker",
+            "inderdaad",
+            "ja inderdaad",
+            "ok",
+            "oke",
+            "oké",
+            "prima",
+            "goed",
+            "is goed",
+            "dat is goed",
+        }
+
+    def turn_has_memory_correction_available(self, turn: dict) -> bool:
+        if turn.get("memory_correction_available"):
+            return True
+        if turn.get("response_mode") in ("mistake_interpretation", "topic_interpretation"):
+            return True
+        if self.mentioned_um_fields(turn):
+            return True
+        return bool(turn.get("allow_memory_change"))
+
+    def has_inline_memory_correction_cue(self, result, transcript: str, turn: dict) -> bool:
+        if turn.get("memory_correction_requested"):
+            return False
+        if not self.turn_has_memory_correction_available(turn):
+            return False
+        if not self.mentioned_um_fields(turn) and not turn.get("memory_correction_field"):
+            return False
+        if self.is_plain_memory_acknowledgement(transcript):
+            return False
+
+        allowed = self.allowed_change_fields(turn)
+        if (
+            turn.get("memory_correction_available")
+            and result.intent in ("um_add", "um_update", "dialogue_update")
+            and result.field in allowed
+            and self.meaningful_classifier_value(result.value)
+        ):
+            return True
+
+        if self.is_explicit_memory_rejection(transcript):
+            return True
+
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        inline_prefixes = (
+            "nee dat is ",
+            "nee het is ",
+            "nee eigenlijk ",
+            "nee, dat is ",
+            "nee, het is ",
+            "dat is eigenlijk ",
+            "het is eigenlijk ",
+        )
+        if any(text.startswith(prefix) for prefix in inline_prefixes):
+            return True
+        return self.has_explicit_memory_change_cue(text)
+
+    def response_mode_allows_direct_memory_update(self, mode: str) -> bool:
+        return mode in {
+            "memory_access_change",
+            "memory_review_group",
+            "memory_review_add_final",
+            "change_confirmation",
+            "value_completion",
+            "value_limit_clarification",
+        }
+
+    def listen_only_allows_topic_memory_correction(self, result, transcript: str, turn: dict) -> bool:
+        if turn.get("response_mode") != "listen_only":
+            return False
+        if not self.is_topic_turn(turn):
+            return False
+        if not self.mentioned_um_fields(turn):
+            return False
+        if self.is_explicit_memory_rejection(transcript):
+            return True
+        if result.intent not in ("um_add", "um_update", "dialogue_update"):
+            return False
+        if result.field not in self.allowed_change_fields(turn):
+            return False
+        if not self.d.is_known(result.value):
+            return False
+        return self.has_explicit_memory_change_cue(transcript)
+
     def turn_allows_memory_change(self, turn: dict) -> bool:
         if turn.get("allow_memory_change"):
             return True
@@ -312,9 +457,16 @@ class ActionHandler:
             "sport": ("sports_fav_play",),
             "boeken": ("books_fav_title",),
             "muziek": ("music_enjoys",),
-            "huisdier": ("pet_name", "animal_fav", "pet_type", "has_pet"),
+            "huisdier": ("pet_name", "pet_type", "animal_fav", "has_pet"),
             "hobby": ("hobby_fav", "hobbies", "freetime_fav"),
         }
+        if (
+            domain == "huisdier"
+            and result
+            and result.field in allowed
+            and self.meaningful_classifier_value(result.value)
+        ):
+            return result.field
         for field in preferred_by_domain.get(domain, ()):
             if field in mentioned:
                 return field
@@ -326,6 +478,240 @@ class ActionHandler:
             if field in allowed:
                 return field
         return ""
+
+    def clean_pet_correction_value(self, value: str, *, name: bool = False) -> str:
+        clean = str(value or "").strip()
+        clean = re.sub(r"\s+", " ", clean)
+        clean = clean.strip(" .,!?;:")
+        clean = re.sub(r"^(een|de|het)\s+", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(
+            r"\s+(?:en|maar|die|hij|zij|het|is|heet)\b.*$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        ).strip(" .,!?;:")
+        if not clean:
+            return ""
+        if name:
+            return clean[:1].upper() + clean[1:]
+        return clean.lower()
+
+    def pet_corrections_from_transcript(self, result, transcript: str) -> dict:
+        text = str(transcript or "").strip()
+        corrections = {}
+
+        if result and result.field in ("pet_type", "pet_name") and self.meaningful_classifier_value(result.value):
+            corrections[result.field] = self.clean_pet_correction_value(
+                result.value,
+                name=result.field == "pet_name",
+            )
+
+        type_patterns = (
+            r"\b(?:het|hij|zij|ze|die|dat|mijn huisdier)\s+is\s+(?:een\s+)?([^,.!?]+)",
+            r"\b(?:dat\s+)?(?:het|mijn huisdier)\s+(?:een\s+)?([^,.!?]+?)\s+is\b",
+            r"\b(?:ik heb|we hebben)\s+(?:een\s+)?([^,.!?]+)",
+        )
+        for pattern in type_patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            pet_type = self.clean_pet_correction_value(match.group(1))
+            if pet_type:
+                corrections.setdefault("pet_type", pet_type)
+                break
+
+        name_patterns = (
+            r"\b(?:hij|zij|ze|die|mijn huisdier)\s+(?!(?:is|een|de|het)\b)([^,.!?]+?)\s+heet\b",
+            r"\b(?:hij|zij|ze|die|het|mijn huisdier)\s+heet\s+([^,.!?]+)",
+            r"\b(?:heet|noemt)\s+([^,.!?]+)",
+            r"\b(?:de naam is|zijn naam is|haar naam is)\s+([^,.!?]+)",
+        )
+        for pattern in name_patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            pet_name = self.clean_pet_correction_value(match.group(1), name=True)
+            if pet_name:
+                corrections.setdefault("pet_name", pet_name)
+                break
+
+        return {field: value for field, value in corrections.items() if self.d.is_known(value)}
+
+    def pet_multi_topic_change_from_answer(
+        self,
+        result,
+        turn: dict,
+        transcript: str,
+        context: dict,
+        inline_memory_correction: bool,
+    ) -> dict:
+        topic = (turn or {}).get("topic") or {}
+        if topic.get("domain") != "huisdier":
+            return {}
+        if not (turn.get("memory_correction_requested") or inline_memory_correction):
+            return {}
+
+        allowed = self.allowed_change_fields(turn)
+        corrections = self.pet_corrections_from_transcript(result, transcript)
+        changes = []
+        for field in ("pet_type", "pet_name"):
+            value = corrections.get(field)
+            if field not in allowed or not self.d.is_known(value):
+                continue
+
+            old_value = (
+                context.get("current_values", {}).get(field)
+                or self.d.last_um_preview.get(field)
+                or self.d.UNKNOWN_VALUE
+            )
+            if self.d.is_known(old_value) and self.field_values_match(field, old_value, value):
+                continue
+
+            field_label = context.get("field_labels", {}).get(field) or self.d.field_label(field)
+            changes.append({
+                "action": "update",
+                "field": field,
+                "field_label": field_label,
+                "old_value": str(old_value),
+                "new_value": str(value),
+                "confidence": result.confidence,
+                "reason": "Child corrected multiple pet memory fields in one answer.",
+                "source_text": transcript,
+                "replace_field": True,
+                "topic_correction": True,
+            })
+
+        if len(changes) < 2:
+            return {}
+
+        pet_type = next((change["new_value"] for change in changes if change["field"] == "pet_type"), "")
+        pet_name = next((change["new_value"] for change in changes if change["field"] == "pet_name"), "")
+        question = "Wil je dat ik dit over je huisdier zo onthoud?"
+        if pet_type and pet_name:
+            question = f"Wil je dat ik onthoud dat je huisdier een {pet_type} is en {pet_name} heet?"
+
+        return {
+            "action": "multi_update",
+            "field_label": "je huisdier",
+            "changes": changes,
+            "confidence": result.confidence,
+            "reason": "Child corrected pet type and pet name in one answer.",
+            "source_text": transcript,
+            "confirmation_question": question,
+            "replace_field": True,
+            "topic_correction": True,
+        }
+
+    def extract_pet_value_for_field(self, result, transcript: str, field: str) -> str:
+        corrections = self.pet_corrections_from_transcript(result, transcript)
+        if corrections.get(field):
+            return corrections[field]
+
+        result_value = (
+            self.meaningful_classifier_value(result.value)
+            if result and result.field == field
+            else None
+        )
+        candidate = result_value or self.short_correction_candidate(transcript)
+        if not candidate:
+            return ""
+        return self.clean_pet_correction_value(candidate, name=field == "pet_name")
+
+    def pet_pair_completion_question(self, known_field: str, known_value: str) -> str:
+        if known_field == "pet_type":
+            article = "een " if not str(known_value).strip().lower().startswith(("een ", "de ", "het ")) else ""
+            return f"Oké, {article}{known_value}. Hoe heet je huisdier?"
+        if known_field == "pet_name":
+            return f"Oké, {known_value}. Wat voor huisdier is {known_value}?"
+        return "Wat moet ik daar nog bij onthouden?"
+
+    def pet_pair_change_from_single_change(
+        self,
+        change: dict,
+        missing_field: str,
+        missing_value: str,
+        turn: dict,
+        transcript: str,
+    ) -> dict:
+        corrections = {
+            change.get("field"): change.get("new_value"),
+            missing_field: missing_value,
+        }
+        context = self.turn_memory_context(turn)
+        changes = []
+        for field in ("pet_type", "pet_name"):
+            value = corrections.get(field)
+            if not self.d.is_known(value):
+                continue
+            old_value = (
+                context.get("current_values", {}).get(field)
+                or self.d.last_um_preview.get(field)
+                or self.d.UNKNOWN_VALUE
+            )
+            field_label = context.get("field_labels", {}).get(field) or self.d.field_label(field)
+            changes.append({
+                "action": "update",
+                "field": field,
+                "field_label": field_label,
+                "old_value": str(old_value),
+                "new_value": str(value),
+                "confidence": change.get("confidence", 0.0),
+                "reason": "Child completed paired pet memory correction.",
+                "source_text": " / ".join(
+                    part for part in (change.get("source_text"), transcript) if self.d.is_known(part)
+                ),
+                "replace_field": True,
+                "topic_correction": True,
+            })
+
+        if len(changes) < 2:
+            return change
+
+        pet_type = next((item["new_value"] for item in changes if item["field"] == "pet_type"), "")
+        pet_name = next((item["new_value"] for item in changes if item["field"] == "pet_name"), "")
+        return {
+            "action": "multi_update",
+            "field_label": "je huisdier",
+            "changes": changes,
+            "confidence": change.get("confidence", 0.0),
+            "reason": "Child completed paired pet memory correction.",
+            "source_text": " / ".join(
+                part for part in (change.get("source_text"), transcript) if self.d.is_known(part)
+            ),
+            "confirmation_question": f"Wil je dat ik onthoud dat je huisdier een {pet_type} is en {pet_name} heet?",
+            "replace_field": True,
+            "topic_correction": True,
+        }
+
+    def complete_pet_topic_pair(self, change: dict, turn: dict) -> dict:
+        if not change or change.get("action") != "update":
+            return change
+        topic = (turn or {}).get("topic") or {}
+        if topic.get("domain") != "huisdier" or not change.get("topic_correction"):
+            return change
+        field = change.get("field")
+        if field not in ("pet_type", "pet_name"):
+            return change
+
+        missing_field = "pet_name" if field == "pet_type" else "pet_type"
+        question = self.pet_pair_completion_question(field, change.get("new_value"))
+        self.d.speech.say(question)
+
+        completion_turn = dict(turn or {})
+        self.mark_waiting_for_memory_correction(completion_turn, missing_field, question)
+        completion_turn["response_mode"] = "value_completion"
+        completion_turn["allow_memory_change"] = True
+        completion_turn["used_fields"] = {field: change.get("new_value")}
+
+        time.sleep(0.5)
+        transcript = self.d.speech.listen_with_review()
+        time.sleep(0.8)
+        result = self.classify_with_repeat(transcript, completion_turn)
+        missing_value = self.extract_pet_value_for_field(result, transcript, missing_field)
+        if not self.d.is_known(missing_value):
+            return change
+
+        return self.pet_pair_change_from_single_change(change, missing_field, missing_value, turn, transcript)
 
     def expected_memory_value_count(self, turn: dict, field: str) -> int:
         explicit_count = self.explicit_expected_memory_value_count(turn, field)
@@ -618,6 +1004,16 @@ class ActionHandler:
         return self.correction_question_for_field(field, field_label, turn)
 
     def topic_correction_question(self, topic: dict) -> str:
+        domain = topic.get("domain")
+        domain_questions = {
+            "sport": "Oeps, welke sport moet ik dan onthouden?",
+            "boeken": "Oeps, welk boek moet ik dan onthouden?",
+            "muziek": "Oeps, wat moet ik dan onthouden over muziek?",
+            "huisdier": "Oeps, wat moet ik dan onthouden over je huisdier?",
+            "hobby": "Oeps, welke hobby moet ik dan onthouden?",
+        }
+        if domain in domain_questions:
+            return domain_questions[domain]
         fields = topic.get("fields") or []
         field = fields[0] if len(fields) == 1 else ""
         field_label = (topic.get("field_labels") or {}).get(field) or topic.get("label") or "mijn geheugen"
@@ -881,18 +1277,23 @@ class ActionHandler:
     def change_from_intent_result(self, result, turn: dict, transcript: str) -> dict:
         intent = result.intent
         mistake_state = self.d.mistake_states.get(turn.get("mistake_id"), {})
+        if self.is_plain_memory_acknowledgement(transcript) and not turn.get("memory_correction_requested"):
+            return {}
         repaired_answer_value = self.repair_value_from_short_answer(result, transcript, turn, mistake_state)
-        transcript_lower = str(transcript or "").strip().lower()
-        inline_memory_rejection = bool(self.mentioned_um_fields(turn)) and any(
-            phrase in transcript_lower
-            for phrase in ("nee", "klopt niet", "niet waar", "verkeerd", "fout")
-        )
+        inline_memory_correction = self.has_inline_memory_correction_cue(result, transcript, turn)
         memory_correction_value = self.repair_value_from_memory_correction_answer(
             result,
             transcript,
             turn,
-            allow_inline_rejection=inline_memory_rejection,
+            allow_inline_rejection=inline_memory_correction,
         )
+        if (
+            intent in ("um_add", "um_update", "dialogue_update", "um_delete")
+            and not turn.get("memory_correction_requested")
+            and not inline_memory_correction
+            and not self.response_mode_allows_direct_memory_update(turn.get("response_mode"))
+        ):
+            return {}
         dialogue_answer_corrects_mistake = (
             intent == "dialogue_answer"
             and turn.get("response_mode") == "mistake_interpretation"
@@ -906,7 +1307,7 @@ class ActionHandler:
         )
         dialogue_answer_corrects_memory = (
             intent in ("dialogue_answer", "dialogue_none", "dialogue_social", "um_add", "um_update", "dialogue_update")
-            and (bool(turn.get("memory_correction_requested")) or inline_memory_rejection)
+            and (bool(turn.get("memory_correction_requested")) or inline_memory_correction)
             and self.d.is_known(memory_correction_value)
         )
         if (
@@ -924,10 +1325,20 @@ class ActionHandler:
         value = memory_correction_value if dialogue_answer_corrects_memory else repaired_answer_value
         if (
             self.is_topic_turn(turn)
-            and (turn.get("memory_correction_requested") or inline_memory_rejection)
+            and (turn.get("memory_correction_requested") or inline_memory_correction)
             and self.is_no_topic_value_answer(result, transcript, turn)
         ):
             return {}
+
+        pet_multi_change = self.pet_multi_topic_change_from_answer(
+            result,
+            turn,
+            transcript,
+            context,
+            inline_memory_correction,
+        )
+        if pet_multi_change:
+            return pet_multi_change
 
         if not field and turn.get("mistake_field") and (
             intent in ("um_add", "um_update", "dialogue_update") or dialogue_answer_corrects_mistake
@@ -935,7 +1346,7 @@ class ActionHandler:
             field = turn.get("mistake_field")
         if not field and dialogue_answer_corrects_memory:
             field = turn.get("memory_correction_field") or self.preferred_memory_correction_field(result, turn)
-        if self.is_topic_turn(turn) and (turn.get("memory_correction_requested") or inline_memory_rejection):
+        if self.is_topic_turn(turn) and (turn.get("memory_correction_requested") or inline_memory_correction):
             topic_field = self.topic_correction_field(result, turn)
             if topic_field:
                 field = topic_field
@@ -1781,15 +2192,22 @@ class ActionHandler:
     def action_handler(self, result, transcript: str, turn: dict) -> dict:
         intent = result.intent
         mode = turn.get("response_mode")
+        listen_only_topic_memory_correction = self.listen_only_allows_topic_memory_correction(
+            result,
+            transcript,
+            turn,
+        )
         listen_only_locks_memory = (
             mode == "listen_only"
             and not turn.get("allow_memory_change")
             and not turn.get("memory_correction_requested")
+            and not listen_only_topic_memory_correction
         )
         change = {} if listen_only_locks_memory else self.change_from_intent_result(result, turn, transcript)
 
         if change:
             if not change.get("direct_mistake_correction"):
+                change = self.complete_pet_topic_pair(change, turn)
                 change = self.complete_expected_memory_values(change, turn)
 
             if change.get("value_limit_unresolved"):
@@ -1926,18 +2344,30 @@ class ActionHandler:
         if mode == "robot_school_guess":
             return self.robot_school_guess_action(result, transcript, turn)
 
+        listen_only_rejected_topic_memory = (
+            mode == "listen_only"
+            and self.is_topic_turn(turn)
+            and bool(self.mentioned_um_fields(turn))
+            and self.is_explicit_memory_rejection(transcript)
+        )
         can_ask_memory_correction = (
-            mode != "listen_only"
-            and (
-                mode in ("mistake_interpretation", "topic_interpretation")
-                or bool(self.mentioned_um_fields(turn))
-                or bool(turn.get("memory_correction_requested"))
+            (
+                mode != "listen_only"
+                and (
+                    mode in ("mistake_interpretation", "topic_interpretation")
+                    or bool(turn.get("memory_correction_requested"))
+                    or self.has_inline_memory_correction_cue(result, transcript, turn)
+                )
             )
+            or listen_only_rejected_topic_memory
         )
         if can_ask_memory_correction and self.is_rejection_without_value(result, transcript):
             if mode == "mistake_interpretation":
                 response = self.mistake_correction_question(turn)
                 correction_field = turn.get("mistake_field", "")
+            elif listen_only_rejected_topic_memory:
+                response = self.topic_correction_question(turn.get("topic", {}))
+                correction_field = ""
             else:
                 response, correction_field = self.memory_mention_correction_question(result, turn)
             self.mark_waiting_for_memory_correction(turn, correction_field, response)
@@ -2038,7 +2468,97 @@ class ActionHandler:
 
     # ── confirmation loop ────────────────────────────────────────────────────
 
+    def primary_reveal_change(self, change: dict) -> dict:
+        changes = change.get("changes") or []
+        if not changes:
+            return change
+        for single_change in changes:
+            if single_change.get("field") == "pet_name":
+                return single_change
+        return changes[0]
+
+    def is_pet_pair_change(self, change: dict) -> bool:
+        fields = {
+            single_change.get("field")
+            for single_change in (change.get("changes") or [])
+            if single_change.get("field")
+        }
+        return "pet_type" in fields and "pet_name" in fields
+
+    def confirm_multi_topic_change(self, change: dict) -> bool:
+        self.d.pending_change = change
+        changes = list(change.get("changes") or [])
+
+        while True:
+            self.d.speech.say(self.confirmation_text(change))
+            time.sleep(0.5)
+
+            confirmation = self.d.speech.listen_with_review()
+            time.sleep(0.8)
+
+            confirmation_context = dict(getattr(self.d, "current_turn_context", {}) or {})
+            confirmation_context["response_mode"] = "change_confirmation"
+            confirmation_context["used_fields"] = {
+                single_change.get("field"): single_change.get("new_value")
+                for single_change in changes
+                if single_change.get("field")
+            }
+            result = self.classify_with_repeat(confirmation, confirmation_context)
+
+            if self.is_confirmation_no(result, confirmation):
+                decision = self.action_result(
+                    "reject_change",
+                    True,
+                    "Child rejected the proposed multi-field change.",
+                    change=change,
+                )
+                self.d.log_action_handler_result(decision)
+                self.d.speech.say("Oké, dan verander ik niets.")
+                self.d.pending_change = None
+                return False
+
+            if self.is_confirmation_yes(result, confirmation):
+                decision = self.action_result(
+                    "confirm_change",
+                    True,
+                    "Child confirmed the proposed multi-field change.",
+                    change=change,
+                )
+                self.d.log_action_handler_result(decision)
+                self.d.corrections_seen += 1
+                reveal_change = self.primary_reveal_change(change)
+                for single_change in changes:
+                    self.d.handle_confirmed_mistake_related_change(single_change, self.d.current_turn_context)
+                    self.remember_confirmed_change_locally(single_change)
+                self.prepare_tablet_change_reveal(reveal_change, self.d.current_turn_context)
+                if self.is_pet_pair_change(change):
+                    written = [self.d.write_pet_pair_change(change)]
+                else:
+                    written = [self.d.write_um_change(single_change) for single_change in changes]
+                if self.d.current_turn_context:
+                    self.d.phases_with_confirmed_change.add(self.d.current_turn_context.get("phase"))
+                if all(written):
+                    self.d.speech.say(self.successful_change_acknowledgement(change))
+                    self.reveal_tablet_change_after_operator(reveal_change, self.d.current_turn_context)
+                else:
+                    self.clear_pending_tablet_reveal(self.d.current_turn_context)
+                    self.d.speech.say("Dankjewel, ik heb dat genoteerd, maar opslaan lukte nu niet.")
+                self.d.pending_change = None
+                return True
+
+            self.d.log_action_handler_result(self.action_result(
+                "ask_confirmation_again",
+                True,
+                "Multi-field confirmation intent was unclear.",
+                change=change,
+                leo_response=self.confirmation_text(change),
+            ))
+            self.d.speech.say(self.confirmation_text(change))
+
     def confirm_topic_change(self, change: dict) -> bool:
+        if change.get("action") == "multi_update":
+            return self.confirm_multi_topic_change(change)
+
         self.d.pending_change = change
 
         while True:

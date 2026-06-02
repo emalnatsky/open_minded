@@ -76,7 +76,11 @@ class Segments:
     def pet_open_fallback(self, topic: dict) -> str:
         pet_name, pet_type, animal = self.pet_subject_parts(topic)
         if pet_name and pet_type and pet_name.casefold() != pet_type.casefold():
-            return f"Ik weet ook nog dat jij een {pet_type} hebt die {pet_name} heet."
+            return (
+                f"Ik weet ook nog dat jij een {pet_type} hebt die {pet_name} heet. "
+                f"Dat vind ik echt een mooie naam. {pet_name} klinkt alsof die stiekem "
+                "belangrijke plannen maakt als niemand kijkt."
+            )
         if pet_type:
             return f"Ik weet ook nog dat jij een {pet_type} als huisdier hebt."
         if pet_name:
@@ -213,7 +217,7 @@ class Segments:
             if self.d.is_known((topic.get("current_values") or {}).get(field))
         ] or input_fields
         segments = []
-        include_recall = generic_prefix != "p1_t2" or self.scenario_has_any_steps([f"{generic_prefix}_recall"])
+        include_recall = generic_prefix != "p1_t2"
         if include_recall:
             segments.append({
                 "content_plan": self.d.l2_pregen(
@@ -269,7 +273,7 @@ class Segments:
             ),
             "expects_response": True,
             "response_mode": "listen_only",
-            "used_fields": {},
+            "used_fields": self.topic_used_fields(topic) if generic_prefix == "p1_t2" else {},
         })
 
         if include_close:
@@ -557,7 +561,7 @@ class Segments:
     def topic2_phase_segments(self, topic: dict) -> list:
         """Build the correct re-ground topic before M2."""
         if topic.get("domain") == "huisdier":
-            return self.pet_topic2_segments(topic)
+            return self.topic2_bridge_segments() + self.pet_topic2_segments(topic)
 
         if self.scenario_has_any_steps([
             "p1_t2_recall",
@@ -565,10 +569,10 @@ class Segments:
             "p1_t2_followup",
             "p1_t2_close",
         ]):
-            return self.generic_topic_segments(topic, "p1_t2", include_close=True)
+            return self.topic2_bridge_segments() + self.generic_topic_segments(topic, "p1_t2", include_close=True)
 
         if topic.get("domain") in ("sport", "muziek", "huisdier", "boeken"):
-            return self.part1_topic_segments(topic, include_close=False, generic_prefix="p1_t2") + [
+            return self.topic2_bridge_segments() + self.part1_topic_segments(topic, include_close=False, generic_prefix="p1_t2") + [
                 {
                     "content_plan": self.d.l2_pregen(
                         "p1_t2_close",
@@ -583,7 +587,7 @@ class Segments:
         label = topic.get("label")
 
         topic_fields = self.topic_label_fields(topic)
-        return [
+        return self.topic2_bridge_segments() + [
             {
                 "content_plan": self.d.l2_slot(
                     "Ik weet ook nog dat {topic} bij jou hoort.",
@@ -596,21 +600,36 @@ class Segments:
             }
         ]
 
+    def topic2_bridge_segments(self) -> list:
+        """Fixed comfort bridge before the second Part 1 topic."""
+        return [
+            {
+                "content_plan": self.d.l1(
+                    "Grappig eigenlijk, he. Mensen hebben vaak meer dan een ding dat ze leuk vinden. "
+                    "Ik heb dat ook een beetje."
+                ),
+                "expects_response": False,
+                "used_fields": {},
+            },
+            {
+                "content_plan": self.d.l1(
+                    "Bij boeken vind ik dat zo fijn: dan kan ik even allerlei verschillende levens proberen, "
+                    "zonder dat ik mijn robotbenen hoef te verplaatsen."
+                ),
+                "expects_response": False,
+                "used_fields": {},
+            },
+            {
+                "content_plan": self.d.l1(
+                    "En jij hebt volgens mij ook meer dingen die je leuk vindt."
+                ),
+                "expects_response": False,
+                "used_fields": {},
+            },
+        ]
+
     def pet_topic2_segments(self, topic: dict) -> list:
         segments = []
-        if self.scenario_has_any_steps(["p1_t2_recall"]):
-            segments.append({
-                "content_plan": self.d.l2_pregen(
-                    "p1_t2_recall",
-                    self.pet_open_fallback(topic),
-                    ["pet_name", "pet_type", "animal_fav", "has_pet"],
-                    topic_sensitive=True,
-                ),
-                "expects_response": True,
-                "response_mode": "listen_only",
-                "used_fields": self.topic_used_fields(topic),
-            })
-
         segments.extend([
             {
                 "content_plan": self.topic_l2_pregen(
@@ -633,7 +652,7 @@ class Segments:
                 ),
                 "expects_response": True,
                 "response_mode": "listen_only",
-                "used_fields": {},
+                "used_fields": self.topic_used_fields(topic),
             },
             {
                 "content_plan": self.d.l2_pregen(

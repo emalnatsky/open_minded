@@ -478,6 +478,153 @@ class UMClient:
 
     # ── writes / deletes ─────────────────────────────────────────────────────
 
+    def pet_pair_display_value(self, pet_type: str, pet_name: str) -> str:
+        pet_type = str(pet_type or "").strip()
+        pet_name = str(pet_name or "").strip()
+        if pet_type and pet_name:
+            return f"{pet_name} ({pet_type})"
+        return pet_name or pet_type or self.d.UNKNOWN_VALUE
+
+    def pet_pair_values_from_change(self, change: dict) -> dict:
+        changes = list((change or {}).get("changes") or [])
+
+        def value_for(field: str, key: str) -> str:
+            for single_change in changes:
+                if single_change.get("field") == field:
+                    return str(single_change.get(key) or "").strip()
+            return ""
+
+        return {
+            "pet_type": value_for("pet_type", "new_value"),
+            "pet_name": value_for("pet_name", "new_value"),
+            "old_pet_type": value_for("pet_type", "old_value"),
+            "old_pet_name": value_for("pet_name", "old_value"),
+        }
+
+    def remember_pet_pair_locally(self, pet_type: str, pet_name: str) -> None:
+        self.d.last_um_preview["pet_type"] = pet_type
+        self.d.last_um_preview["pet_name"] = pet_name
+        self.d.last_um_preview["pets"] = self.pet_pair_display_value(pet_type, pet_name)
+
+    def write_pet_pair_change(self, change: dict) -> bool:
+        values = self.pet_pair_values_from_change(change)
+        pet_type = values["pet_type"]
+        pet_name = values["pet_name"]
+        if not (self.is_known(pet_type) and self.is_known(pet_name)):
+            return False
+
+        old_value = self.pet_pair_display_value(values["old_pet_type"], values["old_pet_name"])
+        new_value = self.pet_pair_display_value(pet_type, pet_name)
+
+        if self.d.use_fake_persona_um():
+            try:
+                self.d.simulated_persona["pet_type"] = pet_type
+                self.d.simulated_persona["pet_name"] = pet_name
+                self.d.simulated_persona["pets"] = new_value
+                self.remember_pet_pair_locally(pet_type, pet_name)
+
+                if self.d.SIMULATION_WRITE_PERSONA_FILE:
+                    with open(self.d.simulated_persona_path, "w", encoding="utf-8") as persona_file:
+                        json.dump(self.d.simulated_persona, persona_file, ensure_ascii=False, indent=2)
+
+                self.d.log_conversation_event(
+                    "um_write",
+                    action="replace",
+                    field="pets",
+                    old_value=old_value,
+                    new_value=new_value,
+                    success=True,
+                    status_code="fake_persona",
+                )
+                return True
+            except Exception as e:
+                self.d.logger.error("Could not apply simulated pet UM change: %s", e)
+                self.d.log_conversation_event(
+                    "um_write",
+                    action="replace",
+                    field="pets",
+                    old_value=old_value,
+                    new_value=new_value,
+                    success=False,
+                    status_code="simulation",
+                    error=str(e),
+                )
+                return False
+
+        url = f"{self.d.UM_API_BASE}/api/um/{self.d.CHILD_ID}/fields"
+        payload = {
+            "fields": {"pets": pet_type},
+            "extra_props": {"pets_petName": pet_name},
+            "source": "cri_4_topic_confirmation",
+        }
+        replace_timeout = getattr(self.d, "UM_REPLACE_TIMEOUT_SECONDS", 15)
+
+        try:
+            dry_response = requests.post(url, json={**payload, "dry_run": True}, timeout=replace_timeout)
+            dry_ok = dry_response.status_code in (200, 201, 202, 204)
+            try:
+                dry_data = dry_response.json().get("data", {})
+                dry_skipped = dry_data.get("skipped") or []
+            except Exception:
+                dry_skipped = []
+            if not dry_ok or dry_skipped:
+                self.d.log_conversation_event(
+                    "um_write",
+                    action="replace",
+                    field="pets",
+                    old_value=old_value,
+                    new_value=new_value,
+                    success=False,
+                    status_code=dry_response.status_code,
+                    error=f"dry_run skipped fields: {dry_skipped}" if dry_skipped else "dry_run failed",
+                )
+                return False
+
+            delete_url = f"{self.d.UM_API_BASE}/api/um/{self.d.CHILD_ID}/field/pets"
+            delete_response = requests.delete(delete_url, timeout=replace_timeout)
+            delete_ok = delete_response.status_code in (200, 202, 204, 404)
+            if not delete_ok:
+                self.d.log_conversation_event(
+                    "um_write",
+                    action="replace",
+                    field="pets",
+                    old_value=old_value,
+                    new_value=new_value,
+                    success=False,
+                    status_code=delete_response.status_code,
+                    error="delete before replace failed",
+                )
+                return False
+
+            response = requests.post(url, json=payload, timeout=replace_timeout)
+            ok = response.status_code in (200, 201, 202, 204)
+            if ok:
+                self.remember_pet_pair_locally(pet_type, pet_name)
+            self.d.log_conversation_event(
+                "um_write",
+                action="replace",
+                field="pets",
+                old_value=old_value,
+                new_value=new_value,
+                success=ok,
+                status_code=response.status_code,
+                delete_status_code=delete_response.status_code,
+            )
+            return ok
+        except Exception as e:
+            self.d.logger.error("Could not write confirmed pet UM change: %s", e)
+            self.d.log_conversation_event(
+                "um_write",
+                action="replace",
+                field="pets",
+                old_value=old_value,
+                new_value=new_value,
+                success=False,
+                status_code=None,
+                error=str(e),
+            )
+            return False
+
     def write_um_change(self, change: dict) -> bool:
         field = change["field"]
         if self.d.use_fake_persona_um():

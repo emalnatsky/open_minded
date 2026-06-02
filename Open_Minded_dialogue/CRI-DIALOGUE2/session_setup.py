@@ -141,6 +141,7 @@ class SessionSetup:
         first_name_cri  = get_local_var("first_name_cri")
         first_name_tablet = get_local_var("first_name_tablet") or first_name_cri
         operator_name   = get_local_var("operator_name")
+        nao_ip          = get_local_var("nao_ip")
         condition_raw   = get_fact("condition") or "experimental"
         continue_raw    = get_fact("continueSession") or "false"
 
@@ -152,6 +153,7 @@ class SessionSetup:
             "first_name_cri":     first_name_cri,
             "first_name_tablet":  first_name_tablet,
             "operator_name":      operator_name,
+            "nao_ip":             nao_ip,
             "condition":          condition,
             "continue_session":   continue_session,
         }
@@ -161,6 +163,8 @@ class SessionSetup:
         print(f"  Tablet name:    {first_name_tablet}  (shown on book cover)")
         print(f"  Researcher:     {operator_name}")
         print(f"  Condition:      {condition}")
+        if nao_ip:
+            print(f"  NAO IP:         {nao_ip}")
         return result
 
     def save_local_session_config(self, config: dict):
@@ -258,6 +262,12 @@ class SessionSetup:
         if child_id:
             self.d.CHILD_ID = child_id
 
+        # NAO IP override from test_config.pl, when present.
+        nao_ip_from_config = str(self.d.session_config.get("nao_ip") or "").strip()
+        if nao_ip_from_config:
+            self.d.nao_ip = nao_ip_from_config
+            print(f"  NAO IP set from test_config.pl: {nao_ip_from_config}")
+
         # first_name_cri   → what NAO TTS pronounces in the dialogue
         # first_name_tablet → what appears on the tablet book cover
         # child_name is the legacy key — used as fallback for both
@@ -349,6 +359,7 @@ class SessionSetup:
         child_id      = pl.get("child_id", "")
         first_name_cri    = pl.get("first_name_cri", "")
         first_name_tablet = pl.get("first_name_tablet", "")
+        nao_ip            = pl.get("nao_ip", "")
         condition     = self.normalize_condition_value(
             pl.get("condition", self.d.CONDITION_CONTROL),
             default=self.d.CONDITION_CONTROL,
@@ -387,6 +398,8 @@ class SessionSetup:
         print(f"  Researcher:    {researcher or '(not set)'}")
         print(f"  Condition:     {self.condition_display(condition) if condition else '(not set)'}")
         print(f"  Start phase:   {self.start_phase_display(start_phase_index)}")
+        if nao_ip:
+            print(f"  NAO IP:        {nao_ip}  <- from test_config.pl")
         print("-" * 56)
         input("\nPress Enter to continue...")
 
@@ -398,6 +411,7 @@ class SessionSetup:
             "first_name_tablet":   first_name_tablet, # explicit tablet display name
             "researcher_name":     researcher,
             "condition":           condition,
+            "nao_ip":              nao_ip,
             "fake_persona_path":   fake_persona_path,
             "start_phase_index":   start_phase_index,
             "created_at":          datetime.now().astimezone().isoformat(timespec="seconds"),

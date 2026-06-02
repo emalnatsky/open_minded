@@ -28,6 +28,7 @@ from sic_framework.devices import Nao
 from sic_framework.devices.common_naoqi.naoqi_autonomous import (
     NaoRestRequest,
     NaoWakeUpRequest,
+    NaoSetAutonomousLifeRequest,
 )
 from sic_framework.services.openai_whisper_stt.whisper_stt import (
     SICWhisper,
@@ -1001,6 +1002,9 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def write_um_change(self, change):
         return self.um.write_um_change(change)
+
+    def write_pet_pair_change(self, change):
+        return self.um.write_pet_pair_change(change)
 
     def log_cri_interaction_event(self, payload):
         return self.um.log_cri_interaction_event(payload)
@@ -2567,9 +2571,12 @@ class CRI_ScriptedDialogue(SICApplication):
             topic["neutral_after_correction"] = True
         else:
             change = action.get("change") or {}
-            field = change.get("field")
-            new_value = change.get("new_value")
-            if field and self.is_known(new_value):
+            changes = change.get("changes") if change.get("action") == "multi_update" else [change]
+            for single_change in changes or []:
+                field = single_change.get("field")
+                new_value = single_change.get("new_value")
+                if not (field and self.is_known(new_value)):
+                    continue
                 current_values = topic.setdefault("current_values", {})
                 current_values[field] = new_value
                 if isinstance(turn.get("used_fields"), dict) and field in turn["used_fields"]:
@@ -2579,7 +2586,32 @@ class CRI_ScriptedDialogue(SICApplication):
 
         turn["force_topic_fallback"] = True
         phase = self.turn_phase(turn)
-        if phase == 5:
+        change = action.get("change") or {}
+        changes = change.get("changes") if change.get("action") == "multi_update" else [change]
+        changed_fields = {
+            single_change.get("field")
+            for single_change in changes or []
+            if single_change.get("field")
+        }
+
+        if phase == 7 and topic.get("domain") == "huisdier" and changed_fields.intersection({"pet_type", "pet_name"}):
+            rebuilt = self.topic2_phase_segments(topic)
+            corrected_followup = next(
+                (
+                    segment for segment in rebuilt
+                    if segment.get("expects_response")
+                    and segment.get("response_mode") == "listen_only"
+                    and {"pet_type", "pet_name"}.intersection((segment.get("used_fields") or {}).keys())
+                ),
+                None,
+            )
+            close_segment = rebuilt[-1] if rebuilt else None
+            current_segment = (self.current_turn_context or {}).get("segment") or 0
+            existing_segments = turn.get("segments") or []
+            prefix = existing_segments[:current_segment] if current_segment else []
+            replacement = [segment for segment in (corrected_followup, close_segment) if segment]
+            turn["segments"] = prefix + replacement if prefix and replacement else rebuilt
+        elif phase == 5:
             turn["segments"] = self.topic1_phase_segments(topic)
         elif phase == 7:
             turn["segments"] = self.topic2_phase_segments(topic)
@@ -2720,6 +2752,7 @@ class CRI_ScriptedDialogue(SICApplication):
         try:
             if not self.simulation_mode and self.CONNECT_NAO:
                 self.nao.autonomous.request(NaoWakeUpRequest())
+                self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
             while i < len(script):
@@ -2772,6 +2805,7 @@ class CRI_ScriptedDialogue(SICApplication):
         finally:
             try:
                 if not self.simulation_mode and self.CONNECT_NAO:
+                    self.nao.autonomous.request(NaoSetAutonomousLifeRequest("disabled"))
                     self.nao.autonomous.request(NaoRestRequest())
             except Exception:
                 pass

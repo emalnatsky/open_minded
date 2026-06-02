@@ -83,6 +83,7 @@ Critical classification rules:
 - If Leo just stated something WRONG about the child (e.g., "Volgens mij is bakken jouw lievelingshobby") and the child disagrees or provides a different value, that is um_update — the child is correcting Leo's memory.
 - If the child says "Nee" or "Klopt niet" after Leo stated a memory value, that is um_update (rejection of stored value), even without a new value.
 - If the user message includes "Expected correction field", Leo has just asked for the replacement value for that exact field. A short answer like "Gym" or "hockey" should be um_update for that field with the child's answer as value.
+- If the child gives both a pet type and pet name in one utterance, return um_update for one explicit pet field; prefer pet_name when a name is given. The action handler will use the full transcript to extract the paired pet field.
 - If the child says "Ja" or "Klopt" after Leo stated a memory value, that is dialogue_answer (confirmation).
 - Memory-access phrases like "wat weet je nog over mij", "wat heb je onthouden", "kun je vertellen wat je weet", "kan ik je geheugen zien", "mag ik je geheugenboek zien", and "kan ik in je geheugen kijken" are always um_inspect.
 - Do NOT classify memory/geheugen/geheugenboek requests as dialogue_question just because they start with "kan ik", "mag ik", or "kun je".
@@ -135,6 +136,16 @@ INTENT_FEW_SHOT_EXAMPLES = [
         "leo": "En volgens mij ben jij vooral goed in rekenen.",
         "child": "Nee hoor, taal!",
         "result": {"intent": "um_update", "field": "school_strength", "value": "taal", "confidence": 0.94},
+    },
+    {
+        "leo": "Oeps, wat moet ik dan onthouden over je huisdier?",
+        "child": "Dat hij lulu heet en het is een poes",
+        "result": {"intent": "um_update", "field": "pet_name", "value": "lulu", "confidence": 0.95},
+    },
+    {
+        "leo": "Oeps, wat moet ik dan onthouden over je huisdier?",
+        "child": "Dat het een poes is die lulu heet",
+        "result": {"intent": "um_update", "field": "pet_name", "value": "lulu", "confidence": 0.95},
     },
     {
         "leo": "En volgens mij is bakken jouw allerliefste hobby.",

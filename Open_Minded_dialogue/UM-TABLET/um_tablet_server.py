@@ -188,6 +188,33 @@ class UMTabletServer(SICApplication):
 
                 for field, entries in cat_data.get("nodes", {}).items():
                     if isinstance(entries, list):
+                        if field == "pets":
+                            pet_types = []
+                            pet_names = []
+                            for entry in entries:
+                                if not isinstance(entry, dict):
+                                    continue
+                                pet_type = str(entry.get("value") or "").strip()
+                                extra_props = entry.get("extra_props") or {}
+                                pet_name = str(extra_props.get("petName") or "").strip()
+                                if pet_type:
+                                    pet_types.append(pet_type)
+                                if pet_name:
+                                    pet_names.append(pet_name)
+                            if pet_types:
+                                flat["pet_type"] = {
+                                    "value":    ", ".join(pet_types),
+                                    "category": category_id,
+                                    "changes":  change_counts.get(field, 0),
+                                }
+                            if pet_names:
+                                flat["pet_name"] = {
+                                    "value":    ", ".join(pet_names),
+                                    "category": category_id,
+                                    "changes":  change_counts.get(field, 0),
+                                }
+                            continue
+
                         values = [e.get("value", "") for e in entries if e.get("value")]
                         flat[field] = {
                             "value":    ", ".join(values) if values else None,
