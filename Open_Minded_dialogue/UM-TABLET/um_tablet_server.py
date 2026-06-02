@@ -201,10 +201,10 @@ class UMTabletServer(SICApplication):
                             "changes":  change_counts.get(field, 0),
                         }
 
-            self.logger.debug(
-                "Fetched %d fields across %d categories for child '%s'.",
-                len(flat), len(categories), self._child_id
-            )
+            # self.logger.debug(
+            #     "Fetched %d fields across %d categories for child '%s'.",
+            #     len(flat), len(categories), self._child_id
+            # )
             return flat
 
         except http.exceptions.ConnectionError:
