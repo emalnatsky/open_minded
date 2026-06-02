@@ -171,6 +171,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.memory_review_requested = False
         self.last_cri_scenario = {}
         self.last_cri_scenario_loaded = False
+        self.pregenerated_rewrite_cache = {}
 
         # Conversation logger — reads/writes the logging state above.
         # Methods in this class delegate to self.conv_log.X.
@@ -1120,6 +1121,152 @@ class CRI_ScriptedDialogue(SICApplication):
 
         return fallback
 
+    def rewrite_value_map(self, input_fields: list, values_override: dict = None) -> dict:
+        values = {}
+        for field in input_fields or []:
+            value = (values_override or {}).get(field)
+            if not self.is_known(value):
+                value = (self.last_um_preview or {}).get(field)
+            if self.is_known(value):
+                values[field] = str(value).strip()
+        return values
+
+    def validate_rewritten_pregenerated_utterance(self, text: str, values: dict, original_text: str = "") -> str:
+        candidate = str(text or "").strip().strip('"').strip("'")
+        candidate = re.sub(r"^(?:leo|antwoord|output)\s*:\s*", "", candidate, flags=re.IGNORECASE).strip()
+        if not candidate:
+            return ""
+        candidate = re.sub(r"\s+", " ", candidate)
+        if len(candidate.split()) > 45:
+            return ""
+
+        lowered = candidate.casefold()
+        for field, value in (values or {}).items():
+            value_clean = str(value or "").strip()
+            if not value_clean:
+                continue
+            if value_clean.casefold() not in lowered:
+                return ""
+
+        pet_type = str((values or {}).get("pet_type") or "").strip().casefold()
+        if pet_type:
+            stale_pet_words = ("vis", "hond", "poes", "kat", "konijn", "hamster", "vogel", "schildpad")
+            original_lower = str(original_text or "").casefold()
+            for word in stale_pet_words:
+                if word != pet_type and word in original_lower and word in lowered:
+                    return ""
+
+        return candidate
+
+    def rewrite_stale_pregenerated_utterance(
+        self,
+        original_text: str,
+        fallback: str,
+        input_fields: list = None,
+        values_override: dict = None,
+        key: str = "",
+        purpose: str = "",
+    ) -> str:
+        """Rewrite stale topic-sensitive scenario text with live UM values."""
+        fallback_text = self.render_template_text(fallback, {})
+        values = self.rewrite_value_map(input_fields or [], values_override or {})
+        if not values:
+            return fallback_text
+
+        cache_key = (
+            str(key or ""),
+            str(purpose or ""),
+            str(original_text or ""),
+            tuple(sorted(values.items())),
+        )
+        cache = getattr(self, "pregenerated_rewrite_cache", None)
+        if cache is None:
+            self.pregenerated_rewrite_cache = {}
+            cache = self.pregenerated_rewrite_cache
+        if cache_key in cache:
+            return cache[cache_key]
+
+        final_text = fallback_text
+        raw_output = ""
+        used_fallback = True
+        validation = "fallback_before_model"
+
+        prompt = {
+            "task": (
+                "Rewrite this stale Dutch CRI scenario line so Leo says the same kind of line, "
+                "but with the live UM values. Keep the original intent and style. "
+                "Only replace the outdated memory reference."
+            ),
+            "purpose": purpose or "topic_sensitive",
+            "original_scenario_line": original_text,
+            "live_um_values": values,
+            "fallback_if_needed": fallback_text,
+            "rules": [
+                "Return plain Dutch text only.",
+                "Do not add labels, quotes, markdown, or explanation.",
+                "Mention every live UM value exactly enough that the sentence is no longer stale.",
+                "Do not mention the outdated value from the original line.",
+                "Keep it child-friendly and short.",
+                "Use one sentence for an open line; a short question is allowed for a follow-up line.",
+            ],
+        }
+        user_prompt = json.dumps(prompt, ensure_ascii=False)
+
+        try:
+            if self.gpt is not None:
+                request = GPTRequest(
+                    prompt=(
+                        "You rewrite one Dutch child-robot dialogue sentence.\n"
+                        "Return only the rewritten sentence.\n\n"
+                        f"{user_prompt}"
+                    ),
+                    stream=False,
+                )
+                response = self.gpt.request(request)
+                raw_output = response.response.strip() if response and response.response else ""
+            elif self.openai_client is not None:
+                response = self.openai_client.chat.completions.create(
+                    model=self.TOPIC_CHANGE_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You rewrite one Dutch child-robot dialogue sentence. "
+                                "Return only the rewritten sentence."
+                            ),
+                        },
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=100,
+                    temperature=0.2,
+                )
+                raw_output = response.choices[0].message.content.strip()
+
+            candidate = self.validate_rewritten_pregenerated_utterance(raw_output, values, original_text)
+            if candidate:
+                final_text = candidate
+                used_fallback = False
+                validation = "ok"
+            else:
+                validation = "invalid_or_empty_model_output" if raw_output else "no_model_available"
+        except Exception as e:
+            validation = f"exception:{e}"
+            self.logger.error("Could not rewrite stale pregenerated utterance: %s", e)
+
+        cache[cache_key] = final_text
+        self.log_conversation_event(
+            "l3_script_rewrite",
+            key=key,
+            purpose=purpose,
+            original_text=original_text,
+            live_um_values=values,
+            raw_output=raw_output,
+            final_output=final_text,
+            used_fallback=used_fallback,
+            validation=validation,
+        )
+        return final_text
+
     def split_memory_values(self, value: str) -> list:
         """Split simple comma/and-separated UM strings into speakable values."""
         if not self.is_known(value):
@@ -1293,7 +1440,10 @@ class CRI_ScriptedDialogue(SICApplication):
     def tutorial_memory_line(self, condition: str) -> str:
         condition = self.normalize_condition_value(condition, default=self.CONDITION_CONTROL)
         if condition == self.CONDITION_EXPERIMENT:
-            return "Dan kan je jouw geheugenboek op de tablet bekijken om te zien waar we het over gehad hebben."
+            return (
+                "Dan kan je jouw geheugenboek op de tablet bekijken om te zien waar we het over gehad hebben. "
+                "Je kan op het geheugenboek tikken en daarna op de categorieen tikken om erdoorheen te bladeren."
+            )
         return "Dan herhaal ik waar we het over gehad hebben."
 
     def greeting_text(self, um: dict) -> str:
@@ -2022,8 +2172,25 @@ class CRI_ScriptedDialogue(SICApplication):
         require_input_values=False,
         branch="default",
         topic_sensitive=False,
+        rewrite_when_stale=False,
+        rewrite_purpose="",
+        fit_validator="",
+        fit_values=None,
+        rewrite_values=None,
     ):
-        return self.cp.l2_pregen(key, fallback, input_fields, require_input_values, branch, topic_sensitive)
+        return self.cp.l2_pregen(
+            key,
+            fallback,
+            input_fields,
+            require_input_values,
+            branch,
+            topic_sensitive,
+            rewrite_when_stale,
+            rewrite_purpose,
+            fit_validator,
+            fit_values,
+            rewrite_values,
+        )
 
     def sequence(self, *parts):
         return self.cp.sequence(*parts)
@@ -2353,6 +2520,20 @@ class CRI_ScriptedDialogue(SICApplication):
         mistake_id = turn.get("mistake_id")
         if mistake_id:
             self.mistake_states.pop(mistake_id, None)
+        self.rebuild_phase_segments_for_repeat(turn)
+
+    def rebuild_phase_segments_for_repeat(self, turn: dict) -> None:
+        """Rebuild repeated topic phases from live UM/topic values."""
+        topic = turn.get("topic")
+        if not isinstance(topic, dict):
+            return
+        phase = self.turn_phase(turn)
+        if phase == 5:
+            turn["segments"] = self.topic1_phase_segments(topic)
+        elif phase == 7:
+            turn["segments"] = self.topic2_phase_segments(topic)
+        elif phase == 12:
+            turn["segments"] = self.subject_phase_segments(topic)
 
     def print_phase_start_banner(self, turn: dict):
         print("\n" + "=" * 72)
@@ -2584,7 +2765,6 @@ class CRI_ScriptedDialogue(SICApplication):
                 if field in self.topic_label_fields_for_domain(topic.get("domain")):
                     topic["label"] = new_value
 
-        turn["force_topic_fallback"] = True
         phase = self.turn_phase(turn)
         change = action.get("change") or {}
         changes = change.get("changes") if change.get("action") == "multi_update" else [change]
@@ -2593,8 +2773,14 @@ class CRI_ScriptedDialogue(SICApplication):
             for single_change in changes or []
             if single_change.get("field")
         }
+        pet_topic_change = (
+            phase == 7
+            and topic.get("domain") == "huisdier"
+            and changed_fields.intersection({"pet_type", "pet_name"})
+        )
+        turn["force_topic_fallback"] = not pet_topic_change
 
-        if phase == 7 and topic.get("domain") == "huisdier" and changed_fields.intersection({"pet_type", "pet_name"}):
+        if pet_topic_change:
             rebuilt = self.topic2_phase_segments(topic)
             corrected_followup = next(
                 (

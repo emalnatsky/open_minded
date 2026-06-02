@@ -148,6 +148,7 @@ def make_app(openai_payloads=None):
     app.memory_review_requested = False
     app.last_cri_scenario = {}
     app.last_cri_scenario_loaded = False
+    app.pregenerated_rewrite_cache = {}
 
     app.SIMULATED_PERSONA_DIR = str(PACKAGE_DIR / "fake_personas")
     app.SIMULATION_WRITE_PERSONA_FILE = False
@@ -407,6 +408,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("Volgens mijn geheugen heet jij Mila", app.greeting_text(new_e))
         self.assertIn("Dan herhaal ik waar we het over gehad hebben", app.tutorial_text(returning_c))
         self.assertIn("geheugenboek op de tablet bekijken", app.tutorial_text(new_e))
+        self.assertNotIn("categorieen tikken", app.tutorial_text(returning_c))
+        self.assertIn("categorieen tikken", app.tutorial_text(new_e))
 
     def test_tutorial_condition_can_fall_back_to_local_config(self):
         app = make_app()
@@ -416,6 +419,7 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(app.tutorial_condition(um), "E")
         self.assertIn("geheugenboek op de tablet bekijken", app.tutorial_text(um))
+        self.assertIn("categorieen tikken", app.tutorial_text(um))
 
     def test_condition_display_uses_control_and_experiment_labels(self):
         app = make_app()
@@ -1757,6 +1761,94 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(topic2_texts[4], "T2 followup uit GraphDB?")
         self.assertEqual(topic2_texts[5], "T2 close uit GraphDB.")
 
+    def test_topic1_activity_sport_rejects_position_open_question(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["sports_fav_play"] = "vissen"
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t1_recall": {"default": "[STUB] Ik weet ook nog dat jij zelf vissen doet."},
+                "p1_t1_open": {"default": "[STUB] In welke positie speel jij?"},
+                "p1_t1_question": {
+                    "default": "[STUB] Ik vraag me wel eens af of ik een goede sportrobot zou kunnen zijn, "
+                    "maar ik val waarschijnlijk al om voor de warming-up. Wat vind jij zo leuk aan vissen?"
+                },
+                "p1_t1_followup": {
+                    "default": "[STUB] Ben jij dan meer van snel rennen, goed overspelen, "
+                    "of juist lekker fanatiek meedoen?"
+                },
+            },
+            "mistakes": [],
+        }
+        topic = app.topic_candidate(
+            domain="sport",
+            label="vissen",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "vissen"},
+            correct_values=["je iets met vissen hebt"],
+            memory_link="vissen iets is waar jij iets mee hebt",
+            options=["vissen", "sport"],
+            reground="Ik houd goed vast dat vissen iets is waar jij iets mee hebt.",
+        )
+
+        segments = app.topic1_phase_segments(topic)
+
+        open_text = app.turn_text(segments[1])
+        followup_text = app.turn_text(segments[3])
+        self.assertIn("vissen", open_text)
+        self.assertNotIn("positie", open_text.lower())
+        self.assertNotIn("overspelen", followup_text.lower())
+        self.assertNotIn("snel rennen", followup_text.lower())
+
+    def test_topic1_correction_to_activity_sport_rebuilds_with_activity_questions(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = app.topic_candidate(
+            domain="sport",
+            label="voetbal",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "voetbal"},
+            correct_values=["je iets met voetbal hebt"],
+            memory_link="voetbal iets is waar jij iets mee hebt",
+            options=["voetbal", "sport"],
+            reground="Ik houd goed vast dat voetbal iets is waar jij iets mee hebt.",
+        )
+        turn = {
+            "phase": 5,
+            "layer": "L2+L3",
+            "name": "Topic 1",
+            "topic": topic,
+            "segments": app.topic1_phase_segments(topic),
+        }
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "sports_fav_play",
+                "old_value": "voetbal",
+                "new_value": "vissen",
+            },
+        })
+
+        open_text = app.turn_text(app.segment_context(turn, turn["segments"][1], 2))
+        question_text = app.turn_text(app.segment_context(turn, turn["segments"][2], 3))
+        followup_text = app.turn_text(app.segment_context(turn, turn["segments"][3], 4))
+        self.assertIn("vissen", open_text)
+        self.assertNotIn("positie", open_text.lower())
+        self.assertIn("vissen", question_text)
+        self.assertNotIn("voetbal", question_text.lower())
+        self.assertNotIn("overspelen", followup_text.lower())
+
     def test_topic2_animals_uses_bridge_open_followup_then_topic_closing(self):
         app = make_app()
         app.last_cri_scenario_loaded = True
@@ -1844,6 +1936,46 @@ class CRIDialogue2Tests(unittest.TestCase):
             {"pet_name": "Vis", "pet_type": "Vis"},
         )
 
+    def test_topic2_pet_stale_scenario_lines_are_rewritten_with_live_um(self):
+        app = make_app(openai_payloads=[
+            "En ik herinner me dat jij een kat hebt die Simba heet. Gaaf!",
+            "Hoe is Simba als kat eigenlijk?",
+        ])
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "kat", "pet_name": "Simba"})
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t2_open": {
+                    "default": "[STUB] En ik herinner me dat jij een vis als huisdier hebt. Gaaf!"
+                },
+                "p1_t2_followup": {
+                    "default": "[STUB] Hoe gaat het met jouw vis? Doet die nog leuke dingen?"
+                },
+            }
+        }
+        topic = app.topic_candidate(
+            domain="huisdier",
+            label="Simba",
+            fields=["pet_name", "pet_type"],
+            field_labels={"pet_name": "de naam van je huisdier", "pet_type": "het soort huisdier"},
+            current_values={"pet_name": "Simba", "pet_type": "kat"},
+            correct_values=["Simba bij jou hoort"],
+            memory_link="Simba belangrijk voor je is",
+            options=["Simba", "dieren"],
+            reground="Ik onthoud dat Simba belangrijk voor je is.",
+        )
+
+        segments = app.topic2_phase_segments(topic)
+
+        open_text = app.turn_text(segments[3])
+        followup_text = app.turn_text(segments[4])
+        self.assertEqual(open_text, "En ik herinner me dat jij een kat hebt die Simba heet. Gaaf!")
+        self.assertEqual(followup_text, "Hoe is Simba als kat eigenlijk?")
+        self.assertNotIn("vis", open_text.lower())
+        self.assertNotIn("vis", followup_text.lower())
+        self.assertEqual(len(app.openai_client.requests), 2)
+
     def test_topic2_pet_fallback_uses_pet_type_and_name(self):
         app = make_app()
         app.last_cri_scenario_loaded = True
@@ -1912,12 +2044,9 @@ class CRIDialogue2Tests(unittest.TestCase):
             },
         })
 
-        self.assertTrue(turn["force_topic_fallback"])
+        self.assertFalse(turn["force_topic_fallback"])
         self.assertEqual(turn["topic"]["label"], "Luna")
-        open_segment = app.segment_context(turn, turn["segments"][3], 4)
         followup_segment = app.segment_context(turn, turn["segments"][4], 5)
-        self.assertNotIn("En ik herinner me dat jij een vis als huisdier hebt.", app.turn_text(open_segment))
-        self.assertIn("Luna", app.turn_text(open_segment))
         self.assertIn("Luna", app.turn_text(followup_segment))
 
     def test_topic2_sport_followup_carries_correction_context(self):
@@ -3277,6 +3406,51 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(app.turn_text(followup_context), "Wat voor kat is Simba eigenlijk?")
         self.assertNotIn("Ik weet ook nog dat jij een kat hebt die Simba heet", app.turn_text(followup_context))
         self.assertIn("Bizar leuk", app.turn_text(close_context))
+
+    def test_repeating_topic2_after_pet_correction_uses_corrected_pet_values(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = {
+            "domain": "huisdier",
+            "label": "Vis",
+            "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+            "field_labels": {
+                "pet_name": "de naam van je huisdier",
+                "pet_type": "het soort huisdier",
+                "animal_fav": "je lievelingsdier",
+                "has_pet": "of je een huisdier hebt",
+            },
+            "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+        }
+        phase = {
+            "phase": 7,
+            "name": "Topic 2",
+            "topic": topic,
+            "segments": app.topic2_phase_segments(topic),
+        }
+        app.current_turn_context = {**phase, **phase["segments"][4], "segment": 5}
+        action = {
+            "continue_phase_after_change": True,
+            "change": {
+                "action": "multi_update",
+                "topic_correction": True,
+                "changes": [
+                    {"field": "pet_type", "new_value": "poes"},
+                    {"field": "pet_name", "new_value": "Lulu"},
+                ],
+            },
+        }
+
+        app.refresh_topic_after_change(phase, action)
+        app.reset_phase_attempt_state(phase)
+
+        open_context = {**phase, **phase["segments"][3]}
+        followup_context = {**phase, **phase["segments"][4]}
+        self.assertIn("poes", app.turn_text(open_context))
+        self.assertIn("Lulu", app.turn_text(open_context))
+        self.assertEqual(app.turn_text(followup_context), "Wat voor poes is Lulu eigenlijk?")
+        self.assertNotIn("vis", app.turn_text(open_context).lower())
+        self.assertNotIn("vis", app.turn_text(followup_context).lower())
 
     def test_topic2_listen_only_sport_rejection_asks_sport_question(self):
         app = make_app()

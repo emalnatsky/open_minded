@@ -37,6 +37,11 @@ class Segments:
         fallback: str,
         input_fields: list = None,
         require_input_values: bool = False,
+        rewrite_when_stale: bool = False,
+        rewrite_purpose: str = "",
+        fit_validator: str = "",
+        fit_values: dict = None,
+        rewrite_values: dict = None,
     ) -> dict:
         return self.d.l2_pregen(
             self.topic_step_keys(generic_prefix, suffix, legacy_key),
@@ -44,7 +49,33 @@ class Segments:
             input_fields or [],
             require_input_values=require_input_values,
             topic_sensitive=True,
+            rewrite_when_stale=rewrite_when_stale,
+            rewrite_purpose=rewrite_purpose,
+            fit_validator=fit_validator,
+            fit_values=fit_values,
+            rewrite_values=rewrite_values,
         )
+
+    def stale_rewriting_topic_l2_pregen(
+        self,
+        generic_prefix: str | None,
+        suffix: str,
+        legacy_key: str,
+        fallback: str,
+        input_fields: list,
+        purpose: str,
+    ) -> dict:
+        plan = self.topic_l2_pregen(
+            generic_prefix,
+            suffix,
+            legacy_key,
+            fallback,
+            input_fields,
+            require_input_values=True,
+        )
+        plan["rewrite_when_stale"] = True
+        plan["rewrite_purpose"] = purpose
+        return plan
 
     def topic_label(self, topic: dict) -> str:
         domain = topic.get("domain")
@@ -117,6 +148,11 @@ class Segments:
             return "Vind je vooral nieuwe bewegingen leren, sterk worden, of dat je goed moet opletten leuk?"
         return "Wat vind je daar meestal het fijnst aan: bezig zijn, beter worden, of samen met anderen iets doen?"
 
+    def sport_open_prompt(self, sport: str) -> str:
+        if self.d.cp.sport_can_have_position(sport):
+            return f"In welke positie speel jij met {sport}?"
+        return f"Hoe ziet dat er meestal uit als jij met {sport} bezig bent?"
+
     def neutral_topic_segments(self, topic: dict, include_close: bool) -> list:
         domain = topic.get("domain")
         prompts = {
@@ -181,7 +217,7 @@ class Segments:
         input_fields = list((topic.get("current_values") or {}).keys())
         if domain == "sport":
             recall_fallback = f"Ik weet ook nog dat jij zelf {label} doet."
-            open_fallback = f"In welke positie speel jij met {label}?"
+            open_fallback = self.sport_open_prompt(label)
             question_fallback = (
                 "Ik vraag me wel eens af of ik een goede sportrobot zou kunnen zijn, "
                 f"maar ik val waarschijnlijk al om voor de warming-up. Wat vind jij zo leuk aan {label}?"
@@ -216,6 +252,9 @@ class Segments:
             field for field in value_fields
             if self.d.is_known((topic.get("current_values") or {}).get(field))
         ] or input_fields
+        fit_values = {}
+        if domain == "sport" and self.d.is_known(label):
+            fit_values = {"sports_fav_play": label}
         segments = []
         include_recall = generic_prefix != "p1_t2"
         if include_recall:
@@ -239,6 +278,11 @@ class Segments:
                 open_fallback,
                 pregen_fields,
                 topic_sensitive=True,
+                rewrite_when_stale=domain == "sport",
+                rewrite_purpose="sport_open" if domain == "sport" else "",
+                fit_validator="sport_open" if domain == "sport" else "",
+                fit_values=fit_values,
+                rewrite_values=fit_values,
             ),
             "expects_response": open_expects_response,
             "used_fields": {} if generic_prefix == "p1_t1" else self.topic_used_fields(topic),
@@ -247,6 +291,15 @@ class Segments:
             open_segment.update({
                 "response_mode": "acknowledge",
                 "llm_turn": True,
+                "l3": {
+                    "script_phase": "part1_topic1",
+                    "topic": "sport" if domain == "sport" else domain or "topic",
+                    "response_function": "acknowledge",
+                    "question_allowed": False,
+                    "relevant_um_fields": ["sports_fav_play"] if domain == "sport" else pregen_fields,
+                    "local_context": f"Leo and the child are talking about {label}.",
+                    "fallback": "Dat snap ik wel.",
+                },
             })
         segments.append(open_segment)
 
@@ -256,8 +309,12 @@ class Segments:
                     f"{generic_prefix}_question",
                     question_fallback,
                     pregen_fields,
-                    require_input_values=domain == "sport",
                     topic_sensitive=True,
+                    rewrite_when_stale=domain == "sport",
+                    rewrite_purpose="sport_question" if domain == "sport" else "",
+                    fit_validator="sport_question" if domain == "sport" else "",
+                    fit_values=fit_values,
+                    rewrite_values=fit_values,
                 ),
                 "expects_response": True,
                 "response_mode": "listen_only",
@@ -270,6 +327,11 @@ class Segments:
                 followup_fallback,
                 pregen_fields,
                 topic_sensitive=True,
+                rewrite_when_stale=domain == "sport",
+                rewrite_purpose="sport_followup" if domain == "sport" else "",
+                fit_validator="sport_followup" if domain == "sport" else "",
+                fit_values=fit_values,
+                rewrite_values=fit_values,
             ),
             "expects_response": True,
             "response_mode": "listen_only",
@@ -316,6 +378,7 @@ class Segments:
             return self.neutral_topic_segments(topic, include_close)
         if domain == "sport":
             sport = topic.get("current_values", {}).get("sports_fav_play") or label
+            fit_values = {"sports_fav_play": sport} if self.d.is_known(sport) else {}
             segments = [
                 {
                     "content_plan": self.topic_l2_pregen(
@@ -335,8 +398,13 @@ class Segments:
                         generic_prefix,
                         "open",
                         "sport_open",
-                        f"In welke positie speel jij met {sport}?",
+                        self.sport_open_prompt(sport),
                         ["sports_fav_play"],
+                        rewrite_when_stale=True,
+                        rewrite_purpose="sport_open",
+                        fit_validator="sport_open",
+                        fit_values=fit_values,
+                        rewrite_values=fit_values,
                     ),
                     "expects_response": True,
                     "response_mode": "acknowledge",
@@ -360,8 +428,12 @@ class Segments:
                             f"maar ik val waarschijnlijk al om voor de warming-up. Wat vind jij zo leuk aan {sport}?"
                         ),
                         ["sports_fav_play"],
-                        require_input_values=True,
                         topic_sensitive=True,
+                        rewrite_when_stale=True,
+                        rewrite_purpose="sport_question",
+                        fit_validator="sport_question",
+                        fit_values=fit_values,
+                        rewrite_values=fit_values,
                     ),
                     "expects_response": True,
                     "response_mode": "listen_only",
@@ -376,6 +448,11 @@ class Segments:
                             "sport_followup",
                             self.sport_followup_prompt(sport),
                             ["sports_fav_play"],
+                            rewrite_when_stale=True,
+                            rewrite_purpose="sport_followup",
+                            fit_validator="sport_followup",
+                            fit_values=fit_values,
+                            rewrite_values=fit_values,
                         ),
                     ),
                     "expects_response": True,
@@ -630,26 +707,37 @@ class Segments:
 
     def pet_topic2_segments(self, topic: dict) -> list:
         segments = []
+        rewrite_values = {
+            field: value
+            for field, value in (topic.get("current_values") or {}).items()
+            if field in ("pet_type", "pet_name") and self.d.is_known(value)
+        }
+        open_plan = self.stale_rewriting_topic_l2_pregen(
+            "p1_t2",
+            "open",
+            "animals_open",
+            self.pet_open_fallback(topic),
+            ["pet_type", "pet_name"],
+            "pet_open",
+        )
+        open_plan["rewrite_values"] = rewrite_values
+        followup_plan = self.stale_rewriting_topic_l2_pregen(
+            "p1_t2",
+            "followup",
+            "animals_followup",
+            self.pet_followup_fallback(topic),
+            ["pet_type", "pet_name"],
+            "pet_followup",
+        )
+        followup_plan["rewrite_values"] = rewrite_values
         segments.extend([
             {
-                "content_plan": self.topic_l2_pregen(
-                    "p1_t2",
-                    "open",
-                    "animals_open",
-                    self.pet_open_fallback(topic),
-                    ["pet_name", "pet_type", "animal_fav", "has_pet"],
-                ),
+                "content_plan": open_plan,
                 "expects_response": False,
                 "used_fields": self.topic_used_fields(topic),
             },
             {
-                "content_plan": self.topic_l2_pregen(
-                    "p1_t2",
-                    "followup",
-                    "animals_followup",
-                    self.pet_followup_fallback(topic),
-                    ["pet_name", "pet_type", "animal_fav"],
-                ),
+                "content_plan": followup_plan,
                 "expects_response": True,
                 "response_mode": "listen_only",
                 "used_fields": self.topic_used_fields(topic),
