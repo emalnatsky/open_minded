@@ -70,8 +70,7 @@ class NudgeManager:
         if not mistake_id:
             return
         state = self.d.mistake_states.setdefault(mistake_id, {"id": mistake_id})
-        state["corrected"] = True
-        state["corrected_at_phase"] = context.get("phase")
+        self.d.mark_mistake_state_corrected(state, context)
 
     # ── lookups ──────────────────────────────────────────────────────────────
 

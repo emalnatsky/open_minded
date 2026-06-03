@@ -669,7 +669,7 @@ class ConversationLogger:
                     "corrected": bool(event.get("corrected")),
                     "child_initiated": self.omr_yes_no(event.get("child_initiated", event.get("corrected"))),
                     "trigger": event.get("trigger") or "mistake-triggered",
-                    "spt_layer": event.get("spt_layer") or event.get("layer"),
+                    "spt_layer": event.get("spt_layer") or event.get("spt_level"),
                     "mistake_type": event.get("mistake_type"),
                     "latency_seconds": event.get("latency_seconds"),
                     "correction_turn_number": event.get("correction_turn_number") or self.omr_turn_number(event),

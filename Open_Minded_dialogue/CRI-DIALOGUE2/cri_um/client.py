@@ -400,6 +400,11 @@ class UMClient:
                 normalized["field"] = normalized["target_field"]
             if "type" not in normalized and normalized.get("mistake_type"):
                 normalized["type"] = normalized["mistake_type"]
+            if "spt_layer" not in normalized:
+                for key in ("spt_level", "sptLevel", "social_presence_layer", "socialPresenceLayer"):
+                    if normalized.get(key):
+                        normalized["spt_layer"] = normalized[key]
+                        break
             return normalized
         return {}
 

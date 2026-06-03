@@ -2007,8 +2007,7 @@ class ActionHandler:
                 break
 
         if matched_state:
-            matched_state["corrected"] = True
-            matched_state["corrected_at_phase"] = turn.get("phase")
+            self.d.mark_mistake_state_corrected(matched_state, turn)
             self.d.corrections_seen += 1
             self.d.phases_with_confirmed_change.add(self.d.turn_phase(turn))
 

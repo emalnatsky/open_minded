@@ -516,6 +516,57 @@ class CRI_ScriptedDialogue(SICApplication):
     def mark_current_mistake_corrected(self):
         return self.nudge.mark_current_mistake_corrected()
 
+    def content_plan_contains_wrong_slot(self, plan) -> bool:
+        if not isinstance(plan, dict):
+            return False
+        if plan.get("wrong_slot"):
+            return True
+        return any(
+            self.content_plan_contains_wrong_slot(part)
+            for part in plan.get("parts", []) or []
+        )
+
+    def should_start_mistake_timer(self, context: dict) -> bool:
+        if not (context or {}).get("mistake_id"):
+            return False
+        return bool(
+            context.get("starts_mistake_timer")
+            or self.content_plan_contains_wrong_slot(context.get("content_plan"))
+        )
+
+    def register_mistake_utterance_start(self, context: dict) -> None:
+        if not self.should_start_mistake_timer(context):
+            return
+        mistake_id = context.get("mistake_id")
+        state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
+        if state.get("mistake_utterance_at") is not None:
+            return
+        state["mistake_utterance_at"] = self.log_timestamp()
+
+    def update_mistake_latency(self, state: dict, end_at=None):
+        if not isinstance(state, dict):
+            return None
+        start_at = state.get("mistake_utterance_at")
+        if start_at is None:
+            return None
+        if end_at is None:
+            end_at = self.log_timestamp()
+        try:
+            latency = round(max(0.0, float(end_at) - float(start_at)), 3)
+        except (TypeError, ValueError):
+            return None
+        state["latency_seconds"] = latency
+        return latency
+
+    def mark_mistake_state_corrected(self, state: dict, turn: dict = None) -> None:
+        if not isinstance(state, dict):
+            return
+        corrected_at = self.log_timestamp()
+        state["corrected"] = True
+        state["corrected_at"] = corrected_at
+        state["corrected_at_phase"] = self.turn_phase(turn or self.current_turn_context or {})
+        self.update_mistake_latency(state, corrected_at)
+
     def current_session_id(self):
         log = getattr(self, "conversation_log", None) or {}
         return log.get("session_id") or "unknown"
@@ -560,11 +611,17 @@ class CRI_ScriptedDialogue(SICApplication):
             else self.current_mistake_memory_value(field, corrected, mistake_value)
         )
         leo_memory_key = self.mistake_memory_key(mistake_id, outcome, field, leo_memory_value)
+        latency_seconds = state.get("latency_seconds")
+        if latency_seconds is None:
+            latency_seconds = self.update_mistake_latency(state)
         return {
             "event_type": event_type,
             "mistake_id": mistake_id,
             "field": field,
             "outcome": outcome,
+            "spt_layer": turn.get("spt_layer") or state.get("spt_layer"),
+            "mistake_type": turn.get("mistake_type") or state.get("mistake_type"),
+            "latency_seconds": latency_seconds,
             "real_value": real_value,
             "mistake_value": mistake_value,
             "wrong_value": mistake_value,
@@ -587,6 +644,9 @@ class CRI_ScriptedDialogue(SICApplication):
         state["outcome"] = payload.get("outcome")
         state["real_value"] = payload.get("real_value")
         state["mistake_value"] = payload.get("mistake_value")
+        state["spt_layer"] = payload.get("spt_layer")
+        state["mistake_type"] = payload.get("mistake_type")
+        state["latency_seconds"] = payload.get("latency_seconds")
         state["leo_memory_key"] = payload.get("leo_memory_key")
         state["leo_memory_value"] = payload.get("leo_memory_value")
         state["outcome_logged"] = True
@@ -608,8 +668,7 @@ class CRI_ScriptedDialogue(SICApplication):
         state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
         if state.get("m3_not_corrected_by_difficulty_change"):
             return
-        state["corrected"] = True
-        state["corrected_at_phase"] = self.turn_phase(turn)
+        self.mark_mistake_state_corrected(state, turn)
         state["corrected_by_school_difficulty_ack"] = True
 
     def handle_confirmed_mistake_related_change(self, change: dict, turn: dict = None) -> bool:
@@ -625,8 +684,7 @@ class CRI_ScriptedDialogue(SICApplication):
             if context.get("mistake_id"):
                 self.mark_current_mistake_corrected()
             else:
-                state["corrected"] = True
-                state["corrected_at_phase"] = self.turn_phase(context)
+                self.mark_mistake_state_corrected(state, context)
             return True
 
         if (
@@ -2998,6 +3056,7 @@ class CRI_ScriptedDialogue(SICApplication):
             self.actions.activate_tablet_memory_access(fields, context)
 
         self.speech.say(self.turn_text(context))
+        self.register_mistake_utterance_start(context)
         if context.get("speak_memory_review_from_access_scope"):
             for line in self.memory_review_lines(runtime_memory_review_fields or context.get("memory_review_fields") or []):
                 self.speech.say(line)

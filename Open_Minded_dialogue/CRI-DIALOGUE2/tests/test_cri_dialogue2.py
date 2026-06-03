@@ -548,6 +548,7 @@ class CRIDialogue2Tests(unittest.TestCase):
                     "target_field": "hobby_fav",
                     "wrong_value": "gamen",
                     "mistake_type": "related-but-wrong",
+                    "spt_level": "orientation",
                     "step": 4,
                 }
             ],
@@ -581,6 +582,32 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(mistake["field"], "hobby_fav")
         self.assertEqual(mistake["type"], "related-but-wrong")
         self.assertEqual(mistake["wrong_value"], "gamen")
+        self.assertEqual(mistake["spt_layer"], "orientation")
+
+    def test_build_script_carries_db_spt_level_into_mistake_phase(self):
+        app = make_app()
+        app.local_child_name = "Sam"
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {},
+            "mistakes": [
+                {
+                    "id": "M1",
+                    "target_field": "hobby_fav",
+                    "wrong_value": "gamen",
+                    "mistake_type": "related-but-wrong",
+                    "spt_level": "orientation",
+                    "step": 1,
+                },
+            ],
+        }
+
+        script = app.build_script()
+        phase16 = next(turn for turn in script if turn.get("mistake_id") == "M1")
+
+        self.assertEqual(phase16["spt_layer"], "orientation")
 
     def test_build_script_uses_part1_phase_sequence_and_mistakes(self):
         app = make_app()
@@ -754,6 +781,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase36["segments"][1]["expects_response"], False)
         self.assertTrue(phase36["segments"][1]["memory_review_from_access_scope"])
         self.assertTrue(phase36["segments"][1]["speak_memory_review_from_access_scope"])
+        self.assertFalse(phase36["segments"][1]["activate_tablet_memory_access"])
         self.assertEqual(phase36["segments"][2]["response_mode"], "memory_review_add_final")
         self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase36["segments"][2]))
         self.assertIn("gewoon nog even verder", app.turn_text(phase36["segments"][-1]))
@@ -785,6 +813,26 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(script[7]["mistake_id"], "M2")
         self.assertEqual(script[7]["mistake_field"], "fav_food")
         self.assertEqual(script[8]["condition"], "run_if_two_mistakes_no_corrections")
+
+    def test_build_script_condition_e_uses_tablet_for_explicit_memory_review(self):
+        app = make_app()
+        app.local_child_name = "Sam"
+        app.local_condition = "E"
+        app.USE_FAKE_PERSONA_UM = False
+        um = sample_um()
+        um["condition"] = "E"
+        app.pull_um = lambda: dict(um)
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+
+        script = app.build_script()
+        phase36 = next(turn for turn in script if turn.get("phase_id") == "3.6/7")
+        review_segment = phase36["segments"][1]
+
+        self.assertIn("Kijk maar op de tablet", app.turn_text(review_segment))
+        self.assertTrue(review_segment["memory_review_from_access_scope"])
+        self.assertFalse(review_segment["speak_memory_review_from_access_scope"])
+        self.assertTrue(review_segment["activate_tablet_memory_access"])
 
     def test_part3_role_model_phase_uses_stored_role_model_and_scenario_fallback(self):
         app = make_app()
@@ -1106,7 +1154,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(segments[2]["used_fields"], {"aspiration": "architect worden"})
         self.assertEqual(phase34["mistake_topic"]["memory_link"], "wat je later wilt worden")
 
-    def test_part3_merged_phase_uses_postcorrection_reflection_scenario(self):
+    def test_part3_merged_phase_uses_profile_based_postcorrection_reflection(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -1114,7 +1162,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.last_cri_scenario = {
             "utterances": {
                 "p3_m4_postcorrection_reflection": {
-                    "default": "[STUB] Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?"
+                    "default": "[STUB] Stale scenario line that should not override the corrected aspiration."
                 },
             },
             "mistakes": [],
@@ -1127,7 +1175,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase34["phase_id"], "3.4/5")
         self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(len(segments), 7)
-        self.assertEqual(app.turn_text(segments[3]), "Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?")
+        self.assertIn("Dat past ook wel mooi bij jou", app.turn_text(segments[3]))
+        self.assertIn("dierenarts worden", app.turn_text(segments[3]))
+        self.assertNotIn("Stale scenario line", app.turn_text(segments[3]))
         self.assertTrue(segments[3]["run_if_phase_confirmed_change"])
         self.assertEqual(segments[3]["condition_phase"], 17)
         self.assertEqual(segments[3]["used_fields"]["aspiration"], "dierenarts worden")
@@ -1147,8 +1197,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         reflection_text = app.turn_text(script[16]["segments"][3])
 
         self.assertIn("Dat past ook wel mooi bij jou", reflection_text)
-        self.assertIn("dierenarts bij jou past", reflection_text)
-        self.assertIn("Wat lijkt jou daar het mooiste aan?", reflection_text)
+        self.assertIn("dierenarts worden", reflection_text)
+        self.assertIn("Wat lijkt jou het mooiste aan", reflection_text)
 
     def test_part3_mistake4_inline_aspiration_update_is_confirmed_and_continues(self):
         app = make_app()
@@ -1499,7 +1549,8 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(turn["mistake_actual"], "tuinman worden")
         self.assertEqual(len(turn["segments"]), 4)
-        self.assertIn("tuinman bij jou past", app.turn_text(turn["segments"][3]))
+        self.assertIn("tuinman worden", app.turn_text(turn["segments"][3]))
+        self.assertIn("Wat lijkt jou het mooiste aan", app.turn_text(turn["segments"][3]))
 
     def test_part2_subject_phase_uses_plural_for_multiple_favorite_subjects(self):
         app = make_app()
@@ -3604,6 +3655,30 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(state_seen_by_tablet_update["wrong"], "padel")
         self.assertFalse(state_seen_by_tablet_update["corrected"])
 
+    def test_mistake_latency_timer_starts_on_wrong_value_segment_only(self):
+        app = make_app()
+        app.log_timestamp = lambda: 42.5
+
+        setup_context = {
+            "mistake_id": "M4",
+            "content_plan": app.l1("Eerst praat Leo over later nadenken."),
+        }
+        app.register_mistake_utterance_start(setup_context)
+
+        self.assertNotIn("M4", app.mistake_states)
+
+        wrong_context = {
+            "mistake_id": "M4",
+            "content_plan": app.l2_pregen(
+                "p3_m4_followup_wrong_aspiration",
+                "En volgens mij wil jij later kok worden.",
+            ),
+            "starts_mistake_timer": True,
+        }
+        app.register_mistake_utterance_start(wrong_context)
+
+        self.assertEqual(app.mistake_states["M4"]["mistake_utterance_at"], 42.5)
+
     def test_tablet_js_keeps_mistake_visible_without_auto_animation(self):
         script = (OUTER_DIR / "UM-TABLET" / "webfiles" / "script.js").read_text(encoding="utf-8")
 
@@ -4692,9 +4767,12 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_actual": "taal",
             "mistake_wrong": "begrijpend lezen",
             "mistake_type": "completely-wrong",
+            "spt_layer": "exploratory affective",
         }
 
         app.register_mistake_phase(turn)
+        app.mistake_states["M3"]["mistake_utterance_at"] = 100.0
+        app.log_timestamp = lambda: 131.25
         app.record_mistake_outcome(turn)
 
         self.assertEqual(payloads[0]["event_type"], "mistake_not_corrected")
@@ -4702,6 +4780,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertFalse(payloads[0]["corrected"])
         self.assertEqual(payloads[0]["real_value"], "taal")
         self.assertEqual(payloads[0]["mistake_value"], "begrijpend lezen")
+        self.assertEqual(payloads[0]["spt_layer"], "exploratory affective")
+        self.assertEqual(payloads[0]["mistake_type"], "completely-wrong")
+        self.assertEqual(payloads[0]["latency_seconds"], 31.25)
         self.assertEqual(
             payloads[0]["leo_memory_key"],
             "M3_mistake_not_corrected_school_strength",
@@ -4713,8 +4794,12 @@ class CRIDialogue2Tests(unittest.TestCase):
             "M3_mistake_not_corrected_school_strength",
         )
         self.assertEqual(app.mistake_states["M3"]["leo_memory_value"], "begrijpend lezen")
+        self.assertEqual(app.mistake_states["M3"]["spt_layer"], "exploratory affective")
+        self.assertEqual(app.mistake_states["M3"]["latency_seconds"], 31.25)
         self.assertTrue(app.mistake_states["M3"]["outcome_logged"])
         self.assertEqual(app.conversation_log["events"][0]["type"], "mistake_outcome")
+        self.assertEqual(app.conversation_log["events"][0]["spt_layer"], "exploratory affective")
+        self.assertEqual(app.conversation_log["events"][0]["latency_seconds"], 31.25)
 
     def test_mistake_phase_logs_corrected_outcome_with_confirmed_value(self):
         app = make_app()
@@ -4738,8 +4823,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         }
 
         app.register_mistake_phase(turn)
+        app.mistake_states["M3"]["mistake_utterance_at"] = 200.0
+        app.log_timestamp = lambda: 209.75
         app.current_turn_context = turn
         app.mark_current_mistake_corrected()
+        app.log_timestamp = lambda: 240.0
         app.record_mistake_outcome(turn)
 
         self.assertEqual(payloads[0]["event_type"], "mistake_corrected")
@@ -4749,8 +4837,10 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(payloads[0]["mistake_value"], "begrijpend lezen")
         self.assertEqual(payloads[0]["leo_memory_key"], "")
         self.assertEqual(payloads[0]["leo_memory_value"], "Gym")
+        self.assertEqual(payloads[0]["latency_seconds"], 9.75)
         self.assertEqual(app.mistake_states["M3"]["outcome"], "corrected")
         self.assertEqual(app.mistake_states["M3"]["leo_memory_value"], "Gym")
+        self.assertEqual(app.mistake_states["M3"]["latency_seconds"], 9.75)
 
     def test_mistake_phase_logs_rejected_unresolved_without_leo_memory_value(self):
         app = make_app()
@@ -5922,6 +6012,9 @@ class CRIDialogue2Tests(unittest.TestCase):
                     "wrong_value": "padel",
                     "real_value": "voetbal",
                     "corrected": True,
+                    "spt_layer": "orientation",
+                    "layer": "L2-slot WRONG",
+                    "latency_seconds": 8.42,
                 },
                 {
                     "type": "action_handler",
@@ -5946,6 +6039,9 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(omr_log["mistakes_and_corrections"][0]["timestamp"], "02:00")
         self.assertEqual(omr_log["mistakes_and_corrections"][0]["child_initiated"], "yes")
+        self.assertEqual(omr_log["mistakes_and_corrections"][0]["spt_layer"], "orientation")
+        self.assertNotEqual(omr_log["mistakes_and_corrections"][0]["spt_layer"], "L2-slot WRONG")
+        self.assertEqual(omr_log["mistakes_and_corrections"][0]["latency_seconds"], 8.42)
         self.assertEqual(len(omr_log["memory_acts"]), 1)
         self.assertEqual(omr_log["memory_acts"][0]["timestamp"], "03:04")
         self.assertEqual(omr_log["memory_acts"][0]["target_field"], "hobby_fav")

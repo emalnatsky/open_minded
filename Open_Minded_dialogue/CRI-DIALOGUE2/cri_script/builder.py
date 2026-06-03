@@ -207,17 +207,26 @@ class ScriptBuilder:
         links = []
         if self.d.known(um, "animal_fav") or self.d.yesish(um.get("animals_enjoys")):
             links.append("dieren")
-        for field in ("interest", "fav_subject", "school_strength", "school_difficulty"):
+        for field in ("hobbies", "interest", "fav_subject", "school_strength", "school_difficulty"):
             value = self.d.known(um, field)
             if value:
                 links.extend(self.d.split_memory_values(value) or [value])
 
         unique_links = []
+        skip_values = {
+            "geen",
+            "nee",
+            "niets",
+            "niks",
+            "niemand",
+            self.d.UNKNOWN_VALUE.lower(),
+        }
         for link in links:
             clean = str(link or "").strip()
-            if clean and clean.lower() not in [item.lower() for item in unique_links]:
+            clean_key = clean.lower()
+            if clean and clean_key not in skip_values and clean_key not in [item.lower() for item in unique_links]:
                 unique_links.append(clean)
-        return self.d.format_dutch_list(unique_links[:4], "wat jij leuk en belangrijk vindt")
+        return self.d.format_dutch_list(unique_links[:4], "")
 
     def memory_review_topic(self, fields: list, um: dict) -> dict:
         return {
@@ -475,27 +484,26 @@ class ScriptBuilder:
         subject_phrase = self.subject_memory_phrase(um)
         difficulty_phrase = self.school_difficulty_phrase(um)
         profile = self.aspiration_reflection_profile_summary(um)
+        profile_line = f"Ik hoor bij jou dingen als {profile}. " if profile else ""
+        reflection_fallback = (
+            "Dat past ook wel mooi bij jou, vind ik. "
+            f"{profile_line}"
+            f"Wat lijkt jou het mooiste aan {actual}?"
+        )
 
         return [
             {
                 "content_plan": self.d.l2_pregen(
                     "p3_m4_postcorrection_reflection",
-                    (
-                        "Dat past ook wel mooi bij jou, vind ik. "
-                        f"Jij houdt van {profile}, "
-                        f"en dan snap ik wel dat {actual_label} bij jou past. "
-                        "Wat lijkt jou daar het mooiste aan?"
-                    ),
+                    reflection_fallback,
                     [
-                        "interest",
-                        "animals_enjoys",
-                        "animal_fav",
-                        "fav_subject",
-                        "school_strength",
-                        "school_difficulty",
                         "aspiration",
                     ],
+                    require_input_values=True,
+                    topic_sensitive=True,
+                    rewrite_values={"aspiration": actual_label},
                 ),
+                "force_topic_fallback": True,
                 "expects_response": True,
                 "response_mode": "listen_only",
                 "run_if_phase_confirmed_change": True,
@@ -854,6 +862,7 @@ class ScriptBuilder:
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M1",
                 "mistake_type": m1_type,
+                "spt_layer": m1_plan.get("spt_layer"),
                 "mistake_field": m1_field,
                 "mistake_actual": m1_actual,
                 "mistake_wrong": m1_wrong,
@@ -932,6 +941,7 @@ class ScriptBuilder:
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M2",
                 "mistake_type": m2_type,
+                "spt_layer": m2_plan.get("spt_layer"),
                 "mistake_field": m2_field,
                 "mistake_actual": m2_actual,
                 "mistake_wrong": m2_wrong,
@@ -1097,6 +1107,7 @@ class ScriptBuilder:
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M3",
                 "mistake_type": m3_type,
+                "spt_layer": m3_plan.get("spt_layer"),
                 "mistake_field": m3_field,
                 "mistake_actual": m3_actual,
                 "mistake_wrong": m3_wrong,
@@ -1293,6 +1304,7 @@ class ScriptBuilder:
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M4",
                 "mistake_type": m4_type,
+                "spt_layer": m4_plan.get("spt_layer"),
                 "mistake_field": m4_field,
                 "mistake_actual": m4_actual,
                 "mistake_wrong": m4_wrong,
@@ -1325,6 +1337,7 @@ class ScriptBuilder:
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
                         "defer_corrected_response": True,
+                        "starts_mistake_timer": True,
                         "used_fields": {m4_field: m4_wrong},
                     },
                     *self.aspiration_postcorrection_segments(um, condition_phase=17),
@@ -1390,7 +1403,7 @@ class ScriptBuilder:
                         "expects_response": False,
                         "condition": "run_if_memory_review_requested",
                         "memory_review_from_access_scope": True,
-                        "speak_memory_review_from_access_scope": True,
+                        "speak_memory_review_from_access_scope": tutorial_condition == self.d.CONDITION_CONTROL,
                         "activate_tablet_memory_access": tutorial_condition == self.d.CONDITION_EXPERIMENT,
                     },
                     {
