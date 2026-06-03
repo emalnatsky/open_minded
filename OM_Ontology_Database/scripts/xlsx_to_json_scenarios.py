@@ -17,10 +17,8 @@ WHAT IT DOES:
        - spt_level inferred: M1/M2=orientation, M3=exploratory, M4=affective
        - step defaults: M1=4, M2=6, M3=10, M4=14
     2. Reads utterance columns → builds utterance dicts
-       - Branch inferred from step_id name:
-           "postcorrection" in name → corrected
-           "followup_wrong" / "wrong_aspiration" / "wrap_after" in name → not_corrected
-           everything else → default
+       - Branch is always "default"; the step_id name carries the meaning
+         (for example postcorrection / followup_wrong)
        - Empty cells are skipped (no utterance created)
     3. Topic_1 and Topic_2 are stored as metadata utterances
 
@@ -65,18 +63,10 @@ UM_REFERENCE_COLS = {
     "interest", "aspiration", "role_model",
 }
 
-# Utterance step_ids and their branches (inferred from naming convention)
+# Utterance step_ids are stored under the default branch. The step_id name
+# carries whether the text belongs to a corrected or not-corrected path.
 def _infer_branch(step_id: str) -> str:
-    """Infer the CRI branch from the utterance step_id name."""
-    sid = step_id.lower()
-    if "postcorrection" in sid:
-        return "corrected"
-    if "followup_wrong" in sid:
-        return "not_corrected"
-    if "wrong_aspiration" in sid:
-        return "not_corrected"
-    if "wrap_after" in sid:
-        return "not_corrected"
+    """Return the branch used for CRI scenario utterances."""
     return "default"
 
 
@@ -210,7 +200,7 @@ def row_to_scenario(row: dict) -> dict | None:
         utterances.append({
             "step_id": step_id,
             "layer": "L2-pregen",
-            "branch": "default",
+            "branch": branch,
             "text": value.strip(),
         })
 

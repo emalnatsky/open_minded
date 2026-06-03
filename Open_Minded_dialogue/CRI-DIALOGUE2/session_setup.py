@@ -11,7 +11,7 @@ stay identical.
 
 What lives here:
   - Roster loading (../conf/test_config.txt) — child name + condition by ID
-  - Condition normalisation (E/C → C2/C1)
+  - Condition normalisation (old C1/C2 aliases -> C/E)
   - Local config file (session_config.local.json) — saved for resume support
   - Pre-session interactive prompt (Child ID, Researcher, Start phase)
   - Run-mode prompt (microphone vs keyboard)
@@ -33,6 +33,7 @@ import os
 import csv
 import json
 import logging
+import re
 from datetime import datetime
 
 import requests
@@ -60,7 +61,7 @@ class SessionSetup:
         Read ../conf/test_config.txt and return a dict keyed by child ID:
             {
               "169": {"name": "Julianna", "gender": "girl",
-                      "past_exposure": 0, "condition": "C1"},
+                      "past_exposure": 0, "condition": "C"},
               ...
             }
         Returns empty dict if file is missing or unreadable.
@@ -78,7 +79,7 @@ class SessionSetup:
                         continue
                     past = (row.get("past_exposure") or "0").strip()
                     raw_condition = (row.get("condition") or "").strip()
-                    # Normalise "C", "C1", "1", "C2", "2" to C1/C2
+                    # Normalise "C", "C1", "1", "E", "C2", "2" to C/E.
                     condition = self.normalize_condition_value(raw_condition, default="")
                     roster[cid] = {
                         "name":          (row.get("Naam") or "").strip(),
@@ -140,10 +141,11 @@ class SessionSetup:
         first_name_cri  = get_local_var("first_name_cri")
         first_name_tablet = get_local_var("first_name_tablet") or first_name_cri
         operator_name   = get_local_var("operator_name")
+        nao_ip          = get_local_var("nao_ip")
         condition_raw   = get_fact("condition") or "experimental"
         continue_raw    = get_fact("continueSession") or "false"
 
-        condition = self.normalize_condition_value(condition_raw, default="C1")
+        condition = self.normalize_condition_value(condition_raw, default=self.d.CONDITION_EXPERIMENT)
         continue_session = continue_raw.strip().lower() in ("true", "yes", "1")
 
         result = {
@@ -151,6 +153,7 @@ class SessionSetup:
             "first_name_cri":     first_name_cri,
             "first_name_tablet":  first_name_tablet,
             "operator_name":      operator_name,
+            "nao_ip":             nao_ip,
             "condition":          condition,
             "continue_session":   continue_session,
         }
@@ -160,6 +163,8 @@ class SessionSetup:
         print(f"  Tablet name:    {first_name_tablet}  (shown on book cover)")
         print(f"  Researcher:     {operator_name}")
         print(f"  Condition:      {condition}")
+        if nao_ip:
+            print(f"  NAO IP:         {nao_ip}")
         return result
 
     def save_local_session_config(self, config: dict):
@@ -180,36 +185,72 @@ class SessionSetup:
         except (EOFError, KeyboardInterrupt):
             return default
 
-    def normalize_condition_value(self, value: str, default: str = "C1") -> str:
+    def normalize_condition_value(self, value: str, default: str = None) -> str:
         """
-        Normalise any condition representation to the internal "C1"/"C2".
-
-        Roster convention (../conf/test_config.txt):
-            "E" = experimental (with tablet) → internal "C2"
-            "C" = control      (no tablet)   → internal "C1"
+        Normalise any condition representation to the canonical "C"/"E".
 
         Internal convention (used by all downstream tutorial/condition logic):
-            "C1" = no tablet
-            "C2" = with tablet
+            "C" = control/no tablet
+            "E" = experimental/with tablet
         """
-        clean = str(value or "").strip().lower()
-        if clean in ("e", "exp", "experimental", "tablet group"):
-            return "C2"
-        if clean in ("c", "ctrl", "control", "control group"):
-            return "C1"
-        if clean in ("2", "c2", "condition 2", "with tablet", "tablet"):
-            return "C2"
-        if clean in ("1", "c1", "condition 1", "no tablet", "without tablet", "geen tablet"):
-            return "C1"
+        if default is None:
+            default = self.d.CONDITION_CONTROL
+        aliases = getattr(self.d, "CONDITION_ALIASES", {})
+        clean = " ".join(str(value or "").strip().lower().replace("_", " ").split())
+        if clean in aliases:
+            return aliases[clean]
+        default_clean = " ".join(str(default or "").strip().lower().replace("_", " ").split())
+        if default_clean in aliases:
+            return aliases[default_clean]
         return default
 
     def condition_display(self, condition: str) -> str:
         normalized = self.normalize_condition_value(condition)
-        return f"{normalized} ({'with tablet' if normalized == 'C2' else 'no tablet'})"
+        label = getattr(self.d, "CONDITION_LABELS", {}).get(normalized)
+        if label:
+            return f"{normalized} ({label})"
+        return f"{normalized} ({'with tablet' if normalized == self.d.CONDITION_EXPERIMENT else 'no tablet'})"
+
+    def script_phase_id_map(self) -> dict:
+        """Map human script ids such as 2.1 to zero-based global phase indexes."""
+        canonical_phase_ids = (
+            [f"1.{phase}" for phase in range(1, 10)]
+            + ["2.1", "2.2", "2.3", "2.4"]
+            + ["3.1", "3.2", "3.3", "3.4/5", "3.6/7", "3.8"]
+        )
+        mapping = {
+            phase_id: index
+            for index, phase_id in enumerate(canonical_phase_ids)
+        }
+        mapping["3.4"] = mapping["3.4/5"]
+        mapping["3.5"] = mapping["3.4/5"]
+        mapping["3.6"] = mapping["3.6/7"]
+        mapping["3.7"] = mapping["3.6/7"]
+        return mapping
+
+    def script_phase_id_for_index(self, index: int) -> str:
+        reverse = {
+            value: key
+            for key, value in self.script_phase_id_map().items()
+            if key not in {"3.4", "3.5", "3.6", "3.7"}
+        }
+        return reverse.get(index, "")
+
+    def start_phase_display(self, index: int) -> str:
+        phase_num = int(index) + 1
+        phase_id = self.script_phase_id_for_index(index)
+        return f"{phase_num} ({phase_id})" if phase_id else str(phase_num)
 
     def parse_phase_index(self, value: str, default_index: int = 0) -> int:
+        clean = str(value or "").strip().lower()
+        clean = clean.replace(",", ".")
+        clean = re.sub(r"^(phase|fase)\s+", "", clean).strip()
+        phase_id_map = self.script_phase_id_map()
+        if clean in phase_id_map:
+            return phase_id_map[clean]
+
         try:
-            phase = int(str(value).strip())
+            phase = int(clean)
             if 1 <= phase <= self.d.TOTAL_SCRIPT_PHASES:
                 return phase - 1
         except (TypeError, ValueError):
@@ -223,6 +264,13 @@ class SessionSetup:
         child_id = str(self.d.session_config.get("child_id") or "").strip()
         if child_id:
             self.d.CHILD_ID = child_id
+
+        # NAO IP override from test_config.pl (only if provided, otherwise
+        # keep whatever default was passed to __init__).
+        nao_ip_from_config = str(self.d.session_config.get("nao_ip") or "").strip()
+        if nao_ip_from_config:
+            self.d.nao_ip = nao_ip_from_config
+            print(f"  NAO IP set from test_config.pl: {nao_ip_from_config}")
 
         # first_name_cri   → what NAO TTS pronounces in the dialogue
         # first_name_tablet → what appears on the tablet book cover
@@ -291,7 +339,7 @@ class SessionSetup:
 
     def session_condition_from_um(self, child_id: str) -> str:
         value = self.get_um_field_for_child(child_id, self.d.TUTORIAL_CONDITION_FIELD)
-        return self.normalize_condition_value(value, default="C1")
+        return self.normalize_condition_value(value, default=self.d.CONDITION_CONTROL)
 
     # ── interactive entry: new session ───────────────────────────────────────
 
@@ -315,7 +363,11 @@ class SessionSetup:
         child_id      = pl.get("child_id", "")
         first_name_cri    = pl.get("first_name_cri", "")
         first_name_tablet = pl.get("first_name_tablet", "")
-        condition     = pl.get("condition", "C1")
+        nao_ip            = pl.get("nao_ip", "")
+        condition     = self.normalize_condition_value(
+            pl.get("condition", self.d.CONDITION_CONTROL),
+            default=self.d.CONDITION_CONTROL,
+        )
         researcher    = pl.get("operator_name", "")
 
         # If pl file was empty or missing, fall back to asking
@@ -327,13 +379,8 @@ class SessionSetup:
 
         # 3. Start phase
         total = self.d.TOTAL_SCRIPT_PHASES
-        phase_raw = self.ask_session_value(f"Start phase (1-{total})", "1")
-        try:
-            phase_num = int(phase_raw)
-        except (TypeError, ValueError):
-            phase_num = 1
-        phase_num = max(1, min(phase_num, total))
-        start_phase_index = phase_num - 1
+        phase_raw = self.ask_session_value(f"Start phase (1-{total}, or 2.1/3.6)", "1")
+        start_phase_index = self.parse_phase_index(phase_raw, default_index=0)
 
         fake_persona_path = self.d.simulated_persona_path
         if self.d.use_fake_persona_um():
@@ -354,7 +401,9 @@ class SessionSetup:
         print(f"  Tablet name:   {first_name_tablet or '(not set)'}  ← shown on book")
         print(f"  Researcher:    {researcher or '(not set)'}")
         print(f"  Condition:     {self.condition_display(condition) if condition else '(not set)'}")
-        print(f"  Start phase:   {phase_num}")
+        print(f"  Start phase:   {self.start_phase_display(start_phase_index)}")
+        if nao_ip:
+            print(f"  NAO IP:        {nao_ip}  ← from test_config.pl")
         print("-" * 56)
         input("\nPress Enter to continue...")
 
@@ -366,6 +415,7 @@ class SessionSetup:
             "first_name_tablet":   first_name_tablet, # explicit tablet display name
             "researcher_name":     researcher,
             "condition":           condition,
+            "nao_ip":              nao_ip,
             "fake_persona_path":   fake_persona_path,
             "start_phase_index":   start_phase_index,
             "created_at":          datetime.now().astimezone().isoformat(timespec="seconds"),

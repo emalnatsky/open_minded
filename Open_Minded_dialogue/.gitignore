@@ -12,8 +12,6 @@ venv_sic/
 
 # Your project-specific
 conf/
-
-# .gitignore
-.env
-.env.local
-.env.*.local
+_local/
+CRI-DIALOGUE2/conversations/
+CRI-DIALOGUE2/session_config.local.json

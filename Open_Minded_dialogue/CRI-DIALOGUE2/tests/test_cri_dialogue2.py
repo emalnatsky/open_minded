@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
 OUTER_DIR = PACKAGE_DIR.parent
+REPO_ROOT = OUTER_DIR.parent
 LOCAL_DIR = OUTER_DIR / "_local"
 SCRIPT_PATH = PACKAGE_DIR / "CRI-BRANCH-BASIC4_0.py"
 LAUNCHER_PATH = LOCAL_DIR / "launchers" / "run_cri_dialogue2.py"
@@ -36,6 +37,14 @@ def load_cri_module():
 
     sys.path.insert(0, str(PACKAGE_DIR))
     spec = importlib.util.spec_from_file_location("cri_dialogue2_for_tests", SCRIPT_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_xlsx_scenario_converter():
+    script_path = REPO_ROOT / "OM_Ontology_Database" / "scripts" / "xlsx_to_json_scenarios.py"
+    spec = importlib.util.spec_from_file_location("xlsx_to_json_scenarios_for_tests", script_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -104,7 +113,12 @@ def make_app(openai_payloads=None):
     app.clf = cri_module.StubIntentClassifier(valid_fields=list(CRI.UM_FIELDS))
     app.desktop = None
     app.speech = FakeSpeech()
-    app.tablet_state = SimpleNamespace(reset=lambda: None, update=lambda turn: None)
+    app.tablet_state = SimpleNamespace(
+        reset=lambda: None,
+        update=lambda turn: None,
+        refresh=lambda phase=None: None,
+        reveal_change=lambda **kwargs: None,
+    )
 
     app.mistakes_mentioned = 0
     app.corrections_seen = 0
@@ -134,6 +148,7 @@ def make_app(openai_payloads=None):
     app.memory_review_requested = False
     app.last_cri_scenario = {}
     app.last_cri_scenario_loaded = False
+    app.pregenerated_rewrite_cache = {}
 
     app.SIMULATED_PERSONA_DIR = str(PACKAGE_DIR / "fake_personas")
     app.SIMULATION_WRITE_PERSONA_FILE = False
@@ -145,6 +160,8 @@ def make_app(openai_payloads=None):
     app.SESSION_ROSTER_DIR = str(LOCAL_DIR / "session_rosters")
     app.SESSION_ROSTER_PATH = str(LOCAL_DIR / "session_rosters" / "active.json")
     app.ROSTER_PATH = str(LOCAL_DIR / "test_config.txt")
+    app.WAIT_FOR_OPERATOR_TABLET_REVEAL = False
+    app.TABLET_REVEAL_WAIT_SECONDS = 0
 
     app.conv_log = cri_module.ConversationLogger(app)
     app.resume = cri_module.ResumeHelper(app)
@@ -193,6 +210,36 @@ def sample_um():
 
 
 class CRIDialogue2Tests(unittest.TestCase):
+    def capture_pet_pair_writes(self, app, writes):
+        def fake_write_pet_pair(change):
+            writes.extend(dict(single_change) for single_change in change.get("changes", []))
+            return True
+
+        app.write_pet_pair_change = fake_write_pet_pair
+        app.write_um_change = lambda change: self.fail(
+            "Pet type/name corrections should use write_pet_pair_change."
+        )
+
+    def test_xlsx_scenario_converter_stores_all_utterances_as_default_branch(self):
+        converter = load_xlsx_scenario_converter()
+
+        scenario = converter.row_to_scenario({
+            "child_id": "701",
+            "M1_target_field": "hobby_fav",
+            "M1_wrong_value": "padel",
+            "p1_m1_followup_wrong_hobby": "Wat vind je het leukste aan padel?",
+            "p1_m2_postcorrection_true_food": "Boerenkool klinkt gezellig.",
+            "p1_hobby_bridge_comment": "Dat is een gezellige combinatie.",
+        })
+
+        branches = {
+            utterance["step_id"]: utterance["branch"]
+            for utterance in scenario["utterances"]
+        }
+        self.assertEqual(branches["p1_m1_followup_wrong_hobby"], "default")
+        self.assertEqual(branches["p1_m2_postcorrection_true_food"], "default")
+        self.assertEqual(branches["p1_hobby_bridge_comment"], "default")
+
     def test_pull_um_missing_child_skips_per_field_fallback(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
@@ -361,6 +408,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("Volgens mijn geheugen heet jij Mila", app.greeting_text(new_e))
         self.assertIn("Dan herhaal ik waar we het over gehad hebben", app.tutorial_text(returning_c))
         self.assertIn("geheugenboek op de tablet bekijken", app.tutorial_text(new_e))
+        self.assertNotIn("categorieen tikken", app.tutorial_text(returning_c))
+        self.assertIn("categorieen tikken", app.tutorial_text(new_e))
 
     def test_tutorial_condition_can_fall_back_to_local_config(self):
         app = make_app()
@@ -370,6 +419,7 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(app.tutorial_condition(um), "E")
         self.assertIn("geheugenboek op de tablet bekijken", app.tutorial_text(um))
+        self.assertIn("categorieen tikken", app.tutorial_text(um))
 
     def test_condition_display_uses_control_and_experiment_labels(self):
         app = make_app()
@@ -386,6 +436,50 @@ class CRIDialogue2Tests(unittest.TestCase):
             app.condition_display("E"),
             "E (Experiment: transmedial metaphor-supported memory access)",
         )
+
+    def test_phase_finished_label_uses_part_phase_numbering(self):
+        app = make_app()
+        turn = {
+            "phase": 10,
+            "part": 2,
+            "phase_id": "2.1",
+            "name": "School joke transition",
+        }
+
+        self.assertEqual(
+            app.phase_finished_label(turn),
+            "Part 2 phase 1 finished: School joke transition",
+        )
+
+    def test_start_phase_parser_accepts_global_phase_numbers_and_script_ids(self):
+        app = make_app()
+
+        self.assertEqual(app.TOTAL_SCRIPT_PHASES, 19)
+        self.assertEqual(app.parse_phase_index("1"), 0)
+        self.assertEqual(app.parse_phase_index("10"), 9)
+        self.assertEqual(app.parse_phase_index("19"), 18)
+        self.assertEqual(app.parse_phase_index("2.1"), 9)
+        self.assertEqual(app.parse_phase_index("2.4"), 12)
+        self.assertEqual(app.parse_phase_index("3.1"), 13)
+        self.assertEqual(app.parse_phase_index("3.4"), 16)
+        self.assertEqual(app.parse_phase_index("3.5"), 16)
+        self.assertEqual(app.parse_phase_index("3.4/5"), 16)
+        self.assertEqual(app.parse_phase_index("3.6"), 17)
+        self.assertEqual(app.parse_phase_index("3.7"), 17)
+        self.assertEqual(app.parse_phase_index("3.6/7"), 17)
+        self.assertEqual(app.parse_phase_index("3.8"), 18)
+        self.assertEqual(app.parse_phase_index("phase 2.1"), 9)
+        self.assertEqual(app.parse_phase_index("2,1"), 9)
+        self.assertEqual(app.parse_phase_index("2.5", default_index=4), 4)
+
+    def test_start_phase_display_shows_global_and_script_phase_id(self):
+        app = make_app()
+
+        self.assertEqual(app.session_setup.start_phase_display(0), "1 (1.1)")
+        self.assertEqual(app.session_setup.start_phase_display(9), "10 (2.1)")
+        self.assertEqual(app.session_setup.start_phase_display(16), "17 (3.4/5)")
+        self.assertEqual(app.session_setup.start_phase_display(17), "18 (3.6/7)")
+        self.assertEqual(app.session_setup.start_phase_display(18), "19 (3.8)")
 
     def test_graphdb_pet_nodes_are_exposed_as_dialogue_aliases(self):
         app = make_app()
@@ -465,7 +559,7 @@ class CRIDialogue2Tests(unittest.TestCase):
                     "default": "[STUB] Dat is echt een actieve mix."
                 },
                 "p1_m1_followup_wrong_hobby": {
-                    "not_corrected": "[STUB] Wat is jouw allerliefste game?"
+                    "default": "[STUB] Wat is jouw allerliefste game?"
                 },
             },
         }
@@ -479,7 +573,7 @@ class CRIDialogue2Tests(unittest.TestCase):
             "Graph opening.",
         )
         self.assertEqual(
-            app.pregenerated_utterance("m1_wrong_followup", "fallback"),
+            app.pregenerated_utterance("m1_wrong_followup", "fallback", branch="not_corrected"),
             "Wat is jouw allerliefste game?",
         )
 
@@ -524,18 +618,16 @@ class CRIDialogue2Tests(unittest.TestCase):
                 "Bridge from school to future",
                 "Leo self-disclosure",
                 "role_model rapport",
-                "Mistake 4 - aspiration",
-                "Space for correction + personalized reflection",
+                "Mistake 4 - aspiration + reflection",
                 "Explicit memory inspection",
-                "Memory review / co-construction",
                 "Closing",
             ],
         )
-        self.assertEqual([turn["phase"] for turn in script], list(range(1, 22)))
+        self.assertEqual([turn["phase"] for turn in script], list(range(1, 20)))
         self.assertEqual(
             [turn["phase_id"] for turn in script],
             [f"1.{phase}" for phase in range(1, 10)]
-            + ["2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"],
+            + ["2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3", "3.4/5", "3.6/7", "3.8"],
         )
         self.assertEqual(script[5]["part"], 1)
         self.assertEqual(script[5]["phase_id"], "1.6")
@@ -543,8 +635,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(script[9]["part"], 2)
         self.assertEqual(script[9]["phase_id"], "2.1")
         self.assertEqual(script[9]["script_phase"], "part2_school_joke_transition")
-        self.assertEqual(script[9]["segments"][0]["response_mode"], "listen_only")
-        self.assertFalse(script[9]["segments"][1]["expects_response"])
+        self.assertEqual(script[9]["segments"][0]["response_mode"], "school_joke_transition")
+        self.assertEqual(len(script[9]["segments"]), 1)
         self.assertEqual(script[9]["layer"], "L1")
         self.assertIn(
             "Zeg... als we het toch over jouw hobby's en lievelingsdingen hebben",
@@ -554,8 +646,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase22["part"], 2)
         self.assertEqual(phase22["phase_id"], "2.2")
         self.assertEqual(phase22["script_phase"], "part2_robot_school_self_disclosure")
-        self.assertEqual(phase22["segments"][0]["response_mode"], "acknowledge")
-        self.assertTrue(phase22["segments"][0]["llm_turn"])
+        self.assertEqual(phase22["segments"][0]["response_mode"], "robot_school_guess")
         self.assertEqual(phase22["segments"][0]["l3"]["script_phase"], "part2_school")
         self.assertEqual(phase22["segments"][0]["l3"]["topic"], "school")
         self.assertEqual(phase22["segments"][0]["l3"]["response_function"], "wrap_up")
@@ -566,12 +657,18 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase23["part"], 2)
         self.assertEqual(phase23["phase_id"], "2.3")
         self.assertEqual(phase23["script_phase"], "part2_correct_fav_subject_connection")
-        self.assertEqual(len(phase23["segments"]), 4)
+        self.assertEqual(len(phase23["segments"]), 5)
         self.assertIn("Ik weet ook nog dat natuur jouw lievelingsvak is.", app.turn_text(phase23["segments"][0]))
-        self.assertEqual(phase23["segments"][0]["response_mode"], "listen_only")
-        self.assertEqual(phase23["segments"][1]["response_mode"], "listen_only")
-        self.assertEqual(phase23["segments"][2]["response_mode"], "listen_only")
-        self.assertFalse(phase23["segments"][3]["expects_response"])
+        self.assertEqual(phase23["segments"][0]["response_mode"], "topic_interpretation")
+        self.assertTrue(phase23["segments"][0]["memory_correction_available"])
+        self.assertNotIn("memory_correction_requested", phase23["segments"][0])
+        self.assertEqual(phase23["segments"][0]["memory_correction_field"], "fav_subject")
+        self.assertTrue(phase23["segments"][0]["expects_response"])
+        self.assertFalse(phase23["segments"][1]["expects_response"])
+        self.assertFalse(phase23["segments"][2]["expects_response"])
+        self.assertEqual(phase23["segments"][3]["response_mode"], "listen_only")
+        self.assertEqual(phase23["segments"][3]["used_fields"], {})
+        self.assertFalse(phase23["segments"][4]["expects_response"])
         phase24 = script[12]
         self.assertEqual(phase24["part"], 2)
         self.assertEqual(phase24["phase_id"], "2.4")
@@ -623,55 +720,44 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("Wat maakt die persoon voor jou zo bijzonder?", app.turn_text(phase33["segments"][0]))
         phase34 = script[16]
         self.assertEqual(phase34["part"], 3)
-        self.assertEqual(phase34["phase_id"], "3.4")
-        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
+        self.assertEqual(phase34["phase_aliases"], ["3.4", "3.5"])
+        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(phase34["mistake_id"], "M4")
         self.assertEqual(phase34["mistake_field"], "aspiration")
         self.assertEqual(phase34["mistake_actual"], "dierenarts worden")
-        self.assertEqual(len(phase34["segments"]), 4)
+        self.assertEqual(len(phase34["segments"]), 7)
         self.assertEqual(phase34["segments"][0]["response_mode"], "listen_only")
         self.assertFalse(phase34["segments"][1]["expects_response"])
         self.assertEqual(phase34["segments"][2]["response_mode"], "mistake_interpretation")
         self.assertTrue(phase34["segments"][3]["run_if_phase_confirmed_change"])
+        self.assertEqual(phase34["segments"][3]["condition_phase"], 17)
+        self.assertTrue(phase34["segments"][4]["skip_if_phase_confirmed_change"])
+        self.assertEqual(phase34["segments"][6]["response_mode"], "middle_school_feeling")
+        self.assertTrue(phase34["segments"][6]["llm_turn"])
         self.assertIn("Snap jij een beetje wat ik bedoel?", app.turn_text(phase34["segments"][0]))
         self.assertIn("En volgens mij wil jij later", app.turn_text(phase34["segments"][2]))
-        phase35 = script[17]
-        self.assertEqual(phase35["part"], 3)
-        self.assertEqual(phase35["phase_id"], "3.5")
-        self.assertEqual(phase35["script_phase"], "part3_aspiration_reflection")
-        self.assertEqual(len(phase35["segments"]), 7)
-        self.assertTrue(phase35["segments"][0]["run_if_phase_confirmed_change"])
-        self.assertEqual(phase35["segments"][0]["condition_phase"], 17)
-        self.assertTrue(phase35["segments"][1]["run_if_phase_confirmed_change"])
-        self.assertEqual(phase35["segments"][1]["condition_phase"], 17)
-        self.assertTrue(phase35["segments"][2]["skip_if_phase_confirmed_change"])
-        self.assertEqual(phase35["segments"][2]["condition_phase"], 17)
-        self.assertEqual(phase35["segments"][4]["response_mode"], "middle_school_feeling")
-        self.assertFalse(phase35["segments"][6]["expects_response"])
-        self.assertIn("Wat lijkt jou daar dan zo leuk aan?", app.turn_text(phase35["segments"][0]))
-        self.assertIn("middelbare school", app.turn_text(phase35["segments"][3]))
-        self.assertIn("goed kijken of ik nu alles goed over jou heb onthouden", app.turn_text(phase35["segments"][6]))
-        phase36 = script[18]
+        self.assertIn("Wat lijkt jou daar het mooiste aan?", app.turn_text(phase34["segments"][3]))
+        self.assertIn("middelbare school", app.turn_text(phase34["segments"][5]))
+        phase36 = script[17]
         self.assertEqual(phase36["part"], 3)
-        self.assertEqual(phase36["phase_id"], "3.6")
-        self.assertEqual(phase36["script_phase"], "part3_explicit_memory_inspection")
-        self.assertEqual(phase36["response_mode"], "explicit_memory_inspection_offer")
-        self.assertEqual(phase36["used_fields"], {})
+        self.assertEqual(phase36["phase_id"], "3.6/7")
+        self.assertEqual(phase36["phase_aliases"], ["3.6", "3.7"])
+        self.assertEqual(phase36["script_phase"], "part3_explicit_memory_inspection_review")
+        self.assertEqual(phase36["segments"][0]["response_mode"], "explicit_memory_inspection_offer")
+        self.assertEqual(phase36["segments"][0]["used_fields"], {})
         self.assertEqual(
-            app.turn_text(phase36),
+            app.turn_text(phase36["segments"][0]),
             "Wil je misschien zien wat ik allemaal over jou onthoud?",
         )
-        phase37 = script[19]
-        self.assertEqual(phase37["part"], 3)
-        self.assertEqual(phase37["phase_id"], "3.7")
-        self.assertEqual(phase37["script_phase"], "part3_memory_review_co_construction")
-        self.assertEqual(phase37["condition"], "run_if_memory_review_requested")
-        self.assertEqual(phase37["segments"][0]["expects_response"], False)
-        self.assertEqual(phase37["segments"][1]["response_mode"], "memory_review_group")
-        self.assertEqual(phase37["segments"][-1]["response_mode"], "memory_review_add_final")
-        self.assertIn("Klopt dat een beetje", app.turn_text(phase37["segments"][1]))
-        self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase37["segments"][-1]))
-        phase38 = script[20]
+        self.assertEqual(phase36["segments"][1]["condition"], "run_if_memory_review_requested")
+        self.assertEqual(phase36["segments"][1]["expects_response"], False)
+        self.assertTrue(phase36["segments"][1]["memory_review_from_access_scope"])
+        self.assertTrue(phase36["segments"][1]["speak_memory_review_from_access_scope"])
+        self.assertEqual(phase36["segments"][2]["response_mode"], "memory_review_add_final")
+        self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase36["segments"][2]))
+        self.assertIn("gewoon nog even verder", app.turn_text(phase36["segments"][-1]))
+        phase38 = script[18]
         self.assertEqual(phase38["part"], 3)
         self.assertEqual(phase38["phase_id"], "3.8")
         self.assertEqual(phase38["script_phase"], "part3_closing")
@@ -692,6 +778,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase4_text = app.turn_text(script[3])
         self.assertIn("Dat vind ik echt een gezellige combinatie.", phase4_text)
         self.assertIn("Daar zit van alles in: creatief bezig zijn.", phase4_text)
+        self.assertFalse(script[3]["expects_response"])
+        self.assertNotIn("response_mode", script[3])
         self.assertEqual(script[5]["mistake_id"], "M1")
         self.assertEqual(script[5]["mistake_field"], "hobby_fav")
         self.assertEqual(script[7]["mistake_id"], "M2")
@@ -757,11 +845,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase33["phase_id"], "3.3")
         self.assertEqual(phase33["used_fields"], {})
         self.assertEqual(len(segments), 2)
-        self.assertEqual(segments[0]["response_mode"], "listen_only")
+        self.assertEqual(segments[0]["response_mode"], "role_model_absence_check")
+        self.assertEqual(segments[0]["memory_correction_field"], "role_model")
         self.assertIn("Als ik het goed heb", app.turn_text(segments[0]))
         self.assertIn("Klopt dat een beetje?", app.turn_text(segments[0]))
-        self.assertEqual(segments[1]["response_mode"], "acknowledge")
-        self.assertTrue(segments[1]["llm_turn"])
+        self.assertEqual(segments[1]["response_mode"], "role_model_discovery")
         self.assertIn("Wie is dat voor jou?", app.turn_text(segments[1]))
         self.assertEqual(segments[1]["l3"]["script_phase"], "part3_rolemodel")
         self.assertEqual(segments[1]["l3"]["topic"], "rolemodel")
@@ -771,6 +859,174 @@ class CRIDialogue2Tests(unittest.TestCase):
             segments[1]["l3"]["fallback"],
             "Dat snap ik. Soms leer je van verschillende mensen iets.",
         )
+
+    def test_part3_role_model_absence_rejection_asks_who_child_looks_up_to(self):
+        app = make_app()
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="role_model", value=None, confidence=0.92),
+            "Nee dat klopt niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "role_model_absence_ask_detail")
+        self.assertEqual(action["leo_response"], "Oeps, wie is dan iemand naar wie je opkijkt?")
+        self.assertTrue(action["follow_up_needed"])
+        self.assertTrue(turn["memory_correction_requested"])
+
+    def test_part3_role_model_absence_agreement_does_not_become_person(self):
+        app = make_app()
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Ja dat klopt",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "role_model_absence_continue")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.speech.spoken, [])
+
+    def test_part3_role_model_absence_inline_person_gets_confirmed_and_continues(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="role_model", value="mijn vader", confidence=0.95),
+            "Nee dat klopt niet, mijn vader",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_role_model_discovery")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["new_value"], "mijn vader")
+        self.assertIn("mijn vader iemand is naar wie je opkijkt", app.speech.spoken[0])
+
+    def test_part3_role_model_discovery_confirms_clear_person_but_not_vague_answer(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_discovery",
+            "used_fields": {},
+            "l3": {
+                "script_phase": "part3_rolemodel",
+                "topic": "rolemodel",
+                "response_function": "wrap_up",
+                "question_allowed": False,
+                "relevant_um_fields": [],
+                "fallback": "Dat snap ik wel. Soms kun je van allerlei mensen iets leren.",
+            },
+        }
+        app.current_turn_context = turn
+
+        clear_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="mijn trainer", confidence=0.92),
+            "mijn trainer",
+            turn,
+        )
+
+        self.assertEqual(clear_action["action"], "confirm_role_model_discovery")
+        self.assertTrue(clear_action["change_confirmed"])
+        self.assertTrue(clear_action["continue_phase_after_change"])
+        self.assertEqual(clear_action["change"]["new_value"], "mijn trainer")
+
+        vague_app = make_app()
+        vague_turn = dict(turn)
+        vague_turn["response_mode"] = "role_model_discovery"
+        vague_action = vague_app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.92),
+            "weet ik niet",
+            vague_turn,
+        )
+
+        self.assertEqual(vague_action["action"], "role_model_discovery_no_person")
+        self.assertFalse(vague_action.get("continue_phase_after_change", False))
+        self.assertEqual(vague_app.speech.spoken[-1], "Dat snap ik wel. Soms kun je van allerlei mensen iets leren.")
+
+    def test_part3_role_model_phase_uses_plural_grammar_for_multiple_role_models(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        um = sample_um()
+        um["role_model"] = "mijn vader  en moeder"
+        app.pull_um = lambda: um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p3_rolemodel_recall": {
+                    "default": "Ik weet nog dat mijn vader  en moeder voor jou iemand is naar wie je opkijkt."
+                },
+            },
+            "mistakes": [],
+        }
+
+        script = app.build_script()
+        phase33 = script[15]
+        text = app.turn_text(phase33["segments"][0])
+
+        self.assertIn("mijn vader en moeder voor jou mensen zijn", text)
+        self.assertIn("Wat maakt hen voor jou zo bijzonder?", text)
+        self.assertNotIn("vader  en", text)
+
+    def test_part3_role_model_correction_reasks_question_with_new_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["role_model"] = "mijn moeder"
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "name": "role_model rapport",
+            "segments": app.script.role_model_rapport_segments(app.last_um_preview),
+            "used_fields": {"role_model": "mijn moeder"},
+        }
+        app.current_turn_context = app.segment_context(turn, turn["segments"][0], 1)
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "role_model",
+                "old_value": "mijn moeder",
+                "new_value": "Superman",
+            },
+        })
+
+        self.assertEqual(turn["used_fields"], {"role_model": "Superman"})
+        self.assertEqual(len(turn["segments"]), 2)
+        self.assertIn("mijn moeder", app.turn_text(turn["segments"][0]))
+        self.assertEqual(turn["segments"][1]["response_mode"], "acknowledge")
+        self.assertEqual("Wat maakt die persoon voor jou zo bijzonder?", app.turn_text(turn["segments"][1]))
 
     def test_part3_mistake4_uses_scenario_wrong_aspiration(self):
         app = make_app()
@@ -797,8 +1053,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase34 = script[16]
         segments = phase34["segments"]
 
-        self.assertEqual(phase34["phase_id"], "3.4")
-        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
+        self.assertEqual(phase34["phase_aliases"], ["3.4", "3.5"])
+        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(phase34["mistake_id"], "M4")
         self.assertEqual(phase34["mistake_field"], "aspiration")
         self.assertEqual(phase34["mistake_type"], "completely-wrong")
@@ -813,6 +1070,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(segments[2]["defer_corrected_response"])
         self.assertEqual(segments[2]["used_fields"], {"aspiration": "juf worden"})
         self.assertTrue(segments[3]["run_if_phase_confirmed_change"])
+        self.assertTrue(segments[4]["skip_if_phase_confirmed_change"])
         self.assertEqual(app.mistake_correction_question(phase34), "Oeps, wat wil jij dan later worden?")
 
     def test_part3_mistake4_uses_fallback_wrong_aspiration_when_um_missing(self):
@@ -838,7 +1096,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase34 = script[16]
         segments = phase34["segments"]
 
-        self.assertEqual(phase34["phase_id"], "3.4")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
         self.assertEqual(phase34["mistake_actual"], CRI.UNKNOWN_VALUE)
         self.assertEqual(phase34["mistake_wrong"], "architect worden")
         self.assertEqual(
@@ -848,7 +1106,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(segments[2]["used_fields"], {"aspiration": "architect worden"})
         self.assertEqual(phase34["mistake_topic"]["memory_link"], "wat je later wilt worden")
 
-    def test_part3_phase35_uses_postcorrection_reflection_scenario(self):
+    def test_part3_merged_phase_uses_postcorrection_reflection_scenario(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -863,25 +1121,22 @@ class CRIDialogue2Tests(unittest.TestCase):
         }
 
         script = app.build_script()
-        phase35 = script[17]
-        segments = phase35["segments"]
+        phase34 = script[16]
+        segments = phase34["segments"]
 
-        self.assertEqual(phase35["phase_id"], "3.5")
-        self.assertEqual(phase35["script_phase"], "part3_aspiration_reflection")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
+        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(len(segments), 7)
-        self.assertTrue(segments[0]["run_if_phase_confirmed_change"])
-        self.assertEqual(segments[0]["condition_phase"], 17)
-        self.assertEqual(segments[0]["response_mode"], "listen_only")
-        self.assertEqual(app.turn_text(segments[1]), "Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?")
-        self.assertTrue(segments[1]["run_if_phase_confirmed_change"])
-        self.assertEqual(segments[1]["condition_phase"], 17)
-        self.assertEqual(segments[1]["used_fields"]["aspiration"], "dierenarts worden")
-        self.assertIn("dieren", segments[1]["used_fields"]["interest"])
-        self.assertTrue(segments[2]["skip_if_phase_confirmed_change"])
-        self.assertEqual(segments[4]["response_mode"], "middle_school_feeling")
-        self.assertFalse(segments[6]["expects_response"])
+        self.assertEqual(app.turn_text(segments[3]), "Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?")
+        self.assertTrue(segments[3]["run_if_phase_confirmed_change"])
+        self.assertEqual(segments[3]["condition_phase"], 17)
+        self.assertEqual(segments[3]["used_fields"]["aspiration"], "dierenarts worden")
+        self.assertIn("dieren", segments[3]["used_fields"]["interest"])
+        self.assertTrue(segments[4]["skip_if_phase_confirmed_change"])
+        self.assertEqual(segments[6]["response_mode"], "middle_school_feeling")
+        self.assertTrue(segments[6]["llm_turn"])
 
-    def test_part3_phase35_fallback_reflection_uses_profile_cues(self):
+    def test_part3_merged_phase_fallback_reflection_uses_profile_cues(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -889,11 +1144,362 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.last_cri_scenario = {"utterances": {}, "mistakes": []}
 
         script = app.build_script()
-        reflection_text = app.turn_text(script[17]["segments"][1])
+        reflection_text = app.turn_text(script[16]["segments"][3])
 
         self.assertIn("Dat past ook wel mooi bij jou", reflection_text)
         self.assertIn("dierenarts bij jou past", reflection_text)
         self.assertIn("Wat lijkt jou daar het mooiste aan?", reflection_text)
+
+    def test_part3_mistake4_inline_aspiration_update_is_confirmed_and_continues(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "juf worden",
+            "used_fields": {"aspiration": "juf worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="tuinman", confidence=0.95),
+            "Nee ik wil tuinman worden",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["new_value"], "tuinman")
+
+    def test_part3_mistake4_multiple_aspirations_asks_for_one_profession(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["kok", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="kok", confidence=0.95),
+            "Nee kok en voetballer",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["field"], "aspiration")
+        self.assertEqual(action["change"]["new_value"], "kok")
+        self.assertEqual(app.last_um_preview["aspiration"], "kok")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier een beroep onthouden. Wat wil jij later worden? Noem een ding.",
+        )
+        self.assertIn("verander naar kok", app.speech.spoken[1])
+
+    def test_part3_mistake4_multiple_aspirations_without_clarification_does_not_update(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["kok of voetballer", ""]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="kok of voetballer", confidence=0.92),
+            "Nee ik wil kok of voetballer worden",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "change_value_limit_unresolved")
+        self.assertEqual(app.last_um_preview["aspiration"], "dierenarts worden")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier een beroep onthouden. Wat wil jij later worden? Noem een ding.",
+        )
+        self.assertEqual(
+            app.speech.spoken[1],
+            "Dat zijn er nog te veel. Ik kan hier een beroep onthouden. Wat wil jij later worden? Noem een ding.",
+        )
+        self.assertIn("Dan verander ik het nu nog niet", app.speech.spoken[2])
+
+    def test_part3_mistake4_unknown_aspiration_answer_gets_confirmed_and_stored_unknown(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "aspiration",
+            "last_correction_question": "Oeps, wat wil jij dan later worden?",
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.95),
+            "Weet ik niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["field"], "aspiration")
+        self.assertEqual(action["change"]["new_value"], CRI.UNKNOWN_VALUE)
+        self.assertTrue(action["change"]["sets_unknown_value"])
+        self.assertEqual(app.last_um_preview["aspiration"], CRI.UNKNOWN_VALUE)
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Wil je dat ik onthoud dat je dat nog niet weet?",
+        )
+
+    def test_part3_mistake4_direct_unknown_aspiration_answer_is_not_stored_as_profession(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="niks", confidence=0.85),
+            "niks",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertEqual(action["change"]["new_value"], CRI.UNKNOWN_VALUE)
+        self.assertNotEqual(action["change"]["new_value"], "niks")
+        self.assertEqual(app.last_um_preview["aspiration"], CRI.UNKNOWN_VALUE)
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Wil je dat ik onthoud dat je dat nog niet weet?",
+        )
+
+    def test_part3_mistake4_unknown_aspiration_refreshes_neutral_route(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        app.last_um_preview = sample_um()
+        turn = app.build_script()[16]
+        app.current_turn_context = app.segment_context(turn, turn["segments"][2], 3)
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "aspiration",
+                "old_value": "kapper worden",
+                "new_value": CRI.UNKNOWN_VALUE,
+                "sets_unknown_value": True,
+            },
+        })
+
+        self.assertEqual(turn["mistake_actual"], CRI.UNKNOWN_VALUE)
+        self.assertEqual(turn["used_fields"]["aspiration"], CRI.UNKNOWN_VALUE)
+        self.assertIn("dat je nog niet weet wat je later wilt worden", turn["mistake_topic"]["memory_link"])
+        self.assertIn("Je hoeft dat nu nog niet te weten", app.turn_text(turn["segments"][3]))
+        self.assertNotIn("bij jou past", app.turn_text(turn["segments"][3]))
+        self.assertEqual(turn["segments"][-1]["response_mode"], "middle_school_feeling")
+
+    def test_part3_mistake4_rejected_confirmation_clears_pending_correction_state(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["nee"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "aspiration",
+            "last_correction_question": "Oeps, wat wil jij dan later worden?",
+        }
+        app.current_turn_context = turn
+        app.mistake_states = {"M4": {"id": "M4", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="kok", confidence=0.95),
+            "Kok",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertFalse(action["change_confirmed"])
+        self.assertTrue(action["repeat_current_segment_after_rejected_correction"])
+        self.assertFalse(turn.get("memory_correction_requested", False))
+        self.assertNotIn("memory_correction_field", turn)
+        self.assertNotIn("last_correction_question", turn)
+        self.assertFalse(app.mistake_states["M4"].get("wrong_value_rejected", False))
+        self.assertEqual(app.last_um_preview["aspiration"], "dierenarts worden")
+
+    def test_part3_mistake4_normal_answer_after_rejected_confirmation_is_not_update(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+        app.mistake_states = {"M4": {"id": "M4"}}
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+            "Dat ik lekker kan knippen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "continue_wrong_value_followup")
+        self.assertEqual(app.speech.spoken, [])
+        self.assertIsNone(getattr(app, "pending_change", None))
+        self.assertEqual(app.last_um_preview["aspiration"], "dierenarts worden")
+
+    def test_part3_mistake4_rejected_correction_repeats_current_segment(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["nee"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="niks", confidence=0.85),
+            "niks",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertFalse(action["change_confirmed"])
+        self.assertTrue(action["repeat_current_segment_after_rejected_correction"])
+        self.assertFalse(action["continue_phase_after_change"])
+        self.assertFalse(action["stop_phase_after_change"])
+
+    def test_run_phase_retries_segment_after_rejected_mistake_correction(self):
+        app = make_app()
+        app.shutdown_event = SimpleNamespace(is_set=lambda: False)
+        app.start_turn_log = lambda turn: None
+        app.finish_turn_log = lambda: None
+        app.record_mistake_outcome = lambda turn: None
+        app.refresh_topic_after_change = lambda turn, action: None
+        calls = []
+        actions = iter([
+            {"handled": True, "repeat_current_segment_after_rejected_correction": True},
+            {"handled": True},
+            {"handled": True},
+        ])
+
+        def fake_run_phase_segment(turn, segment, index=None):
+            calls.append(index)
+            return next(actions)
+
+        app.run_phase_segment = fake_run_phase_segment
+        phase = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "name": "Mistake 4 - aspiration + reflection",
+            "layer": "L1 + L2-pregen WRONG + reflection",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "segments": [
+                {"content_plan": app.l1("Ik weet ook nog dat jij later kapper wilt worden.")},
+                {"content_plan": app.l1("Ik weet ook nog dat jij later kapper wilt worden. Gaaf! Wat trekt je daarin aan?")},
+            ],
+        }
+
+        app.run_phase(phase, phase_index=16, total_phases=20)
+
+        self.assertEqual(calls, [1, 1, 2])
+
+    def test_part3_mistake4_refreshes_reflection_after_corrected_aspiration(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        app.last_um_preview = sample_um()
+        turn = app.build_script()[16]
+        app.current_turn_context = app.segment_context(turn, turn["segments"][2], 3)
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "aspiration",
+                "old_value": "juf worden",
+                "new_value": "tuinman",
+            },
+        })
+
+        self.assertEqual(turn["mistake_actual"], "tuinman worden")
+        self.assertEqual(len(turn["segments"]), 4)
+        self.assertIn("tuinman bij jou past", app.turn_text(turn["segments"][3]))
 
     def test_part2_subject_phase_uses_plural_for_multiple_favorite_subjects(self):
         app = make_app()
@@ -926,10 +1532,391 @@ class CRIDialogue2Tests(unittest.TestCase):
             "Ik weet ook nog dat gym en rekenen jouw lievelingsvakken zijn.",
             app.turn_text(phase23["segments"][0]),
         )
-        self.assertIn("Gym en rekenen, dat snap ik wel.", app.turn_text(phase23["segments"][0]))
-        self.assertEqual(app.turn_text(phase23["segments"][1]), "Dat past bij jou.")
+        self.assertEqual(app.turn_text(phase23["segments"][1]), "Gym en rekenen, dat snap ik wel.")
+        self.assertEqual(app.turn_text(phase23["segments"][2]), "Dat past bij jou.")
 
-    def test_part2_mistake3_uses_scenario_and_school_l3_branches(self):
+    def test_part2_subject_correction_rebuilds_remaining_lines_with_new_subject(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        um = sample_um()
+        um["fav_subject"] = "Rekenen en Gym"
+        um["hobbies"] = "tekenen en lezen"
+        um["interest"] = "dieren"
+        app.pull_um = lambda: um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p2_fav_subject_comment_subject": {
+                    "default": "Dat snap ik. Rekenen is best als een puzzel."
+                },
+                "p2_subject_profile_link": {
+                    "default": "Grappig, rekenen en voetbal gaan eigenlijk best goed samen."
+                },
+            },
+            "mistakes": [],
+        }
+        app.last_um_preview = dict(um)
+        script = app.build_script()
+        phase23 = script[11]
+
+        app.refresh_topic_after_change(phase23, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "fav_subject",
+                "old_value": "Rekenen en Gym",
+                "new_value": "taal",
+            },
+        })
+
+        self.assertTrue(phase23["force_topic_fallback"])
+        comment_context = app.segment_context(phase23, phase23["segments"][1], 2)
+        link_context = app.segment_context(phase23, phase23["segments"][2], 3)
+        self.assertIn("Met taal kun je verhalen maken", app.turn_text(comment_context))
+        self.assertIn("met taal kun je daar ook weer over vertellen", app.turn_text(link_context))
+        self.assertNotIn("rekenen en voetbal", app.turn_text(link_context).lower())
+
+    def test_part2_subject_bare_rejection_asks_for_favorite_subject(self):
+        app = make_app()
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "topic_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_subject",
+            "used_fields": {"fav_subject": "Rekenen en Gym"},
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+                "expected_value_count": {"fav_subject": 2},
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_subject", value=None, confidence=0.92),
+            "Dat klopt niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "ask_correction_detail")
+        self.assertEqual(
+            action["leo_response"],
+            "Oeps, vertel mij maximaal twee lievelingsvakken die ik moet onthouden.",
+        )
+
+    def test_part2_subject_agreement_does_not_start_memory_change(self):
+        for transcript in ("Ja dat klopt", "Oké", "Ja inderdaad goed onthouden"):
+            with self.subTest(transcript=transcript):
+                app = make_app()
+                turn = {
+                    "phase": 12,
+                    "phase_id": "2.3",
+                    "response_mode": "topic_interpretation",
+                    "memory_correction_available": True,
+                    "memory_correction_field": "fav_subject",
+                    "used_fields": {"fav_subject": "Rekenen en Gym"},
+                    "topic": {
+                        "domain": "school_subject",
+                        "label": "Rekenen en Gym",
+                        "fields": ["fav_subject"],
+                        "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                        "current_values": {"fav_subject": "Rekenen en Gym"},
+                        "expected_value_count": {"fav_subject": 2},
+                    },
+                }
+
+                action = app.action_handler(
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                    transcript,
+                    turn,
+                )
+
+                self.assertEqual(action["action"], "no_memory_change")
+                self.assertEqual(action["change"], {})
+                self.assertEqual(app.speech.spoken, [])
+
+    def test_part2_subject_one_subject_correction_asks_for_second_subject(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["gym", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "listen_only",
+            "used_fields": {"fav_subject": "Rekenen en Gym"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "fav_subject",
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+                "expected_value_count": {"fav_subject": 2},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_subject", value="taal", confidence=0.94),
+            "Taal",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "fav_subject")
+        self.assertEqual(action["change"]["new_value"], "taal en gym")
+        self.assertEqual(app.last_um_preview["fav_subject"], "taal en gym")
+        self.assertEqual(app.speech.spoken[0], "Oké, taal. Vertel mij maximaal één ander lievelingsvak.")
+        self.assertIn("je twee lievelingsvakken verander naar taal en gym", app.speech.spoken[1])
+
+    def test_part2_subject_inline_single_subject_correction_asks_only_for_second_subject(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["gym", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "topic_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_subject",
+            "used_fields": {"fav_subject": "Rekenen en Gym"},
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+                "expected_value_count": {"fav_subject": 2},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="wrong_guess", confidence=0.92),
+            "Nee dat is Taal",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "fav_subject")
+        self.assertEqual(action["change"]["new_value"], "Taal en gym")
+        self.assertEqual(app.speech.spoken[0], "Oké, Taal. Vertel mij maximaal één ander lievelingsvak.")
+        self.assertNotIn("Oeps, vertel mij maximaal twee lievelingsvakken die ik moet onthouden.", app.speech.spoken)
+        self.assertIn("je twee lievelingsvakken verander naar Taal en gym", app.speech.spoken[1])
+
+    def test_part2_subject_inline_two_subject_correction_confirms_directly(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "topic_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_subject",
+            "used_fields": {"fav_subject": "Rekenen en Gym"},
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+                "expected_value_count": {"fav_subject": 2},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="wrong_guess", confidence=0.92),
+            "Nee dat is Taal en Gym",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "fav_subject")
+        self.assertEqual(action["change"]["new_value"], "Taal en Gym")
+        self.assertFalse(any("Vertel mij maximaal één ander lievelingsvak" in text for text in app.speech.spoken))
+        self.assertIn("je twee lievelingsvakken verander naar Taal en Gym", app.speech.spoken[0])
+
+    def test_part2_subject_too_many_initial_subjects_asks_for_max_two(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["taal en gym", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "topic_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_subject",
+            "used_fields": {"fav_subject": "Rekenen en Gym"},
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+                "expected_value_count": {"fav_subject": 2},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_subject", value="Taal, gym en rekenen", confidence=0.94),
+            "Taal, gym en rekenen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["new_value"], "taal en gym")
+        self.assertEqual(action["change"]["field_label"], "je twee lievelingsvakken")
+        self.assertEqual(app.last_um_preview["fav_subject"], "taal en gym")
+        self.assertEqual(app.speech.heard, [])
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan er maximaal twee onthouden. Vertel mij maximaal twee lievelingsvakken die ik moet bewaren.",
+        )
+        self.assertIn("je twee lievelingsvakken verander naar taal en gym", app.speech.spoken[1])
+
+    def test_part2_subject_completion_with_too_many_extra_subjects_asks_for_one_extra(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["gym en rekenen", "gym", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "listen_only",
+            "used_fields": {"fav_subject": "Rekenen en Gym"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "fav_subject",
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je twee lievelingsvakken"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+                "expected_value_count": {"fav_subject": 2},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_subject", value="taal", confidence=0.94),
+            "Taal",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["new_value"], "taal en gym")
+        self.assertEqual(action["change"]["field_label"], "je twee lievelingsvakken")
+        self.assertEqual(app.last_um_preview["fav_subject"], "taal en gym")
+        self.assertEqual(app.speech.spoken[0], "Oké, taal. Vertel mij maximaal één ander lievelingsvak.")
+        self.assertEqual(app.speech.spoken[1], "Ik heb al taal. Vertel mij maximaal één ander lievelingsvak.")
+        self.assertIn("je twee lievelingsvakken verander naar taal en gym", app.speech.spoken[2])
+
+    def test_part2_subject_final_question_does_not_allow_memory_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "listen_only",
+            "used_fields": {},
+            "topic": {
+                "domain": "school_subject",
+                "label": "Rekenen en Gym",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je lievelingsvak"},
+                "current_values": {"fav_subject": "Rekenen en Gym"},
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_subject", value="taal", confidence=0.94),
+            "Nee, taal",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "listen_only")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.speech.spoken, [])
+
+    def test_normal_reactions_with_um_update_intent_do_not_start_memory_change(self):
+        app = make_app()
+        cases = [
+            (
+                {
+                    "phase": 13,
+                    "phase_id": "2.4",
+                    "response_mode": "acknowledge",
+                    "used_fields": {
+                        "fav_subject": "Rekenen en Gym",
+                        "school_difficulty": "begrijpend lezen",
+                    },
+                },
+                IntentResult(intent="um_update", field="school_difficulty", value="moeilijk", confidence=0.92),
+                "Ik vind het gewoon moeilijk",
+            ),
+            (
+                {
+                    "phase": 16,
+                    "phase_id": "3.3",
+                    "response_mode": "acknowledge",
+                    "used_fields": {"role_model": "mijn moeder"},
+                },
+                IntentResult(intent="um_update", field="role_model", value="lief", confidence=0.92),
+                "Omdat ze lief is",
+            ),
+            (
+                {
+                    "phase": 17,
+                    "phase_id": "3.4/5",
+                    "response_mode": "middle_school_feeling",
+                    "used_fields": {"aspiration": "dierenarts worden"},
+                },
+                IntentResult(intent="um_update", field="aspiration", value="spannend", confidence=0.92),
+                "Ik vind het spannend",
+            ),
+        ]
+
+        for turn, result, transcript in cases:
+            with self.subTest(phase_id=turn["phase_id"], transcript=transcript):
+                self.assertEqual(app.actions.change_from_intent_result(result, turn, transcript), {})
+
+    def test_explicit_memory_correction_cue_after_um_mention_still_updates(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "acknowledge",
+            "used_fields": {"role_model": "mijn moeder"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="role_model", value="mijn vader", confidence=0.94),
+            "Nee dat klopt niet, mijn rolmodel is mijn vader",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["field"], "role_model")
+        self.assertEqual(action["change"]["new_value"], "mijn vader")
+        self.assertIn("naar wie je opkijkt verander naar mijn vader", app.speech.spoken[0])
+
+    def test_part2_mistake3_uses_default_scenario_lines_for_branch_paths(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -945,10 +1932,10 @@ class CRIDialogue2Tests(unittest.TestCase):
             ],
             "utterances": {
                 "p2_m3_postcorrection_true_strength": {
-                    "corrected": "[STUB] Taal! Wat vind jij het leukste aan taal?"
+                    "default": "[STUB] Oeps, goed dat je het zegt. Dan pas ik het aan. Taal! Wat vind jij het leukste aan taal?"
                 },
                 "p2_school_wrap_after_difficulty": {
-                    "not_corrected": "[STUB] Dat snap ik wel. School kan soms plakken."
+                    "default": "[STUB] Dat snap ik wel. School kan soms plakken."
                 },
             },
         }
@@ -965,16 +1952,46 @@ class CRIDialogue2Tests(unittest.TestCase):
             app.turn_text(segments[0]),
             "En volgens mij ben jij vooral goed in rekenen.",
         )
-        self.assertIn("Oeps, goed dat je het zegt.", app.turn_text(segments[1]))
+        self.assertNotIn("Oeps, goed dat je het zegt.", app.turn_text(segments[1]))
+        self.assertNotIn("Dan pas ik het aan.", app.turn_text(segments[1]))
         self.assertIn("Taal! Wat vind jij het leukste aan taal?", app.turn_text(segments[1]))
-        self.assertIn("Taal vond ik altijd al moeilijk", app.turn_text(segments[2]))
+        self.assertIn("Gym vond ik altijd al moeilijk", app.turn_text(segments[2]))
         self.assertEqual(segments[2]["response_mode"], "acknowledge")
         self.assertEqual(segments[2]["l3"]["relevant_um_fields"], [])
         self.assertEqual(segments[2]["l3"]["fallback"], "Dat snap ik wel. School kan soms plakken.")
         self.assertIn("natuur jouw lievelingsvak is", app.turn_text(segments[3]))
         self.assertIn("rekenen voor jou soms wat lastiger voelt", app.turn_text(segments[3]))
+        self.assertTrue(segments[3]["m3_school_difficulty_resolution"])
         self.assertEqual(segments[3]["l3"]["relevant_um_fields"], ["fav_subject", "school_difficulty"])
-        self.assertEqual(app.mistake_correction_question(phase24), "Oeps, waar ben jij dan vooral goed in op school?")
+        self.assertEqual(phase24["mistake_topic"]["expected_value_count"], {"school_strength": 1})
+        self.assertEqual(
+            app.mistake_correction_question(phase24),
+            "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+        )
+
+    def test_part2_mistake3_no_correction_keeps_difficulty_when_it_does_not_conflict(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "mistakes": [
+                {
+                    "id": "M3",
+                    "target_field": "school_strength",
+                    "wrong_value": "aardrijkskunde",
+                    "mistake_type": "completely-wrong",
+                }
+            ],
+            "utterances": {},
+        }
+
+        script = app.build_script()
+        phase24 = script[12]
+        no_correction_followup = app.turn_text(phase24["segments"][3])
+
+        self.assertIn("rekenen voor jou soms wat lastiger voelt", no_correction_followup)
+        self.assertEqual(phase24["segments"][3]["l3"]["relevant_um_fields"], ["fav_subject", "school_difficulty"])
 
     def test_mistake1_uses_cri_scenario_opener_and_branch_followups(self):
         app = make_app()
@@ -996,10 +2013,10 @@ class CRIDialogue2Tests(unittest.TestCase):
                     "default": "[STUB] Iets maken dat ook nog lekker ruikt, dat is best indrukwekkend."
                 },
                 "p1_m1_followup_wrong_hobby": {
-                    "not_corrected": "[STUB] Wat vind jij het leukste om te bakken?"
+                    "default": "[STUB] Wat vind jij het leukste om te bakken?"
                 },
                 "p1_followup_postcorrection_true_hobby": {
-                    "corrected": "[STUB] Dansen! Wat voor dans doe je?"
+                    "default": "[STUB] Oeps, dan had ik dat verkeerd. Wat vind jij op dit moment het leukste aan tekenen?"
                 },
             },
         }
@@ -1011,6 +2028,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase6["phase_id"], "1.6")
         self.assertEqual(phase6["mistake_field"], "hobby_fav")
         self.assertEqual(phase6["mistake_wrong"], "bakken")
+        self.assertEqual(phase6["mistake_topic"]["expected_value_count"], {"hobby_fav": 1})
         self.assertEqual(len(segments), 4)
         self.assertEqual(
             app.turn_text(segments[0]),
@@ -1018,9 +2036,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
         self.assertIn("Dat snap ik trouwens wel.", app.turn_text(segments[1]))
         self.assertIn("Iets maken dat ook nog lekker ruikt", app.turn_text(segments[1]))
-        self.assertIn("Oeps, dan had ik dat verkeerd.", app.turn_text(segments[2]))
-        self.assertIn("Wat vind jij het leukste aan tekenen?", app.turn_text(segments[2]))
-        self.assertNotIn("Dansen", app.turn_text(segments[2]))
+        self.assertNotIn("Oeps, dan had ik dat verkeerd.", app.turn_text(segments[2]))
+        self.assertIn("Wat vind jij op dit moment het leukste aan tekenen?", app.turn_text(segments[2]))
         self.assertEqual(app.turn_text(segments[3]), "Wat vind jij het leukste om te bakken?")
 
     def test_mistake1_corrected_followup_uses_child_corrected_hobby_at_runtime(self):
@@ -1038,11 +2055,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.last_um_preview["hobby_fav"] = "tekenen"
 
         text = app.turn_text(corrected_segment)
-        self.assertIn("Oeps, dan had ik dat verkeerd.", text)
+        self.assertNotIn("Oeps, dan had ik dat verkeerd.", text)
         self.assertIn("Wat vind jij het leukste aan tekenen?", text)
         self.assertNotIn("dansen", text.lower())
 
-    def test_mistake2_uses_cri_scenario_wrong_and_corrected_branches(self):
+    def test_mistake2_uses_default_scenario_lines_for_wrong_and_corrected_paths(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -1058,10 +2075,10 @@ class CRIDialogue2Tests(unittest.TestCase):
             ],
             "utterances": {
                 "p1_m2_followup_wrong_food": {
-                    "not_corrected": "[STUB] Pizza is rond en warm. Wat vind jij daar lekker aan?"
+                    "default": "[STUB] Pizza is rond en warm. Wat vind jij daar lekker aan?"
                 },
                 "p1_m2_postcorrection_true_food": {
-                    "corrected": "[STUB] Pannenkoeken klinken eerlijk gezegd ook meteen gezellig."
+                    "default": "[STUB] Pannenkoeken klinken eerlijk gezegd ook meteen gezellig."
                 },
             },
         }
@@ -1077,8 +2094,14 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("Ik weet nog dat jouw lievelingseten pizza is.", app.turn_text(segments[0]))
         self.assertIn("Dat is op zich wel een sterke keuze.", app.turn_text(segments[1]))
         self.assertIn("Pizza is rond en warm.", app.turn_text(segments[1]))
-        self.assertIn("Oeps, goed dat je het zegt. Dan pas ik het aan.", app.turn_text(segments[2]))
         self.assertIn("Pannenkoeken klinken eerlijk gezegd", app.turn_text(segments[2]))
+
+        app.last_um_preview = sample_um()
+        app.last_um_preview["fav_food"] = "boerenkool"
+        corrected_text = app.turn_text(segments[2])
+        self.assertIn("Dan houden we het bij boerenkool.", corrected_text)
+        self.assertNotIn("Pannenkoeken", corrected_text)
+
         self.assertFalse(segments[2]["expects_response"])
         self.assertTrue(segments[2]["run_if_phase_confirmed_change"])
 
@@ -1174,6 +2197,10 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("sportrobot", app.turn_text(segments[2]))
         self.assertIn("Ben jij dan meer van verdedigen of aanvallen?", app.turn_text(segments[3]))
         self.assertEqual(app.turn_text(segments[4]), "Maar jij doet natuurlijk nog meer leuke dingen.")
+        self.assertEqual(segments[0]["response_mode"], "topic_interpretation")
+        self.assertEqual(segments[1]["used_fields"], {})
+        self.assertEqual(segments[2]["used_fields"], {})
+        self.assertEqual(segments[3]["used_fields"], {})
 
     def test_part1_topics_follow_cri_scenario_topic_sets(self):
         app = make_app()
@@ -1201,11 +2228,142 @@ class CRIDialogue2Tests(unittest.TestCase):
             "Ik weet ook nog dat jij piano speelt.",
         )
         self.assertEqual(
-            app.turn_text(script[6]["segments"][0]),
+            app.turn_text(script[6]["segments"][3]),
             "Ik weet ook nog dat jij een kat hebt die Momo heet.",
         )
 
-    def test_topic2_animals_uses_open_followup_then_topic_closing(self):
+    def test_part1_topics_can_use_generic_t1_t2_scenario_names(self):
+        app = make_app()
+        app.local_child_name = "Sam"
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "topic_1": {"default": "sport"},
+                "topic_2": {"default": "huisdier"},
+                "p1_t1_recall": {"default": "[STUB] T1 recall uit GraphDB."},
+                "p1_t1_open": {"default": "[STUB] T1 open uit GraphDB?"},
+                "p1_t1_question": {"default": "[STUB] T1 question uit GraphDB?"},
+                "p1_t1_followup": {"default": "[STUB] T1 followup uit GraphDB?"},
+                "p1_t2_recall": {"default": "[STUB] T2 recall uit GraphDB."},
+                "p1_t2_open": {"default": "[STUB] T2 open uit GraphDB?"},
+                "p1_t2_followup": {"default": "[STUB] T2 followup uit GraphDB?"},
+                "p1_t2_close": {"default": "[STUB] T2 close uit GraphDB."},
+            },
+            "mistakes": [],
+        }
+
+        script = app.build_script()
+
+        self.assertEqual(script[4]["topic"]["domain"], "sport")
+        self.assertEqual(script[6]["topic"]["domain"], "huisdier")
+        self.assertEqual(app.turn_text(script[4]["segments"][0]), "T1 recall uit GraphDB.")
+        self.assertEqual(app.turn_text(script[4]["segments"][1]), "T1 open uit GraphDB?")
+        self.assertEqual(app.turn_text(script[4]["segments"][2]), "T1 question uit GraphDB?")
+        self.assertEqual(app.turn_text(script[4]["segments"][3]), "T1 followup uit GraphDB?")
+        self.assertEqual(script[4]["segments"][0]["response_mode"], "topic_interpretation")
+        self.assertEqual(script[4]["segments"][1]["used_fields"], {})
+        self.assertEqual(script[4]["segments"][2]["used_fields"], {})
+        self.assertEqual(script[4]["segments"][3]["used_fields"], {})
+        topic2_texts = [app.turn_text(segment) for segment in script[6]["segments"]]
+        self.assertIn("Mensen hebben vaak meer dan een ding", topic2_texts[0])
+        self.assertIn("Bij boeken vind ik dat zo fijn", topic2_texts[1])
+        self.assertEqual(topic2_texts[2], "En jij hebt volgens mij ook meer dingen die je leuk vindt.")
+        self.assertNotIn("T2 recall uit GraphDB.", topic2_texts)
+        self.assertEqual(topic2_texts[3], "T2 open uit GraphDB?")
+        self.assertEqual(topic2_texts[4], "T2 followup uit GraphDB?")
+        self.assertEqual(topic2_texts[5], "T2 close uit GraphDB.")
+
+    def test_topic1_activity_sport_rejects_position_open_question(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["sports_fav_play"] = "vissen"
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t1_recall": {"default": "[STUB] Ik weet ook nog dat jij zelf vissen doet."},
+                "p1_t1_open": {"default": "[STUB] In welke positie speel jij?"},
+                "p1_t1_question": {
+                    "default": "[STUB] Ik vraag me wel eens af of ik een goede sportrobot zou kunnen zijn, "
+                    "maar ik val waarschijnlijk al om voor de warming-up. Wat vind jij zo leuk aan vissen?"
+                },
+                "p1_t1_followup": {
+                    "default": "[STUB] Ben jij dan meer van snel rennen, goed overspelen, "
+                    "of juist lekker fanatiek meedoen?"
+                },
+            },
+            "mistakes": [],
+        }
+        topic = app.topic_candidate(
+            domain="sport",
+            label="vissen",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "vissen"},
+            correct_values=["je iets met vissen hebt"],
+            memory_link="vissen iets is waar jij iets mee hebt",
+            options=["vissen", "sport"],
+            reground="Ik houd goed vast dat vissen iets is waar jij iets mee hebt.",
+        )
+
+        segments = app.topic1_phase_segments(topic)
+
+        open_text = app.turn_text(segments[1])
+        followup_text = app.turn_text(segments[3])
+        self.assertIn("vissen", open_text)
+        self.assertNotIn("positie", open_text.lower())
+        self.assertNotIn("overspelen", followup_text.lower())
+        self.assertNotIn("snel rennen", followup_text.lower())
+
+    def test_topic1_correction_to_activity_sport_rebuilds_with_activity_questions(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = app.topic_candidate(
+            domain="sport",
+            label="voetbal",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "voetbal"},
+            correct_values=["je iets met voetbal hebt"],
+            memory_link="voetbal iets is waar jij iets mee hebt",
+            options=["voetbal", "sport"],
+            reground="Ik houd goed vast dat voetbal iets is waar jij iets mee hebt.",
+        )
+        turn = {
+            "phase": 5,
+            "layer": "L2+L3",
+            "name": "Topic 1",
+            "topic": topic,
+            "segments": app.topic1_phase_segments(topic),
+        }
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "sports_fav_play",
+                "old_value": "voetbal",
+                "new_value": "vissen",
+            },
+        })
+
+        open_text = app.turn_text(app.segment_context(turn, turn["segments"][1], 2))
+        question_text = app.turn_text(app.segment_context(turn, turn["segments"][2], 3))
+        followup_text = app.turn_text(app.segment_context(turn, turn["segments"][3], 4))
+        self.assertIn("vissen", open_text)
+        self.assertNotIn("positie", open_text.lower())
+        self.assertIn("vissen", question_text)
+        self.assertNotIn("voetbal", question_text.lower())
+        self.assertNotIn("overspelen", followup_text.lower())
+
+    def test_topic2_animals_uses_bridge_open_followup_then_topic_closing(self):
         app = make_app()
         app.last_cri_scenario_loaded = True
         app.last_cri_scenario = {
@@ -1232,13 +2390,211 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         segments = app.topic2_phase_segments(topic)
 
-        self.assertEqual(len(segments), 3)
+        self.assertEqual(len(segments), 6)
         self.assertFalse(segments[0]["expects_response"])
-        self.assertTrue(segments[1]["expects_response"])
+        self.assertFalse(segments[1]["expects_response"])
         self.assertFalse(segments[2]["expects_response"])
-        self.assertEqual(app.turn_text(segments[0]), "Ik weet ook nog dat jij een kat hebt die Luna heet.")
-        self.assertEqual(app.turn_text(segments[1]), "Wat voor kat is Luna eigenlijk?")
-        self.assertIn("Ik vind dieren altijd fascinerend", app.turn_text(segments[2]))
+        self.assertFalse(segments[3]["expects_response"])
+        self.assertTrue(segments[4]["expects_response"])
+        self.assertFalse(segments[5]["expects_response"])
+        self.assertIn("Mensen hebben vaak meer dan een ding", app.turn_text(segments[0]))
+        self.assertIn("Bij boeken vind ik dat zo fijn", app.turn_text(segments[1]))
+        self.assertEqual(app.turn_text(segments[2]), "En jij hebt volgens mij ook meer dingen die je leuk vindt.")
+        self.assertEqual(app.turn_text(segments[3]), "Ik weet ook nog dat jij een kat hebt die Luna heet.")
+        self.assertEqual(app.turn_text(segments[4]), "Wat voor kat is Luna eigenlijk?")
+        self.assertIn("Ik vind dieren altijd fascinerend", app.turn_text(segments[5]))
+
+    def test_topic2_pet_uses_generic_open_without_fallback_recall(self):
+        app = make_app()
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t2_open": {
+                    "default": "[STUB] En ik herinner me dat jij een vis als huisdier hebt."
+                },
+                "p1_t2_followup": {
+                    "default": "[STUB] Hoe gaat het met jouw vis? Doet die nog leuke dingen?"
+                },
+                "p1_t2_close": {
+                    "default": "[STUB] Bizar leuk. Ik vind dieren altijd fascinerend."
+                },
+            }
+        }
+        topic = app.topic_candidate(
+            domain="huisdier",
+            label="Vis",
+            fields=["pet_name", "pet_type"],
+            field_labels={"pet_name": "de naam van je huisdier", "pet_type": "het soort huisdier"},
+            current_values={"pet_name": "Vis", "pet_type": "Vis"},
+            correct_values=["Vis bij jou hoort"],
+            memory_link="Vis belangrijk voor je is",
+            options=["Vis", "dieren"],
+            reground="Ik onthoud dat Vis belangrijk voor je is.",
+        )
+
+        segments = app.topic2_phase_segments(topic)
+
+        self.assertEqual(len(segments), 6)
+        self.assertFalse(segments[0]["expects_response"])
+        self.assertFalse(segments[1]["expects_response"])
+        self.assertFalse(segments[2]["expects_response"])
+        self.assertFalse(segments[3]["expects_response"])
+        self.assertTrue(segments[4]["expects_response"])
+        self.assertFalse(segments[5]["expects_response"])
+        self.assertIn("Mensen hebben vaak meer dan een ding", app.turn_text(segments[0]))
+        self.assertEqual(app.turn_text(segments[3]), "En ik herinner me dat jij een vis als huisdier hebt.")
+        self.assertEqual(app.turn_text(segments[4]), "Hoe gaat het met jouw vis? Doet die nog leuke dingen?")
+        self.assertEqual(app.turn_text(segments[5]), "Bizar leuk. Ik vind dieren altijd fascinerend.")
+        self.assertEqual(
+            segments[4]["used_fields"],
+            {"pet_name": "Vis", "pet_type": "Vis"},
+        )
+
+    def test_topic2_pet_stale_scenario_lines_are_rewritten_with_live_um(self):
+        app = make_app(openai_payloads=[
+            "En ik herinner me dat jij een kat hebt die Simba heet. Gaaf!",
+            "Hoe is Simba als kat eigenlijk?",
+        ])
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "kat", "pet_name": "Simba"})
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t2_open": {
+                    "default": "[STUB] En ik herinner me dat jij een vis als huisdier hebt. Gaaf!"
+                },
+                "p1_t2_followup": {
+                    "default": "[STUB] Hoe gaat het met jouw vis? Doet die nog leuke dingen?"
+                },
+            }
+        }
+        topic = app.topic_candidate(
+            domain="huisdier",
+            label="Simba",
+            fields=["pet_name", "pet_type"],
+            field_labels={"pet_name": "de naam van je huisdier", "pet_type": "het soort huisdier"},
+            current_values={"pet_name": "Simba", "pet_type": "kat"},
+            correct_values=["Simba bij jou hoort"],
+            memory_link="Simba belangrijk voor je is",
+            options=["Simba", "dieren"],
+            reground="Ik onthoud dat Simba belangrijk voor je is.",
+        )
+
+        segments = app.topic2_phase_segments(topic)
+
+        open_text = app.turn_text(segments[3])
+        followup_text = app.turn_text(segments[4])
+        self.assertEqual(open_text, "En ik herinner me dat jij een kat hebt die Simba heet. Gaaf!")
+        self.assertEqual(followup_text, "Hoe is Simba als kat eigenlijk?")
+        self.assertNotIn("vis", open_text.lower())
+        self.assertNotIn("vis", followup_text.lower())
+        self.assertEqual(len(app.openai_client.requests), 2)
+
+    def test_topic2_pet_fallback_uses_pet_type_and_name(self):
+        app = make_app()
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}}
+        topic = app.topic_candidate(
+            domain="huisdier",
+            label="Luna",
+            fields=["pet_name", "pet_type"],
+            field_labels={"pet_name": "de naam van je huisdier", "pet_type": "het soort huisdier"},
+            current_values={"pet_name": "Luna", "pet_type": "kat"},
+            correct_values=["Luna bij jou hoort"],
+            memory_link="Luna belangrijk voor je is",
+            options=["Luna", "dieren"],
+            reground="Ik onthoud dat Luna belangrijk voor je is.",
+        )
+
+        segments = app.topic2_phase_segments(topic)
+
+        self.assertEqual(
+            app.turn_text(segments[3]),
+            (
+                "Ik weet ook nog dat jij een kat hebt die Luna heet. "
+                "Dat vind ik echt een mooie naam. Luna klinkt alsof die stiekem "
+                "belangrijke plannen maakt als niemand kijkt."
+            ),
+        )
+        self.assertEqual(app.turn_text(segments[4]), "Wat voor kat is Luna eigenlijk?")
+
+    def test_topic2_corrected_pet_skips_old_graphdb_lines(self):
+        app = make_app()
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t2_recall": {"default": "[STUB] Ik weet nog dat jouw huisdier een vis is."},
+                "p1_t2_open": {"default": "[STUB] En ik herinner me dat jij een vis als huisdier hebt."},
+                "p1_t2_followup": {"default": "[STUB] Hoe gaat het met jouw vis?"},
+                "p1_t2_close": {"default": "[STUB] Bizar leuk over vissen."},
+            }
+        }
+        topic = app.topic_candidate(
+            domain="huisdier",
+            label="Vis",
+            fields=["pet_name", "pet_type"],
+            field_labels={"pet_name": "de naam van je huisdier", "pet_type": "het soort huisdier"},
+            current_values={"pet_name": "Vis", "pet_type": "Vis"},
+            correct_values=["Vis bij jou hoort"],
+            memory_link="Vis belangrijk voor je is",
+            options=["Vis", "dieren"],
+            reground="Ik onthoud dat Vis belangrijk voor je is.",
+        )
+        turn = {
+            "phase": 7,
+            "layer": "L2+L3",
+            "name": "Topic 2",
+            "topic": topic,
+            "segments": app.topic2_phase_segments(topic),
+        }
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "pet_name",
+                "old_value": "Vis",
+                "new_value": "Luna",
+            },
+        })
+
+        self.assertFalse(turn["force_topic_fallback"])
+        self.assertEqual(turn["topic"]["label"], "Luna")
+        followup_segment = app.segment_context(turn, turn["segments"][4], 5)
+        self.assertIn("Luna", app.turn_text(followup_segment))
+
+    def test_topic2_sport_followup_carries_correction_context(self):
+        app = make_app()
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_t2_open": {"default": "[STUB] Ik weet dat jij voetbal doet."},
+                "p1_t2_followup": {"default": "[STUB] Hoe gaat het met voetbal?"},
+                "p1_t2_close": {"default": "[STUB] Sport is leuk."},
+            }
+        }
+        topic = app.topic_candidate(
+            domain="sport",
+            label="voetbal",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "voetbal"},
+            correct_values=["voetbal"],
+            memory_link="voetbal belangrijk voor je is",
+            options=["voetbal"],
+            reground="Ik onthoud dat voetbal belangrijk voor je is.",
+        )
+
+        segments = app.topic2_phase_segments(topic)
+
+        self.assertEqual(segments[4]["response_mode"], "listen_only")
+        self.assertEqual(
+            segments[4]["used_fields"],
+            {"sports_enjoys": "ja", "sports_fav_play": "voetbal"},
+        )
 
     def test_topic2_closing_line_depends_on_domain(self):
         app = make_app()
@@ -1322,6 +2678,78 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("M1 related-but-wrong", [row["mistake"] for row in rows])
         self.assertIn("M2 completely-wrong", [row["mistake"] for row in rows])
 
+    def test_prestart_db_retrieval_rows_show_um_and_scenario_missing_values(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["name"] = "Ali"
+        app.last_um_preview["role_model"] = CRI.UNKNOWN_VALUE
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p1_m1_followup_wrong_hobby": {"default": "Wat vind jij leuk aan padel?"},
+                "p1_m2_postcorrection_true_food": {"default": "Boerenkool klinkt ook gezellig."},
+                "p1_t1_recall": {"default": "Ik weet nog dat jij voetbal doet."},
+                "p3_future_theme_wrap": {"default": "Later voelt soms nog ver weg."},
+                "unused_extra_step": {"default": "Deze regel hoort niet in het overzicht."},
+            },
+            "mistakes": [],
+        }
+        script = [
+            {
+                "content_plan": app.l2_pregen(
+                    "m2_wrong_followup",
+                    "fallback",
+                    branch="not_corrected",
+                ),
+            },
+            {
+                "segments": [
+                    {
+                        "content_plan": app.l2_pregen(
+                            "m2_corrected_followup",
+                            "fallback",
+                            branch="corrected",
+                        ),
+                    }
+                ],
+            },
+        ]
+
+        um_rows = {row["field"]: row["value"] for row in app.db_um_retrieval_rows(app.last_um_preview)}
+        self.assertEqual(set(um_rows), set(app.STARTUP_OVERVIEW_UM_FIELDS))
+        self.assertNotIn("condition", um_rows)
+        self.assertNotIn("exposure", um_rows)
+        self.assertEqual(um_rows["name"], "Ali")
+        self.assertEqual(um_rows["role_model"], "<empty / unknown>")
+
+        scenario_result = app.db_scenario_retrieval_rows(script)
+        scenario_rows = {(row["step_id"], row["branch"]): row["value"] for row in scenario_result}
+        self.assertEqual(
+            list(scenario_rows),
+            list(app.STARTUP_OVERVIEW_SCENARIO_FIELDS),
+        )
+        self.assertNotIn(("unused_extra_step", "default"), scenario_rows)
+        self.assertEqual(
+            scenario_rows[("p1_m1_followup_wrong_hobby", "default")],
+            "Wat vind jij leuk aan padel?",
+        )
+        self.assertEqual(
+            scenario_rows[("p1_m2_followup_wrong_food", "default")],
+            "<missing>",
+        )
+        self.assertEqual(
+            scenario_rows[("p1_m2_postcorrection_true_food", "default")],
+            "Boerenkool klinkt ook gezellig.",
+        )
+        self.assertEqual(
+            scenario_rows[("p1_t1_recall", "default")],
+            "Ik weet nog dat jij voetbal doet.",
+        )
+        self.assertEqual(
+            scenario_rows[("p3_future_theme_wrap", "default")],
+            "Later voelt soms nog ver weg.",
+        )
+
     def test_memory_access_returns_only_child_facing_mentioned_um_fields(self):
         app = make_app()
         app.last_um_preview = sample_um()
@@ -1344,7 +2772,7 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         response, scope, returned = app.memory_access_response(result, turn)
 
-        self.assertIn("Ik heb vandaag al gebruikt", response)
+        self.assertNotIn("Ik heb vandaag al gebruikt", response)
         self.assertIn("je Noor heet", response)
         self.assertIn("je houdt van tekenen, tuinieren, lego bouwen", response)
         self.assertIn("tekenen jouw favoriete hobby is", response)
@@ -1352,9 +2780,109 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertNotIn("of je sport leuk vindt", response)
         self.assertNotIn("condition", scope)
         self.assertNotIn("exposure", scope)
-        self.assertNotIn("sports_enjoys", returned)
+        self.assertIn("sports_enjoys", scope)
+        self.assertIn("freetime_fav", scope)
+        self.assertIn("sports_enjoys", returned)
 
-    def test_explicit_memory_inspection_accepts_and_defers_to_phase_37(self):
+    def test_memory_access_scope_expands_one_field_to_whole_chapter(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = {"sports_fav_play"}
+
+        scope = app.memory_access_scope({})
+
+        self.assertIn("sports_enjoys", scope)
+        self.assertIn("sports_fav_play", scope)
+        self.assertNotIn("fav_food", scope)
+
+    def test_memory_access_resume_replays_setup_bundle_before_current_question(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = {"interest"}
+        app.speech = FakeSpeech(["kan ik je geheugen zien?", "ja hoor"])
+        app.log_action_handler_result = lambda action: None
+
+        class SequenceClassifier:
+            def __init__(self):
+                self.results = [
+                    IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95),
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                ]
+
+            def classify(self, text, turn_context=None):
+                return self.results.pop(0)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = SequenceClassifier()
+        phase = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "name": "Mistake 4 - aspiration + reflection",
+            "layer": "test",
+            "segments": [
+                {
+                    "content_plan": app.l1("Vorige vraag die niet opnieuw moet."),
+                    "expects_response": True,
+                    "response_mode": "listen_only",
+                },
+                {
+                    "content_plan": app.l1("Later is trouwens niet alleen later-later."),
+                    "expects_response": False,
+                },
+                {
+                    "content_plan": app.l1("Voor kinderen in groep 7 en 8 komt de middelbare school dichtbij."),
+                    "expects_response": False,
+                },
+                {
+                    "content_plan": app.l1("Denk jij daar al een beetje over na?"),
+                    "expects_response": True,
+                    "response_mode": "listen_only",
+                },
+            ],
+        }
+
+        with patch("builtins.input", side_effect=[""]), patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, phase["segments"][3], 4)
+
+        self.assertEqual(action["action"], "listen_only")
+        self.assertEqual(app.speech.spoken.count("Denk jij daar al een beetje over na?"), 2)
+        self.assertIn("Later is trouwens niet alleen later-later.", app.speech.spoken)
+        self.assertIn(
+            "Voor kinderen in groep 7 en 8 komt de middelbare school dichtbij.",
+            app.speech.spoken,
+        )
+        self.assertEqual(app.speech.spoken.count("Vorige vraag die niet opnieuw moet."), 0)
+        replay_start = app.speech.spoken.index("Later is trouwens niet alleen later-later.")
+        self.assertEqual(
+            app.speech.spoken[replay_start:replay_start + 3],
+            [
+                "Later is trouwens niet alleen later-later.",
+                "Voor kinderen in groep 7 en 8 komt de middelbare school dichtbij.",
+                "Denk jij daar al een beetje over na?",
+            ],
+        )
+
+    def test_memory_access_mentions_no_fixed_role_model_in_inspiration_chapter(self):
+        app = make_app()
+        um = sample_um()
+        um["role_model"] = "niemand"
+        um["interest"] = "Verbetering van technologie"
+        um["aspiration"] = CRI.UNKNOWN_VALUE
+        app.last_um_preview = um
+        app.memory_fields_mentioned_so_far = {"aspiration"}
+        result = IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95)
+
+        response, scope, returned = app.memory_access_response(result, {})
+
+        self.assertIn("role_model", scope)
+        self.assertIn("role_model", returned)
+        self.assertIn("je interesse hebt in Verbetering van technologie", response)
+        self.assertIn("je niet echt een vaste persoon hebt naar wie je opkijkt", response)
+        self.assertNotIn("niemand", response.lower())
+
+    def test_explicit_memory_inspection_accepts_and_unblocks_review_segments(self):
         app = make_app()
         app.last_um_preview = sample_um()
         app.memory_fields_mentioned_so_far = {
@@ -1389,7 +2917,9 @@ class CRIDialogue2Tests(unittest.TestCase):
             set(action["memory_scope"]),
             {
                 "hobby_fav",
+                "freetime_fav",
                 "role_model",
+                "interest",
                 "hobbies",
                 "fav_subject",
                 "fav_food",
@@ -1400,10 +2930,7 @@ class CRIDialogue2Tests(unittest.TestCase):
                 "school_difficulty",
             },
         )
-        self.assertEqual(
-            app.speech.spoken,
-            ["Goed. Dan gaan we zo rustig samen door mijn geheugen heen."],
-        )
+        self.assertEqual(app.speech.spoken, [])
 
     def test_explicit_memory_inspection_decline_and_unclear_continue(self):
         app = make_app()
@@ -1447,11 +2974,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertFalse(action["follow_up_needed"])
         self.assertEqual(action["tutorial_condition"], "E")
         self.assertTrue(app.memory_review_requested)
-        self.assertEqual(set(action["memory_scope"]), {"name", "hobbies", "fav_food", "aspiration"})
         self.assertEqual(
-            app.speech.spoken,
-            ["Goed. Dan kunnen we zo samen op de tablet naar mijn geheugenboek kijken."],
+            set(action["memory_scope"]),
+            {"name", "hobbies", "hobby_fav", "freetime_fav", "fav_food", "aspiration", "role_model", "interest"},
         )
+        self.assertEqual(app.speech.spoken, [])
 
     def test_memory_review_phase_groups_fields_in_script_order(self):
         app = make_app()
@@ -1491,8 +3018,8 @@ class CRIDialogue2Tests(unittest.TestCase):
     def test_memory_review_group_response_modes_confirm_repeat_and_ask_detail(self):
         app = make_app()
         turn = {
-            "phase": 20,
-            "phase_id": "3.7",
+            "phase": 18,
+            "phase_id": "3.6/7",
             "response_mode": "memory_review_group",
             "content_plan": app.l1("Over school weet ik iets. Klopt dat?"),
             "topic": {
@@ -1537,8 +3064,8 @@ class CRIDialogue2Tests(unittest.TestCase):
     def test_memory_review_final_can_decline_or_ask_for_extra_detail(self):
         app = make_app()
         turn = {
-            "phase": 20,
-            "phase_id": "3.7",
+            "phase": 18,
+            "phase_id": "3.6/7",
             "response_mode": "memory_review_add_final",
             "content_plan": app.l1("Is er nog iets dat ik moet onthouden?"),
             "topic": {"fields": list(CRI.UM_FIELDS), "field_labels": {}, "current_values": {}},
@@ -1566,7 +3093,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
         self.assertEqual(extra["action"], "memory_review_final_extra_unmapped")
 
-    def test_memory_review_phase_skips_unless_offer_was_accepted_and_can_activate_tablet(self):
+    def test_memory_review_segments_skip_unless_offer_was_accepted_and_can_activate_tablet(self):
         app = make_app()
         self.assertTrue(app.should_skip_phase({"condition": "run_if_memory_review_requested"}))
         app.memory_review_requested = True
@@ -1580,19 +3107,68 @@ class CRIDialogue2Tests(unittest.TestCase):
                 captured["phase"] = phase
 
         app.tablet_state = FakeTabletState()
-        phase = {"phase": 20, "phase_id": "3.7", "name": "Memory review / co-construction", "layer": "L1"}
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = {"fav_food"}
+        phase = {"phase": 18, "phase_id": "3.6/7", "name": "Explicit memory inspection", "layer": "L1"}
         segment = {
             "content_plan": app.l1("Kijk maar op de tablet."),
             "expects_response": False,
+            "condition": "run_if_memory_review_requested",
+            "memory_review_from_access_scope": True,
+            "speak_memory_review_from_access_scope": True,
             "activate_tablet_memory_access": True,
-            "memory_review_fields": ["hobbies", "fav_food", "aspiration"],
+            "memory_review_fallback_fields": ["hobbies", "fav_food", "aspiration"],
+        }
+
+        app.memory_review_requested = False
+        app.run_phase_segment(phase, segment)
+        self.assertEqual(captured, {})
+        self.assertEqual(app.speech.spoken, [])
+
+        app.memory_review_requested = True
+        app.run_phase_segment(phase, segment)
+
+        self.assertEqual(captured["phase"], 18)
+        self.assertEqual(captured["fields"], ["fav_food"])
+        self.assertEqual(
+            app.speech.spoken,
+            ["Kijk maar op de tablet.", "Ik weet ook nog dat je lievelingseten pannenkoeken is."],
+        )
+
+    def test_explicit_memory_review_direct_start_does_not_fall_back_to_static_um_fields(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = set()
+        app.memory_review_requested = True
+        captured = {}
+
+        class FakeTabletState:
+            def activate_memory_access(self, fields, phase=None):
+                captured["fields"] = list(fields)
+                captured["phase"] = phase
+
+        app.tablet_state = FakeTabletState()
+        phase = {"phase": 18, "phase_id": "3.6/7", "name": "Explicit memory inspection", "layer": "L1"}
+        segment = {
+            "content_plan": app.l1("Kijk maar op de tablet."),
+            "expects_response": False,
+            "condition": "run_if_memory_review_requested",
+            "memory_review_from_access_scope": True,
+            "speak_memory_review_from_access_scope": True,
+            "activate_tablet_memory_access": True,
         }
 
         app.run_phase_segment(phase, segment)
 
-        self.assertEqual(captured["phase"], 20)
-        self.assertEqual(captured["fields"], ["hobbies", "fav_food", "aspiration"])
-        self.assertEqual(app.speech.spoken, ["Kijk maar op de tablet."])
+        self.assertEqual(captured["phase"], 18)
+        self.assertEqual(captured["fields"], [])
+        self.assertEqual(
+            app.speech.spoken,
+            [
+                "Kijk maar op de tablet.",
+                "Ik heb vandaag nog niet zoveel uit mijn geheugen gebruikt.",
+            ],
+        )
 
     def test_spontaneous_memory_access_condition_e_uses_same_tablet_visible_fields(self):
         app = make_app()
@@ -1621,9 +3197,228 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
 
         self.assertEqual(action["action"], "memory_access_tablet")
-        self.assertEqual(set(action["visible_fields"]), {"hobbies", "fav_food", "fav_subject"})
-        self.assertEqual(set(captured["fields"]), {"hobbies", "fav_food", "fav_subject"})
+        self.assertEqual(
+            app.speech.spoken,
+            [
+                "Tik op mijn geheugenboek om te zien wat erin staat. "
+                "Als er iets niet klopt, zeg het dan tegen mij."
+            ],
+        )
+        self.assertEqual(
+            set(action["visible_fields"]),
+            {
+                "hobbies",
+                "hobby_fav",
+                "freetime_fav",
+                "fav_food",
+                "fav_subject",
+                "school_strength",
+                "school_difficulty",
+            },
+        )
+        self.assertEqual(set(captured["fields"]), set(action["visible_fields"]))
         self.assertEqual(captured["phase"], 12)
+
+    def test_spontaneous_memory_access_condition_c_speaks_memory_with_tutorial(self):
+        app = make_app()
+        um = sample_um()
+        um["condition"] = "C"
+        app.last_um_preview = um
+        app.memory_fields_mentioned_so_far = {"sports_fav_play"}
+
+        action = app.action_handler(
+            IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95),
+            "Wat weet je over mij?",
+            {"phase": 5, "response_mode": "topic_interpretation"},
+        )
+
+        self.assertEqual(action["action"], "memory_access")
+        self.assertIn("Over sport weet ik dat je zwemmen doet", action["leo_response"])
+        self.assertIn("Als iets niet klopt", action["leo_response"])
+        self.assertIn("nog een keer wilt horen", action["leo_response"])
+        self.assertIn("sports_enjoys", action["visible_fields"])
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_memory_access_change_context_allows_any_visible_field(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        action = {
+            "visible_fields": ["sports_enjoys", "sports_fav_play"],
+            "memory_scope": ["sports_enjoys", "sports_fav_play"],
+        }
+
+        context = app.memory_access_change_context(action, {"phase": 5, "phase_id": "1.5", "name": "Topic 1"})
+
+        self.assertEqual(context["response_mode"], "memory_access_change")
+        self.assertTrue(context["allow_memory_change"])
+        self.assertTrue(context["memory_correction_requested"])
+        self.assertEqual(context["memory_review_fields"], ["sports_enjoys", "sports_fav_play"])
+        self.assertEqual(set(app.allowed_change_fields(context)), {"sports_enjoys", "sports_fav_play"})
+
+    def test_memory_access_change_to_already_stored_value_is_acknowledged(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["hobby_fav"] = "gamen"
+        action = {
+            "visible_fields": ["hobbies", "hobby_fav", "freetime_fav"],
+            "memory_scope": ["hobbies", "hobby_fav", "freetime_fav"],
+        }
+        source_turn = {"phase": 6, "phase_id": "1.6", "name": "Mistake 1 - hobby_fav"}
+        context = app.memory_access_change_context(action, source_turn)
+
+        result = IntentResult(intent="um_update", field="hobby_fav", value="gamen", confidence=0.95)
+        handled = app.action_handler(result, "Mijn lievelingshobby naar gamen", context)
+
+        self.assertEqual(handled["action"], "memory_access_change_already_stored")
+        self.assertTrue(handled["handled"])
+        self.assertEqual(handled["change"]["field"], "hobby_fav")
+        self.assertEqual(handled["change"]["new_value"], "gamen")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Dat staat al zo in mijn geheugen. Ik heb al onthouden dat je favoriete hobby gamen is.",
+        )
+
+    def test_memory_access_change_from_visible_mistake_to_stored_value_is_correction(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["hobby_fav"] = "gamen"
+        app.mistake_states = {
+            "M1": {
+                "id": "M1",
+                "mentioned": True,
+                "field": "hobby_fav",
+                "actual": "gamen",
+                "wrong": "padel",
+                "corrected": False,
+            }
+        }
+        action = {
+            "visible_fields": ["hobbies", "hobby_fav", "freetime_fav"],
+            "memory_scope": ["hobbies", "hobby_fav", "freetime_fav"],
+        }
+        source_turn = {"phase": 6, "phase_id": "1.6", "name": "Memory access"}
+        context = app.memory_access_change_context(action, source_turn)
+
+        self.assertEqual(context["topic"]["current_values"]["hobby_fav"], "padel")
+        self.assertEqual(context["topic"]["stored_values"]["hobby_fav"], "gamen")
+
+        result = IntentResult(intent="um_update", field="hobby_fav", value="gamen", confidence=0.95)
+        change = app.actions.change_from_intent_result(result, context, "Mijn lievelingshobby naar gamen")
+
+        self.assertEqual(change["action"], "update")
+        self.assertEqual(change["old_value"], "padel")
+        self.assertEqual(change["new_value"], "gamen")
+        self.assertEqual(change["visible_mistake_id"], "M1")
+        self.assertTrue(change["replace_field"])
+
+        app.handle_confirmed_mistake_related_change(change, context)
+
+        self.assertTrue(app.mistake_states["M1"]["corrected"])
+
+    def test_memory_access_change_in_mistake_phase_reroutes_to_corrected_branch(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "E"
+        app.last_um_preview["hobby_fav"] = "gamen"
+        app.simulated_persona = dict(app.last_um_preview)
+        app.speech = FakeSpeech([
+            "Kan ik je geheugen zien?",
+            "favoriete hobby naar spelletjes spelen",
+            "ja",
+        ])
+        app.log_action_handler_result = lambda action: None
+
+        class SequenceClassifier:
+            def __init__(self):
+                self.results = [
+                    IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95),
+                    IntentResult(intent="um_update", field="hobby_fav", value="spelletjes spelen", confidence=0.95),
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95),
+                ]
+
+            def classify(self, text, turn_context=None):
+                return self.results.pop(0)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = SequenceClassifier()
+        phase = {
+            "phase": 6,
+            "phase_id": "1.6",
+            "name": "Mistake 1 - hobby_fav",
+            "layer": "L2-slot WRONG + L2-pregen",
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "gamen",
+            "mistake_wrong": "padel",
+            "mistake_topic": {
+                "fields": ["hobby_fav"],
+                "field_labels": {"hobby_fav": "je favoriete hobby"},
+                "current_values": {"hobby_fav": "gamen"},
+                "domain": "hobby",
+            },
+            "used_fields": {"hobby_fav": "padel"},
+            "segments": [
+                {
+                    "content_plan": app.l2_slot(
+                        "En volgens mij is {wrong_hobby} jouw allerliefste hobby.",
+                        {"wrong_hobby": "padel"},
+                        wrong=True,
+                    ),
+                    "expects_response": True,
+                    "response_mode": "mistake_interpretation",
+                },
+                {
+                    "content_plan": app.sequence(
+                        app.l1("Dat snap ik trouwens wel."),
+                        app.l2_pregen(
+                            "m1_wrong_opener",
+                            "Leuk, padel! Wat vind je er het allerleukst aan?",
+                            ["hobby_fav"],
+                        ),
+                    ),
+                    "expects_response": True,
+                    "response_mode": "mistake_interpretation",
+                    "skip_if_phase_confirmed_change": True,
+                },
+                {
+                    "content_plan": app.l2_pregen(
+                        "m1_corrected_followup",
+                        "Wat vind jij het leukste aan {hobby_fav}?",
+                        ["hobby_fav"],
+                        require_input_values=True,
+                        branch="corrected",
+                    ),
+                    "expects_response": True,
+                    "response_mode": "listen_only",
+                    "run_if_phase_confirmed_change": True,
+                    "used_fields": {"hobby_fav": "gamen"},
+                },
+            ],
+        }
+        app.register_mistake_phase(phase)
+
+        with patch("builtins.input", side_effect=["c", ""]), patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, phase["segments"][1], 2)
+
+        wrong_followup = "Dat snap ik trouwens wel. Leuk, padel! Wat vind je er het allerleukst aan?"
+        self.assertEqual(app.speech.spoken.count(wrong_followup), 1)
+        self.assertEqual(action["action"], "memory_access_change_confirmed")
+        self.assertTrue(action["change_confirmed"])
+        self.assertFalse(action["stop_phase_after_change"])
+        self.assertIn(6, app.phases_with_confirmed_change)
+        self.assertTrue(app.mistake_states["M1"]["corrected"])
+        self.assertEqual(app.mistake_states["M1"]["actual"], "spelletjes spelen")
+        self.assertEqual(app.last_um_preview["hobby_fav"], "spelletjes spelen")
+        self.assertEqual(phase["mistake_actual"], "spelletjes spelen")
+        self.assertEqual(phase["segments"][2]["used_fields"]["hobby_fav"], "spelletjes spelen")
+
+        corrected_context = app.segment_context(phase, phase["segments"][2], 3)
+        self.assertEqual(
+            app.turn_text(corrected_context),
+            "Wat vind jij het leukste aan spelletjes spelen?",
+        )
 
     def test_tablet_state_writes_visible_fields_for_memory_access(self):
         temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_state_test_")
@@ -1645,11 +3440,104 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(state["child_id"], "test_boy_1")
         self.assertEqual(state["phase"], 19)
         self.assertTrue(state["memory_access_active"])
+        self.assertEqual(state["memory_access_prompt_id"], 1)
+        self.assertEqual(state["tablet_command"]["type"], "memory_access_home")
         self.assertEqual(state["visible_fields"], ["name", "fav_food", "aspiration"])
         self.assertIn("eten", state["unlocked_categories"])
         self.assertIn("aspiratie", state["unlocked_categories"])
         self.assertTrue(state["mistakes"]["M4"]["corrected"])
         self.assertEqual(state["mistakes"]["M4"]["wrong"], "juf worden")
+        first_command_id = state["tablet_command"]["id"]
+
+        writer.activate_memory_access(["fav_food"], phase=20)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["tablet_command"]["type"], "memory_access_home")
+        self.assertNotEqual(state["tablet_command"]["id"], first_command_id)
+
+    def test_tablet_state_writes_reveal_command_for_corrected_value(self):
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_reveal_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        state_path = Path(temp_dir) / "session_state.json"
+        writer = cri_module.TabletStateWriter(
+            state_path=str(state_path),
+            get_child_id_fn=lambda: "701",
+            get_child_name_fn=lambda: "Ali",
+            get_mistake_states_fn=lambda: {
+                "M1": {"field": "hobby_fav", "actual": "voetbal", "wrong": "padel", "corrected": True}
+            },
+        )
+
+        writer.reveal_change(field="hobby_fav", old_value="padel", new_value="gamen", phase=6)
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["phase"], 6)
+        self.assertIn("hobby", state["unlocked_categories"])
+        self.assertEqual(state["tablet_reveal"]["id"], 1)
+        self.assertEqual(state["tablet_reveal"]["field"], "hobby_fav")
+        self.assertEqual(state["tablet_reveal"]["category"], "hobby")
+        self.assertEqual(state["tablet_reveal"]["old_value"], "padel")
+        self.assertEqual(state["tablet_reveal"]["new_value"], "gamen")
+        self.assertIsInstance(state["tablet_reveal"]["created_at"], float)
+
+    def test_tablet_state_writes_pending_reveal_and_clears_on_reveal(self):
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_pending_reveal_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        state_path = Path(temp_dir) / "session_state.json"
+        writer = cri_module.TabletStateWriter(
+            state_path=str(state_path),
+            get_child_id_fn=lambda: "701",
+            get_child_name_fn=lambda: "Ali",
+        )
+
+        writer.prepare_reveal_change(
+            field="hobbies",
+            old_value="voetbal, schaatsen",
+            new_value="fietsen, zwemmen",
+            phase=6,
+        )
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIn("hobby", state["unlocked_categories"])
+        self.assertIsNone(state["tablet_reveal"])
+        self.assertEqual(state["tablet_reveal_pending"]["field"], "hobbies")
+        self.assertEqual(state["tablet_reveal_pending"]["category"], "hobby")
+        self.assertEqual(state["tablet_reveal_pending"]["old_value"], "voetbal, schaatsen")
+        self.assertEqual(state["tablet_reveal_pending"]["new_value"], "fietsen, zwemmen")
+
+        writer.reveal_change(
+            field="hobbies",
+            old_value="voetbal, schaatsen",
+            new_value="fietsen, zwemmen",
+            phase=6,
+        )
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIsNone(state["tablet_reveal_pending"])
+        self.assertEqual(state["tablet_reveal"]["field"], "hobbies")
+        self.assertEqual(state["tablet_reveal"]["old_value"], "voetbal, schaatsen")
+        self.assertEqual(state["tablet_reveal"]["new_value"], "fietsen, zwemmen")
+
+    def test_tablet_state_reset_clears_stale_reveal_file(self):
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_reset_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        state_path = Path(temp_dir) / "session_state.json"
+        writer = cri_module.TabletStateWriter(
+            state_path=str(state_path),
+            get_child_id_fn=lambda: "701",
+            get_child_name_fn=lambda: "Ali",
+        )
+
+        writer.reveal_change(field="hobby_fav", old_value="padel", new_value="gamen", phase=6)
+        writer.reset()
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["unlocked_categories"], [])
+        self.assertFalse(state["memory_access_active"])
+        self.assertEqual(state["memory_access_prompt_id"], 0)
+        self.assertEqual(state["visible_fields"], [])
+        self.assertIsNone(state["tablet_reveal"])
+        self.assertIsNone(state["tablet_reveal_pending"])
+        self.assertIsNone(state["tablet_command"])
 
     def test_tablet_state_carries_all_unresolved_mistake_overlays(self):
         temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_tablet_state_mistakes_test_")
@@ -1684,6 +3572,45 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(state["mistakes"]["M4"]["wrong"], "kok")
         self.assertEqual(state["mistakes"]["M1"]["actual"], "voetbal")
         self.assertEqual(state["mistakes"]["M4"]["actual"], "dokter")
+
+    def test_mistake_is_registered_before_tablet_state_update(self):
+        app = make_app()
+        state_seen_by_tablet_update = {}
+
+        def fake_start_turn_log(turn):
+            state_seen_by_tablet_update.update(app.mistake_states.get("M1", {}))
+
+        app.start_turn_log = fake_start_turn_log
+        app.finish_turn_log = lambda: None
+        app.run_phase_segment = lambda turn, segment: None
+
+        app.run_phase(
+            {
+                "phase": 6,
+                "layer": "L2-slot WRONG",
+                "name": "Mistake 1 - hobby_fav",
+                "text": "En volgens mij is padel jouw allerliefste hobby.",
+                "mistake_id": "M1",
+                "mistake_field": "hobby_fav",
+                "mistake_actual": "voetbal",
+                "mistake_wrong": "padel",
+                "mistake_type": "related-but-wrong",
+            },
+            phase_index=5,
+            total_phases=21,
+        )
+
+        self.assertEqual(state_seen_by_tablet_update["field"], "hobby_fav")
+        self.assertEqual(state_seen_by_tablet_update["wrong"], "padel")
+        self.assertFalse(state_seen_by_tablet_update["corrected"])
+
+    def test_tablet_js_keeps_mistake_visible_without_auto_animation(self):
+        script = (OUTER_DIR / "UM-TABLET" / "webfiles" / "script.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("if (!memoryAccessActive) return null;", script)
+        self.assertIn("const instantUpdatesByCategory", script)
+        self.assertIn("if (prevValue !== newValue && unresolvedMistake)", script)
+        self.assertIn("renderPills(currentCategory, true);", script)
 
     def test_action_handler_logs_already_correct_mistake_without_um_write(self):
         app = make_app()
@@ -1730,6 +3657,741 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(action["action"], "listen_only")
         self.assertEqual(action["change"], {})
         self.assertEqual(app.speech.spoken, [])
+
+    def test_topic_value_statement_rejection_asks_for_correction_detail(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 5,
+            "response_mode": "topic_interpretation",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "topic": {
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="sports_enjoys", value=None, confidence=0.93),
+            "Nee dat is niet waar",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "ask_correction_detail")
+        self.assertTrue(action["follow_up_needed"])
+        self.assertTrue(turn["memory_correction_requested"])
+        self.assertEqual(turn["memory_correction_field"], "sports_fav_play")
+        self.assertEqual(app.speech.spoken, ["Oeps, welke sport moet ik dan onthouden?"])
+
+    def test_topic2_listen_only_pet_rejection_asks_broad_pet_correction_question(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="has_pet", value=None, confidence=0.92),
+            "Nee dat klopt niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "ask_correction_detail")
+        self.assertTrue(action["follow_up_needed"])
+        self.assertTrue(turn["memory_correction_requested"])
+        self.assertNotIn("memory_correction_field", turn)
+        self.assertEqual(
+            action["leo_response"],
+            "Oeps, wat moet ik dan onthouden over je huisdier?",
+        )
+
+    def test_topic2_listen_only_pet_plain_no_stays_normal_answer(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.92),
+            "Nee",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "listen_only")
+        self.assertEqual(action["change"], {})
+        self.assertNotIn("memory_correction_requested", turn)
+        self.assertEqual(app.speech.spoken, [])
+
+    def test_topic2_listen_only_pet_explicit_name_update_confirms_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["een kat", "ja"]
+        writes = []
+        self.capture_pet_pair_writes(app, writes)
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="pet_name", value="Luna", confidence=0.95),
+            "Mijn huisdier heet Luna",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_multi_update")
+        self.assertEqual([write["field"] for write in writes], ["pet_type", "pet_name"])
+        self.assertEqual(writes[0]["new_value"], "kat")
+        self.assertEqual(writes[1]["new_value"], "Luna")
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(app.last_um_preview["pet_type"], "kat")
+        self.assertEqual(app.last_um_preview["pet_name"], "Luna")
+
+    def test_topic2_pet_type_classifier_result_keeps_pet_type_field(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "vis", "pet_name": "Vis"})
+        app.speech.heard = ["Simba", "ja"]
+        writes = []
+        self.capture_pet_pair_writes(app, writes)
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "memory_correction_requested": True,
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_add", field="pet_type", value="kat", confidence=0.95),
+            "Het is een kat",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_multi_update")
+        self.assertEqual([write["field"] for write in writes], ["pet_type", "pet_name"])
+        self.assertEqual(writes[0]["new_value"], "kat")
+        self.assertEqual(writes[1]["new_value"], "Simba")
+        self.assertEqual(app.last_um_preview["pet_type"], "kat")
+        self.assertEqual(app.last_um_preview["pet_name"], "Simba")
+        self.assertEqual(app.speech.spoken[0], "Oké, een kat. Hoe heet je huisdier?")
+        self.assertIn("een kat is en Simba heet", app.speech.spoken[1])
+
+    def test_topic2_pet_name_only_asks_for_pet_type_before_confirming(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "vis", "pet_name": "Vis"})
+        app.speech.heard = ["een kat", "ja"]
+        writes = []
+        self.capture_pet_pair_writes(app, writes)
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "memory_correction_requested": True,
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="pet_name", value="Simba", confidence=0.95),
+            "Hij heet Simba",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_multi_update")
+        self.assertEqual([write["field"] for write in writes], ["pet_type", "pet_name"])
+        self.assertEqual(writes[0]["new_value"], "kat")
+        self.assertEqual(writes[1]["new_value"], "Simba")
+        self.assertEqual(app.speech.spoken[0], "Oké, Simba. Wat voor huisdier is Simba?")
+
+    def test_topic2_pet_type_and_name_can_be_corrected_in_one_answer(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "vis", "pet_name": "Vis"})
+        app.speech.heard = ["ja"]
+        writes = []
+        self.capture_pet_pair_writes(app, writes)
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "memory_correction_requested": True,
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_add", field="pet_type", value="kat", confidence=0.95),
+            "Het is een kat en hij heet Simba",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_multi_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertEqual([write["field"] for write in writes], ["pet_type", "pet_name"])
+        self.assertEqual(writes[0]["new_value"], "kat")
+        self.assertEqual(writes[1]["new_value"], "Simba")
+        self.assertEqual(app.last_um_preview["pet_type"], "kat")
+        self.assertEqual(app.last_um_preview["pet_name"], "Simba")
+        self.assertIn("een kat is en Simba heet", app.speech.spoken[0])
+        self.assertTrue(action["continue_phase_after_change"])
+
+    def test_topic2_pet_type_and_name_catches_reversed_dutch_name_order(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "vis", "pet_name": "Vis"})
+        app.speech.heard = ["ja"]
+        writes = []
+        self.capture_pet_pair_writes(app, writes)
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "memory_correction_requested": True,
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_add", field="pet_type", value="poes", confidence=0.95),
+            "Dat het een poes is die lulu heet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_multi_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertEqual([write["field"] for write in writes], ["pet_type", "pet_name"])
+        self.assertEqual(writes[0]["new_value"], "poes")
+        self.assertEqual(writes[1]["new_value"], "Lulu")
+        self.assertEqual(app.last_um_preview["pet_type"], "poes")
+        self.assertEqual(app.last_um_preview["pet_name"], "Lulu")
+        self.assertIn("een poes is en Lulu heet", app.speech.spoken[0])
+        self.assertNotIn("Hoe heet je huisdier?", app.speech.spoken[0])
+        self.assertTrue(action["continue_phase_after_change"])
+
+    def test_topic2_pet_name_then_type_in_one_answer_does_not_use_name_as_type(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview.update({"pet_type": "vis", "pet_name": "Vis"})
+        app.speech.heard = ["ja"]
+        writes = []
+        self.capture_pet_pair_writes(app, writes)
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "memory_correction_requested": True,
+            "used_fields": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            "topic": {
+                "domain": "huisdier",
+                "label": "Vis",
+                "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+                "field_labels": {
+                    "pet_name": "de naam van je huisdier",
+                    "pet_type": "het soort huisdier",
+                    "animal_fav": "je lievelingsdier",
+                    "has_pet": "of je een huisdier hebt",
+                },
+                "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_add", field="pet_name", value="lulu", confidence=0.95),
+            "dat hij lulu heet en het is een poes",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_multi_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertEqual([write["field"] for write in writes], ["pet_type", "pet_name"])
+        self.assertEqual(writes[0]["new_value"], "poes")
+        self.assertEqual(writes[1]["new_value"], "Lulu")
+        self.assertEqual(app.last_um_preview["pet_type"], "poes")
+        self.assertEqual(app.last_um_preview["pet_name"], "Lulu")
+        self.assertIn("een poes is en Lulu heet", app.speech.spoken[0])
+        self.assertNotIn("een lulu is", app.speech.spoken[0])
+        self.assertTrue(action["continue_phase_after_change"])
+
+    def test_topic2_pet_correction_resumes_with_corrected_followup_not_open(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = {
+            "domain": "huisdier",
+            "label": "Vis",
+            "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+            "field_labels": {
+                "pet_name": "de naam van je huisdier",
+                "pet_type": "het soort huisdier",
+                "animal_fav": "je lievelingsdier",
+                "has_pet": "of je een huisdier hebt",
+            },
+            "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+        }
+        phase = {
+            "phase": 7,
+            "name": "Topic 2",
+            "topic": topic,
+            "segments": app.topic2_phase_segments(topic),
+        }
+        app.current_turn_context = {**phase, **phase["segments"][4], "segment": 5}
+        action = {
+            "continue_phase_after_change": True,
+            "change": {
+                "action": "multi_update",
+                "topic_correction": True,
+                "changes": [
+                    {"field": "pet_type", "new_value": "kat"},
+                    {"field": "pet_name", "new_value": "Simba"},
+                ],
+            },
+        }
+
+        app.refresh_topic_after_change(phase, action)
+
+        followup_context = {**phase, **phase["segments"][5]}
+        close_context = {**phase, **phase["segments"][6]}
+        self.assertEqual(app.turn_text(followup_context), "Wat voor kat is Simba eigenlijk?")
+        self.assertNotIn("Ik weet ook nog dat jij een kat hebt die Simba heet", app.turn_text(followup_context))
+        self.assertIn("Bizar leuk", app.turn_text(close_context))
+
+    def test_repeating_topic2_after_pet_correction_uses_corrected_pet_values(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = {
+            "domain": "huisdier",
+            "label": "Vis",
+            "fields": ["pet_name", "pet_type", "animal_fav", "has_pet"],
+            "field_labels": {
+                "pet_name": "de naam van je huisdier",
+                "pet_type": "het soort huisdier",
+                "animal_fav": "je lievelingsdier",
+                "has_pet": "of je een huisdier hebt",
+            },
+            "current_values": {"pet_name": "Vis", "pet_type": "vis", "has_pet": "ja"},
+        }
+        phase = {
+            "phase": 7,
+            "name": "Topic 2",
+            "topic": topic,
+            "segments": app.topic2_phase_segments(topic),
+        }
+        app.current_turn_context = {**phase, **phase["segments"][4], "segment": 5}
+        action = {
+            "continue_phase_after_change": True,
+            "change": {
+                "action": "multi_update",
+                "topic_correction": True,
+                "changes": [
+                    {"field": "pet_type", "new_value": "poes"},
+                    {"field": "pet_name", "new_value": "Lulu"},
+                ],
+            },
+        }
+
+        app.refresh_topic_after_change(phase, action)
+        app.reset_phase_attempt_state(phase)
+
+        open_context = {**phase, **phase["segments"][3]}
+        followup_context = {**phase, **phase["segments"][4]}
+        self.assertIn("poes", app.turn_text(open_context))
+        self.assertIn("Lulu", app.turn_text(open_context))
+        self.assertEqual(app.turn_text(followup_context), "Wat voor poes is Lulu eigenlijk?")
+        self.assertNotIn("vis", app.turn_text(open_context).lower())
+        self.assertNotIn("vis", app.turn_text(followup_context).lower())
+
+    def test_topic2_listen_only_sport_rejection_asks_sport_question(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 7,
+            "response_mode": "listen_only",
+            "used_fields": {"sports_enjoys": "ja", "sports_fav_play": "voetbal"},
+            "topic": {
+                "domain": "sport",
+                "label": "voetbal",
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="sports_enjoys", value=None, confidence=0.92),
+            "Nee dat klopt niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "ask_correction_detail")
+        self.assertEqual(action["leo_response"], "Oeps, welke sport moet ik dan onthouden?")
+
+    def test_topic_value_statement_agreement_continues_without_memory_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 5,
+            "response_mode": "topic_interpretation",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "topic": {
+                "domain": "sport",
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.93),
+            "Ja dat klopt",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "no_memory_change")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(app.last_um_preview["sports_fav_play"], "zwemmen")
+
+    def test_topic_value_statement_inline_update_confirms_and_continues_topic_phase(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 5,
+            "response_mode": "topic_interpretation",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "topic": {
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="sports_fav_play", value="hockey", confidence=0.96),
+            "Nee, ik doe hockey",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertFalse(action["stop_phase_after_change"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertTrue(action["change"]["topic_correction"])
+        self.assertTrue(action["change"]["replace_field"])
+        self.assertEqual(app.last_um_preview["sports_fav_play"], "hockey")
+        self.assertIn(5, app.phases_with_confirmed_change)
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik de sport die je graag doet verander naar hockey?")
+
+    def test_listen_only_um_mention_followup_bare_answer_updates_memory(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 5,
+            "response_mode": "listen_only",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "sports_fav_play",
+            "topic": {
+                "domain": "sport",
+                "label": "voetbal",
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="hockey", confidence=0.9),
+            "hockey",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "sports_fav_play")
+        self.assertEqual(action["change"]["new_value"], "hockey")
+        self.assertFalse(action["stop_phase_after_change"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(app.last_um_preview["sports_fav_play"], "hockey")
+
+    def test_topic_correction_prefers_spoken_sport_field_over_classifier_boolean(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 5,
+            "response_mode": "listen_only",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "sports_fav_play",
+            "topic": {
+                "domain": "sport",
+                "label": "voetbal",
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_add", field="sports_enjoys", value="hockey", confidence=0.92),
+            "Ik doe hockey",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "sports_fav_play")
+        self.assertEqual(action["change"]["old_value"], "voetbal")
+        self.assertEqual(action["change"]["new_value"], "hockey")
+        self.assertNotEqual(action["change"]["field"], "sports_enjoys")
+
+    def test_confirmed_topic_correction_rebuilds_remaining_segments_with_new_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = app.topic_candidate(
+            domain="sport",
+            label="voetbal",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "voetbal"},
+            correct_values=["je iets met voetbal hebt"],
+            memory_link="voetbal iets is waar jij iets mee hebt",
+            options=["voetbal", "sport"],
+            reground="Ik houd goed vast dat voetbal iets is waar jij iets mee hebt.",
+        )
+        turn = {
+            "phase": 5,
+            "layer": "L2+L3",
+            "name": "Topic 1",
+            "topic": topic,
+            "segments": app.topic1_phase_segments(topic),
+        }
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "sports_fav_play",
+                "old_value": "voetbal",
+                "new_value": "hockey",
+            },
+        })
+
+        self.assertEqual(turn["topic"]["label"], "hockey")
+        self.assertTrue(turn["force_topic_fallback"])
+        second_segment = app.segment_context(turn, turn["segments"][1], 2)
+        third_segment = app.segment_context(turn, turn["segments"][2], 3)
+        self.assertIn("hockey", app.turn_text(second_segment))
+        self.assertIn("hockey", app.turn_text(third_segment))
+
+    def test_topic_followup_answer_does_not_update_corrected_sport(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        topic = app.topic_candidate(
+            domain="sport",
+            label="hockey",
+            fields=["sports_enjoys", "sports_fav_play"],
+            field_labels={
+                "sports_enjoys": "of je sport leuk vindt",
+                "sports_fav_play": "de sport die je graag doet",
+            },
+            current_values={"sports_enjoys": "ja", "sports_fav_play": "hockey"},
+            correct_values=["je iets met hockey hebt"],
+            memory_link="hockey iets is waar jij iets mee hebt",
+            options=["hockey", "sport"],
+            reground="Ik houd goed vast dat hockey iets is waar jij iets mee hebt.",
+        )
+        turn = {
+            "phase": 5,
+            "layer": "L2+L3",
+            "name": "Topic 1",
+            "topic": topic,
+            "segments": app.topic1_phase_segments(topic),
+            "force_topic_fallback": True,
+        }
+        open_segment = app.segment_context(turn, turn["segments"][1], 2)
+
+        action = app.action_handler(
+            IntentResult(intent="um_add", field="sports_fav_play", value="achterin", confidence=0.92),
+            "achterin",
+            open_segment,
+        )
+
+        self.assertEqual(open_segment["used_fields"], {})
+        self.assertEqual(action["action"], "acknowledge")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.last_um_preview["sports_fav_play"], "zwemmen")
+
+    def test_topic_correction_without_value_continues_with_neutral_topic(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 5,
+            "response_mode": "listen_only",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "sports_fav_play",
+            "topic": {
+                "domain": "sport",
+                "label": "voetbal",
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "geen idee",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "topic_correction_no_value")
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertTrue(action["topic_neutral_after_correction"])
+        self.assertEqual(action["change"], {})
+        self.assertIn("algemener over sport", app.speech.spoken[-1])
 
     def test_mistake_correction_rejects_classifier_value_not_in_transcript(self):
         app = make_app()
@@ -1849,6 +4511,519 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
 
+    def test_mistake_rejection_sets_correction_context_for_classifier(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 13,
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "Rekenen en Gym",
+            "mistake_wrong": "begrijpend lezen",
+            "response_mode": "mistake_interpretation",
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="school_strength", value=None, confidence=0.92),
+            "dat is niet zo",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "ask_correction_detail")
+        self.assertTrue(turn["memory_correction_requested"])
+        self.assertEqual(turn["memory_correction_field"], "school_strength")
+        self.assertEqual(
+            turn["last_correction_question"],
+            "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+        )
+        context = app.actions.classifier_context(turn)
+        self.assertEqual(context["expected_correction_field"], "school_strength")
+        self.assertEqual(
+            context["correction_question"],
+            "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+        )
+
+    def test_mistake_correction_followup_uses_raw_answer_when_classifier_says_unclear(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 13,
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "Rekenen en Gym",
+            "mistake_wrong": "begrijpend lezen",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "school_strength",
+            "last_correction_question": "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+        }
+        app.current_turn_context = turn
+        app.mistake_states = {"M3": {"id": "M3", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+            "Gym",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "school_strength")
+        self.assertEqual(action["change"]["new_value"], "Gym")
+        self.assertEqual(app.last_um_preview["school_strength"], "Gym")
+        self.assertIn(13, app.phases_with_confirmed_change)
+        self.assertIn("verander naar Gym", app.speech.spoken[0])
+
+    def test_part2_mistake3_multiple_strengths_asks_for_one_strength(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["Gym", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "Taal",
+            "mistake_wrong": "begrijpend lezen",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "school_strength",
+            "last_correction_question": "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+            "mistake_topic": app.topic_candidate(
+                domain="school",
+                label="waar je goed in bent op school",
+                fields=["school_strength"],
+                field_labels={"school_strength": "waar je goed in bent op school"},
+                current_values={"school_strength": "Taal"},
+                correct_values=["je vooral goed bent in Taal"],
+                memory_link="je vooral goed bent in Taal",
+                options=["Taal"],
+                reground="Ik weet zeker dat Taal iets is waar je goed in bent op school.",
+            ),
+        }
+        turn["mistake_topic"]["expected_value_count"] = {"school_strength": 1}
+        app.current_turn_context = turn
+        app.mistake_states = {"M3": {"id": "M3", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="school_strength", value="Rekenen en Gym", confidence=0.94),
+            "Nee dat is Rekenen en Gym",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "school_strength")
+        self.assertEqual(action["change"]["new_value"], "Gym")
+        self.assertEqual(app.last_um_preview["school_strength"], "Gym")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier een ding onthouden. Waar ben jij vooral goed in op school? Noem een ding.",
+        )
+        self.assertIn("waar je goed in bent op school verander naar Gym", app.speech.spoken[1])
+
+    def test_part2_mistake3_multiple_strengths_without_clarification_does_not_update(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["Rekenen en Gym", ""]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "Taal",
+            "mistake_wrong": "begrijpend lezen",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "school_strength",
+            "last_correction_question": "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+            "mistake_topic": app.topic_candidate(
+                domain="school",
+                label="waar je goed in bent op school",
+                fields=["school_strength"],
+                field_labels={"school_strength": "waar je goed in bent op school"},
+                current_values={"school_strength": "Taal"},
+                correct_values=["je vooral goed bent in Taal"],
+                memory_link="je vooral goed bent in Taal",
+                options=["Taal"],
+                reground="Ik weet zeker dat Taal iets is waar je goed in bent op school.",
+            ),
+        }
+        turn["mistake_topic"]["expected_value_count"] = {"school_strength": 1}
+        app.current_turn_context = turn
+        app.mistake_states = {"M3": {"id": "M3", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="school_strength", value="Rekenen en Gym", confidence=0.94),
+            "Nee dat is Rekenen en Gym",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "change_value_limit_unresolved")
+        self.assertNotEqual(app.last_um_preview["school_strength"], "Rekenen en Gym")
+        self.assertNotEqual(app.last_um_preview["school_strength"], "Gym")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier een ding onthouden. Waar ben jij vooral goed in op school? Noem een ding.",
+        )
+        self.assertEqual(
+            app.speech.spoken[1],
+            "Dat zijn er nog te veel. Ik kan hier een ding onthouden. Waar ben jij vooral goed in op school? Noem een ding.",
+        )
+        self.assertIn("Dan verander ik het nu nog niet", app.speech.spoken[2])
+
+    def test_mistake_phase_logs_not_corrected_outcome_with_leo_memory_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.conversation_log = {"session_id": "test-session", "events": []}
+        app.current_turn_log = {"events": [], "utterances": []}
+        app.conv_log.write_conversation_logs = lambda: None
+        payloads = []
+        app.um.log_cri_interaction_event = lambda payload: payloads.append(dict(payload)) or True
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "layer": "L1 + L2-slot WRONG",
+            "name": "Mistake 3 - school_strength",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "taal",
+            "mistake_wrong": "begrijpend lezen",
+            "mistake_type": "completely-wrong",
+        }
+
+        app.register_mistake_phase(turn)
+        app.record_mistake_outcome(turn)
+
+        self.assertEqual(payloads[0]["event_type"], "mistake_not_corrected")
+        self.assertEqual(payloads[0]["outcome"], "not_corrected")
+        self.assertFalse(payloads[0]["corrected"])
+        self.assertEqual(payloads[0]["real_value"], "taal")
+        self.assertEqual(payloads[0]["mistake_value"], "begrijpend lezen")
+        self.assertEqual(
+            payloads[0]["leo_memory_key"],
+            "M3_mistake_not_corrected_school_strength",
+        )
+        self.assertEqual(payloads[0]["leo_memory_value"], "begrijpend lezen")
+        self.assertEqual(app.mistake_states["M3"]["outcome"], "not_corrected")
+        self.assertEqual(
+            app.mistake_states["M3"]["leo_memory_key"],
+            "M3_mistake_not_corrected_school_strength",
+        )
+        self.assertEqual(app.mistake_states["M3"]["leo_memory_value"], "begrijpend lezen")
+        self.assertTrue(app.mistake_states["M3"]["outcome_logged"])
+        self.assertEqual(app.conversation_log["events"][0]["type"], "mistake_outcome")
+
+    def test_mistake_phase_logs_corrected_outcome_with_confirmed_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["school_strength"] = "Gym"
+        app.conversation_log = {"session_id": "test-session", "events": []}
+        app.current_turn_log = {"events": [], "utterances": []}
+        app.conv_log.write_conversation_logs = lambda: None
+        payloads = []
+        app.um.log_cri_interaction_event = lambda payload: payloads.append(dict(payload)) or True
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "layer": "L1 + L2-slot WRONG",
+            "name": "Mistake 3 - school_strength",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "taal",
+            "mistake_wrong": "begrijpend lezen",
+            "mistake_type": "completely-wrong",
+        }
+
+        app.register_mistake_phase(turn)
+        app.current_turn_context = turn
+        app.mark_current_mistake_corrected()
+        app.record_mistake_outcome(turn)
+
+        self.assertEqual(payloads[0]["event_type"], "mistake_corrected")
+        self.assertEqual(payloads[0]["outcome"], "corrected")
+        self.assertTrue(payloads[0]["corrected"])
+        self.assertEqual(payloads[0]["real_value"], "taal")
+        self.assertEqual(payloads[0]["mistake_value"], "begrijpend lezen")
+        self.assertEqual(payloads[0]["leo_memory_key"], "")
+        self.assertEqual(payloads[0]["leo_memory_value"], "Gym")
+        self.assertEqual(app.mistake_states["M3"]["outcome"], "corrected")
+        self.assertEqual(app.mistake_states["M3"]["leo_memory_value"], "Gym")
+
+    def test_mistake_phase_logs_rejected_unresolved_without_leo_memory_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.conversation_log = {"session_id": "test-session", "events": []}
+        app.current_turn_log = {"events": [], "utterances": []}
+        app.conv_log.write_conversation_logs = lambda: None
+        payloads = []
+        app.um.log_cri_interaction_event = lambda payload: payloads.append(dict(payload)) or True
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "layer": "L1 + L2-slot WRONG",
+            "name": "Mistake 3 - school_strength",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "taal",
+            "mistake_wrong": "begrijpend lezen",
+            "mistake_type": "completely-wrong",
+        }
+
+        app.register_mistake_phase(turn)
+        app.mistake_states["M3"]["wrong_value_rejected"] = True
+        app.record_mistake_outcome(turn)
+
+        self.assertEqual(payloads[0]["event_type"], "mistake_rejected_unresolved")
+        self.assertEqual(payloads[0]["outcome"], "rejected_unresolved")
+        self.assertEqual(payloads[0]["leo_memory_key"], "")
+        self.assertIsNone(payloads[0]["leo_memory_value"])
+        self.assertEqual(payloads[0]["real_value"], "taal")
+        self.assertEqual(payloads[0]["mistake_value"], "begrijpend lezen")
+
+    def test_mistake3_school_difficulty_ack_resolves_mistake_without_memory_key(self):
+        app = make_app(["Dat snap ik."])
+        app.last_um_preview = sample_um()
+        app.conversation_log = {"session_id": "test-session", "events": []}
+        app.current_turn_log = {"events": [], "utterances": []}
+        app.conv_log.write_conversation_logs = lambda: None
+        payloads = []
+        app.um.log_cri_interaction_event = lambda payload: payloads.append(dict(payload)) or True
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "name": "Mistake 3 - school_strength",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "taal",
+            "mistake_wrong": "rekenen",
+            "mistake_type": "completely-wrong",
+            "m3_requires_school_difficulty_resolution": True,
+            "m3_school_difficulty_resolution": True,
+            "response_mode": "acknowledge",
+            "llm_turn": True,
+            "used_fields": {
+                "fav_subject": "taal",
+                "school_difficulty": "rekenen",
+            },
+        }
+
+        app.register_mistake_phase(turn)
+        app.current_turn_context = turn
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Ja, dat klopt",
+            turn,
+        )
+        app.record_mistake_outcome(turn)
+
+        self.assertEqual(action["action"], "acknowledge")
+        self.assertTrue(app.mistake_states["M3"]["corrected"])
+        self.assertTrue(app.mistake_states["M3"]["corrected_by_school_difficulty_ack"])
+        self.assertEqual(payloads[0]["event_type"], "mistake_corrected")
+        self.assertEqual(payloads[0]["outcome"], "corrected")
+        self.assertEqual(payloads[0]["leo_memory_key"], "")
+        self.assertEqual(payloads[0]["leo_memory_value"], "taal")
+
+    def test_mistake3_school_difficulty_change_marks_original_mistake_not_corrected(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.conversation_log = {"session_id": "test-session", "events": []}
+        app.current_turn_log = {"events": [], "utterances": []}
+        app.conv_log.write_conversation_logs = lambda: None
+        payloads = []
+        app.um.log_cri_interaction_event = lambda payload: payloads.append(dict(payload)) or True
+
+        def write_um_change(change):
+            app.last_um_preview[change["field"]] = change["new_value"]
+            return True
+
+        app.write_um_change = write_um_change
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "name": "Mistake 3 - school_strength",
+            "mistake_id": "M3",
+            "mistake_field": "school_strength",
+            "mistake_actual": "taal",
+            "mistake_wrong": "rekenen",
+            "mistake_type": "completely-wrong",
+            "m3_requires_school_difficulty_resolution": True,
+            "m3_school_difficulty_resolution": True,
+            "response_mode": "acknowledge",
+            "used_fields": {
+                "fav_subject": "taal",
+                "school_difficulty": "rekenen",
+            },
+        }
+
+        app.register_mistake_phase(turn)
+        app.current_turn_context = turn
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="school_difficulty", value="spelling", confidence=0.94),
+            "Nee, spelling is lastig",
+            turn,
+        )
+        app.record_mistake_outcome(turn)
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(app.last_um_preview["school_difficulty"], "spelling")
+        self.assertFalse(app.mistake_states["M3"].get("corrected", False))
+        self.assertTrue(app.mistake_states["M3"]["m3_not_corrected_by_difficulty_change"])
+        self.assertEqual(payloads[0]["event_type"], "mistake_not_corrected")
+        self.assertEqual(payloads[0]["outcome"], "not_corrected")
+        self.assertEqual(
+            payloads[0]["leo_memory_key"],
+            "M3_mistake_not_corrected_school_strength",
+        )
+        self.assertEqual(payloads[0]["leo_memory_value"], "rekenen")
+
+    def test_listen_only_segment_with_mentioned_um_field_does_not_trigger_memory_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "response_mode": "listen_only",
+            "used_fields": {"school_strength": "rekenen"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.92),
+            "Nee niet echt",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "listen_only")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(app.last_um_preview["school_strength"], "taal")
+
+    def test_mistake_correction_change_replaces_field_values(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "zingen",
+            "response_mode": "mistake_interpretation",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+        }
+
+        change = app.change_from_intent_result(
+            IntentResult(intent="um_update", field="hobby_fav", value="tennis", confidence=0.96),
+            turn,
+            "Nee, mijn favoriete hobby is tennis",
+        )
+
+        self.assertEqual(change["action"], "update")
+        self.assertEqual(change["new_value"], "tennis")
+        self.assertTrue(change["replace_field"])
+
+    def test_inline_mistake_correction_asks_confirmation_before_continuing(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "padel",
+            "response_mode": "mistake_interpretation",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "defer_corrected_response": True,
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="hobby_fav", value="gamen", confidence=0.94),
+            "Nee dat is gamen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je favoriete hobby verander naar gamen?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
+        self.assertEqual(app.last_um_preview["hobby_fav"], "gamen")
+        self.assertIn(6, app.phases_with_confirmed_change)
+        self.assertTrue(app.mistake_states["M1"].get("corrected"))
+
+    def test_mistake1_inline_multiple_favorite_hobbies_asks_for_one_hobby(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["gamen", "ja"]
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "padel",
+            "response_mode": "mistake_interpretation",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "defer_corrected_response": True,
+        }
+        turn["mistake_topic"]["expected_value_count"] = {"hobby_fav": 1}
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="rejects_joke_no", confidence=0.92),
+            "nee dat is gamen en tekenen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "hobby_fav")
+        self.assertEqual(action["change"]["new_value"], "gamen")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier één favoriete hobby onthouden. Wat is jouw allerliefste hobby? Noem één ding.",
+        )
+        self.assertEqual(app.speech.spoken[1], "Wil je dat ik je favoriete hobby verander naar gamen?")
+        self.assertEqual(app.last_um_preview["hobby_fav"], "gamen")
+
+    def test_mistake1_correction_detail_multiple_favorite_hobbies_asks_for_one_hobby(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["tekenen", "ja"]
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "padel",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_requested": True,
+            "memory_correction_field": "hobby_fav",
+            "last_correction_question": "Oeps, wat is dan je favoriete hobby?",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "defer_corrected_response": True,
+        }
+        turn["mistake_topic"]["expected_value_count"] = {"hobby_fav": 1}
+        app.current_turn_context = turn
+        app.mistake_states = {"M1": {"id": "M1", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="hobby_fav", value="gamen en tekenen", confidence=0.94),
+            "gamen en tekenen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(action["change"]["field"], "hobby_fav")
+        self.assertEqual(action["change"]["new_value"], "tekenen")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier één favoriete hobby onthouden. Wat is jouw allerliefste hobby? Noem één ding.",
+        )
+        self.assertEqual(app.speech.spoken[1], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertEqual(app.last_um_preview["hobby_fav"], "tekenen")
+
     def test_mistake_rejection_phrase_is_not_repaired_into_fake_value(self):
         app = make_app()
         app.last_um_preview = sample_um()
@@ -1875,10 +5050,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(action["change"], {})
         self.assertTrue(app.mistake_states["M1"].get("wrong_value_rejected"))
 
-    def test_explicit_mistake_correction_answer_updates_directly_when_actual_is_missing(self):
+    def test_explicit_mistake_correction_answer_asks_confirmation_when_actual_is_missing(self):
         app = make_app()
         app.last_um_preview = sample_um()
         app.last_um_preview["hobby_fav"] = CRI.UNKNOWN_VALUE
+        app.speech.heard = ["ja"]
         app.simulated_persona = {}
         turn = {
             "phase": 6,
@@ -1908,13 +5084,320 @@ class CRIDialogue2Tests(unittest.TestCase):
             turn,
         )
 
-        self.assertEqual(action["action"], "mistake_corrected_update")
-        self.assertTrue(action["write_success"])
-        self.assertIsNone(action["leo_response"])
+        self.assertEqual(action["action"], "confirm_update")
         self.assertEqual(app.simulated_persona["hobby_fav"], "tekenen")
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
+        self.assertTrue(action["change"]["replace_field"])
+
+    def test_replace_field_write_validates_deletes_then_posts_update(self):
+        class FakeResponse:
+            def __init__(self, status_code, payload=None):
+                self.status_code = status_code
+                self._payload = payload or {}
+
+            def json(self):
+                return self._payload
+
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.UM_API_BASE = "http://um.local"
+        app.CHILD_ID = "701"
+        app.last_um_preview = {"hobby_fav": "voetbal"}
+        calls = []
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append(("post", url, json))
+            return FakeResponse(200, {"data": {"skipped": []}})
+
+        def fake_delete(url, timeout=None):
+            calls.append(("delete", url, None))
+            return FakeResponse(200)
+
+        change = {
+            "action": "update",
+            "field": "hobby_fav",
+            "old_value": "voetbal",
+            "new_value": "tennis, Playmobiel bouwen",
+            "replace_field": True,
+        }
+
+        with patch("cri_um.client.requests.post", side_effect=fake_post), patch(
+            "cri_um.client.requests.delete",
+            side_effect=fake_delete,
+        ):
+            ok = app.write_um_change(change)
+
+        self.assertTrue(ok)
+        self.assertEqual(calls[0][0], "post")
+        self.assertTrue(calls[0][2]["dry_run"])
+        self.assertEqual(calls[1], ("delete", "http://um.local/api/um/701/field/hobby_fav", None))
+        self.assertEqual(calls[2][0], "post")
+        self.assertNotIn("dry_run", calls[2][2])
+        self.assertEqual(calls[2][2]["fields"], {"hobby_fav": "tennis, Playmobiel bouwen"})
+        self.assertEqual(app.last_um_preview["hobby_fav"], "tennis, Playmobiel bouwen")
+
+    def test_pet_pair_write_uses_consolidated_pets_field(self):
+        class FakeResponse:
+            def __init__(self, status_code, payload=None):
+                self.status_code = status_code
+                self._payload = payload or {}
+
+            def json(self):
+                return self._payload
+
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.UM_API_BASE = "http://um.local"
+        app.CHILD_ID = "701"
+        app.last_um_preview = {"pet_type": "Vis", "pet_name": "Vis", "pets": "Vis (Vis)"}
+        calls = []
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append(("post", url, json))
+            return FakeResponse(200, {"data": {"skipped": []}})
+
+        def fake_delete(url, timeout=None):
+            calls.append(("delete", url, None))
+            return FakeResponse(200)
+
+        change = {
+            "action": "multi_update",
+            "changes": [
+                {
+                    "action": "update",
+                    "field": "pet_type",
+                    "old_value": "Vis",
+                    "new_value": "poes",
+                },
+                {
+                    "action": "update",
+                    "field": "pet_name",
+                    "old_value": "Vis",
+                    "new_value": "Lulu",
+                },
+            ],
+            "replace_field": True,
+        }
+
+        with patch("cri_um.client.requests.post", side_effect=fake_post), patch(
+            "cri_um.client.requests.delete",
+            side_effect=fake_delete,
+        ):
+            ok = app.write_pet_pair_change(change)
+
+        self.assertTrue(ok)
+        self.assertEqual(calls[0][0], "post")
+        self.assertTrue(calls[0][2]["dry_run"])
+        self.assertEqual(calls[0][2]["fields"], {"pets": "poes"})
+        self.assertEqual(calls[0][2]["extra_props"], {"pets_petName": "Lulu"})
+        self.assertEqual(calls[1], ("delete", "http://um.local/api/um/701/field/pets", None))
+        self.assertEqual(calls[2][0], "post")
+        self.assertEqual(calls[2][2]["fields"], {"pets": "poes"})
+        self.assertEqual(calls[2][2]["extra_props"], {"pets_petName": "Lulu"})
+        self.assertNotIn("dry_run", calls[2][2])
+        self.assertEqual(app.last_um_preview["pet_type"], "poes")
+        self.assertEqual(app.last_um_preview["pet_name"], "Lulu")
+        self.assertEqual(app.last_um_preview["pets"], "Lulu (poes)")
+
+    def test_cri_interaction_event_local_log_avoids_event_type_collision(self):
+        class FakeResponse:
+            status_code = 200
+
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.UM_API_BASE = "http://um.local"
+        app.CHILD_ID = "701"
+        events = []
+        app.log_conversation_event = lambda event_type, **data: events.append((event_type, data))
+        payload = {
+            "event_type": "mistake_corrected",
+            "mistake_id": "M3",
+            "field": "school_strength",
+        }
+
+        with patch("cri_um.client.requests.post", return_value=FakeResponse()):
+            ok = app.um.log_cri_interaction_event(payload)
+
+        self.assertTrue(ok)
+        self.assertEqual(events[0][0], "cri_interaction_event_write")
+        self.assertEqual(events[0][1]["logged_event_type"], "mistake_corrected")
+        self.assertNotIn("event_type", events[0][1])
+
+    def test_cri_interaction_event_failure_log_avoids_event_type_collision(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.UM_API_BASE = "http://um.local"
+        app.CHILD_ID = "701"
+        events = []
+        app.log_conversation_event = lambda event_type, **data: events.append((event_type, data))
+        payload = {
+            "event_type": "mistake_corrected",
+            "mistake_id": "M3",
+            "field": "school_strength",
+        }
+
+        with patch("cri_um.client.requests.post", side_effect=RuntimeError("boom")):
+            ok = app.um.log_cri_interaction_event(payload)
+
+        self.assertFalse(ok)
+        self.assertEqual(events[0][0], "cri_interaction_event_write")
+        self.assertEqual(events[0][1]["logged_event_type"], "mistake_corrected")
+        self.assertNotIn("event_type", events[0][1])
+        self.assertIn("boom", events[0][1]["error"])
+
+    def test_confirmed_change_updates_local_preview_even_when_save_fails(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: False
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_wrong": "padel",
+        }
+        change = {
+            "action": "update",
+            "field": "hobby_fav",
+            "field_label": "je favoriete hobby",
+            "old_value": "voetbal",
+            "new_value": "playmobiel bouwen",
+            "replace_field": True,
+        }
+
+        accepted = app.confirm_topic_change(change)
+
+        self.assertTrue(accepted)
+        self.assertEqual(app.last_um_preview["hobby_fav"], "playmobiel bouwen")
+        self.assertIn("opslaan lukte nu niet", app.speech.spoken[-1])
+
+    def test_tablet_condition_reveals_confirmed_change_after_acknowledgement(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "C2"
+        app.local_condition = "C2"
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_wrong": "padel",
+        }
+        app.write_um_change = lambda change: True
+        events = []
+
+        class EventSpeech(FakeSpeech):
+            def say(self, text):
+                super().say(text)
+                events.append(("say", text))
+
+        app.speech = EventSpeech(["ja"])
+        app.tablet_state = SimpleNamespace(
+            refresh=lambda phase=None: events.append(("refresh", phase)),
+            prepare_reveal_change=lambda **kwargs: events.append(("prepare", kwargs)),
+            reveal_change=lambda **kwargs: events.append(("reveal", kwargs)),
+        )
+        change = {
+            "action": "update",
+            "field": "hobby_fav",
+            "field_label": "je favoriete hobby",
+            "old_value": "voetbal",
+            "new_value": "playmobiel spelen",
+            "replace_field": True,
+        }
+
+        accepted = app.confirm_topic_change(change)
+
+        self.assertTrue(accepted)
+        self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby verander naar playmobiel spelen?"))
+        self.assertEqual(
+            events[1],
+            (
+                "prepare",
+                {
+                    "field": "hobby_fav",
+                    "old_value": "padel",
+                    "new_value": "playmobiel spelen",
+                    "phase": 6,
+                },
+            ),
+        )
+        self.assertEqual(
+            events[2],
+            ("say", "Dankjewel, ik heb dat aangepast. Kijk maar op de tablet, daar zie je het veranderen."),
+        )
+        self.assertEqual(
+            events[3],
+            (
+                "reveal",
+                {
+                    "field": "hobby_fav",
+                    "old_value": "padel",
+                    "new_value": "playmobiel spelen",
+                    "phase": 6,
+                },
+            ),
+        )
+
+    def test_tablet_condition_confirms_even_when_correction_already_in_um(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "C2"
+        app.last_um_preview["hobby_fav"] = "gamen"
+        app.local_condition = "C2"
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "gamen",
+            "mistake_wrong": "padel",
+        }
+        app.write_um_change = lambda change: True
+        events = []
+
+        class EventSpeech(FakeSpeech):
+            def say(self, text):
+                super().say(text)
+                events.append(("say", text))
+
+        app.speech = EventSpeech(["ja"])
+        app.tablet_state = SimpleNamespace(
+            refresh=lambda phase=None: events.append(("refresh", phase)),
+            reveal_change=lambda **kwargs: events.append(("reveal", kwargs)),
+        )
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "gamen",
+            "mistake_wrong": "padel",
+            "response_mode": "mistake_interpretation",
+            "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "defer_corrected_response": True,
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="hobby_fav", value="gamen", confidence=0.94),
+            "Nee dat is gamen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby verander naar gamen?"))
+        self.assertEqual(
+            events[2],
+            (
+                "reveal",
+                {
+                    "field": "hobby_fav",
+                    "old_value": "padel",
+                    "new_value": "gamen",
+                    "phase": 6,
+                },
+            ),
+        )
 
     def test_mistake_rejection_without_value_asks_for_detail_then_accepts_short_answer(self):
         app = make_app()
@@ -2027,11 +5510,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(action["leo_response"], "Oeps, wat wil jij dan later worden?")
         self.assertTrue(app.mistake_states["M4"].get("wrong_value_rejected"))
 
-    def test_middle_school_feeling_is_static_session_context_not_um_change(self):
+    def test_middle_school_feeling_speaks_flexible_wrap_without_um_change(self):
         app = make_app()
         turn = {
-            "phase": 18,
-            "phase_id": "3.5",
+            "phase": 17,
+            "phase_id": "3.4/5",
             "response_mode": "middle_school_feeling",
         }
         result = IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9)
@@ -2040,7 +5523,107 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(action["action"], "middle_school_feeling")
         self.assertEqual(action["middle_school_feeling"], "mixed")
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(action["leo_response"], "Dat snap ik. Je kunt er zin in hebben en het tegelijk spannend vinden.")
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_middle_school_feeling_detects_not_spannend_as_calm(self):
+        app = make_app()
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "middle_school_feeling",
+        }
+        result = IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85)
+
+        action = app.action_handler(result, "Nee hoor vind ik helemaal niet spannend", turn)
+
+        self.assertEqual(action["action"], "middle_school_feeling")
+        self.assertEqual(action["middle_school_feeling"], "calm")
+        self.assertEqual(action["leo_response"], "Fijn, dan kijk je er best rustig naar.")
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_school_joke_transition_uses_classifier_category(self):
+        app = make_app()
+        turn = {
+            "phase": 10,
+            "phase_id": "2.1",
+            "response_mode": "school_joke_transition",
+        }
+        result = IntentResult(
+            intent="dialogue_answer",
+            field=None,
+            value="dislikes_school",
+            confidence=0.92,
+        )
+
+        action = app.action_handler(result, "School is stom.", turn)
+
+        self.assertEqual(action["action"], "school_joke_transition")
+        self.assertEqual(action["school_joke_category"], "dislikes_school")
+        self.assertEqual(
+            action["leo_response"],
+            "Dat snap ik ook. Ik maakte een grapje; school hoeft echt niet altijd leuk te zijn.",
+        )
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_school_joke_transition_has_offline_fallback_category(self):
+        app = make_app()
+        turn = {
+            "phase": 10,
+            "phase_id": "2.1",
+            "response_mode": "school_joke_transition",
+        }
+        result = IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9)
+
+        action = app.action_handler(result, "Nee echt niet.", turn)
+
+        self.assertEqual(action["action"], "school_joke_transition")
+        self.assertEqual(action["school_joke_category"], "rejects_joke_no")
+        self.assertIn("School is meestal niet iemands hobby", action["leo_response"])
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_robot_school_guess_uses_classifier_category(self):
+        app = make_app()
+        turn = {
+            "phase": 11,
+            "phase_id": "2.2",
+            "response_mode": "robot_school_guess",
+        }
+        result = IntentResult(
+            intent="dialogue_answer",
+            field=None,
+            value="wrong_guess",
+            confidence=0.93,
+        )
+
+        action = app.action_handler(result, "Rekenen?", turn)
+
+        self.assertEqual(action["action"], "robot_school_guess")
+        self.assertEqual(action["robot_school_guess_category"], "wrong_guess")
+        self.assertEqual(
+            action["leo_response"],
+            "Haha, bijna. Ik was eigenlijk best goed in luisteren. De rest was soms wat lastiger.",
+        )
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_robot_school_guess_unknown_uses_reveal_line(self):
+        app = make_app()
+        turn = {
+            "phase": 11,
+            "phase_id": "2.2",
+            "response_mode": "robot_school_guess",
+        }
+        result = IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.95)
+
+        action = app.action_handler(result, "Weet ik niet", turn)
+
+        self.assertEqual(action["action"], "robot_school_guess")
+        self.assertEqual(action["robot_school_guess_category"], "unclear")
+        self.assertEqual(
+            action["leo_response"],
+            "Ik verklap het: luisteren ging best oké. De rest was soms wat lastiger.",
+        )
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
 
     def test_phase_confirmed_change_segment_flags_can_target_previous_phase(self):
         app = make_app()
@@ -2067,6 +5650,32 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.run_phase_segment(phase, run_segment)
         app.run_phase_segment(phase, skip_segment)
         self.assertEqual(app.speech.spoken, ["corrected branch"])
+
+    def test_repeat_phase_clears_prior_confirmed_change_state_for_that_phase(self):
+        app = make_app()
+        turn = {
+            "phase": 13,
+            "phase_id": "2.4",
+            "mistake_id": "M3",
+        }
+        app.phases_with_confirmed_change = {12, 13, 17}
+        app.mistake_states = {
+            "M3": {
+                "id": "M3",
+                "corrected": True,
+                "outcome_logged": True,
+            },
+            "M2": {
+                "id": "M2",
+                "corrected": False,
+            },
+        }
+
+        app.reset_phase_attempt_state(turn)
+
+        self.assertEqual(app.phases_with_confirmed_change, {12, 17})
+        self.assertNotIn("M3", app.mistake_states)
+        self.assertIn("M2", app.mistake_states)
 
     def test_nudge_phase_asks_for_missing_correction_or_offers_memory_access(self):
         app = make_app()
@@ -2144,6 +5753,76 @@ class CRIDialogue2Tests(unittest.TestCase):
                 result = clf.classify(phrase)
                 self.assertEqual(result.intent, "um_inspect")
 
+    def test_gpt_classifier_coerces_memory_book_questions_to_um_inspect(self):
+        gpt = object.__new__(cri_module.GPTIntentClassifier)
+
+        for phrase in (
+            "Kan ik je geheugen zien?",
+            "Mag ik je geheugenboek zien?",
+            "Kan ik in je geheugen kijken?",
+        ):
+            with self.subTest(phrase=phrase):
+                coerced = gpt._coerce_result(
+                    "dialogue_question",
+                    None,
+                    None,
+                    0.92,
+                    phrase,
+                )
+                self.assertEqual(coerced[0], "um_inspect")
+                self.assertIsNone(coerced[1])
+                self.assertIsNone(coerced[2])
+                self.assertGreaterEqual(coerced[3], 0.95)
+
+    def test_public_gpt_classifier_uses_context_aware_newer_version(self):
+        self.assertEqual(cri_module.GPTIntentClassifier.__module__, "cri_classifier.gpt_newer")
+
+    def test_action_handler_passes_turn_context_to_context_aware_classifier(self):
+        app = make_app()
+
+        class ContextAwareClassifier:
+            def __init__(self):
+                self.calls = []
+
+            def classify(self, text, turn_context=None):
+                self.calls.append(("classify", text, turn_context))
+                return cri_module.IntentResult(
+                    intent="dialogue_answer",
+                    field=None,
+                    value=None,
+                    confidence=0.95,
+                )
+
+            def classify_retry(self, text, turn_context=None):
+                self.calls.append(("classify_retry", text, turn_context))
+                return cri_module.IntentResult(
+                    intent="dialogue_answer",
+                    field=None,
+                    value=None,
+                    confidence=0.95,
+                )
+
+        app.clf = ContextAwareClassifier()
+        app.last_leo_utterance = "En volgens mij is padel jouw allerliefste hobby."
+        turn = {
+            "phase": 6,
+            "text": app.last_leo_utterance,
+            "response_mode": "mistake_interpretation",
+            "mistake_field": "hobby_fav",
+            "used_fields": {"hobbies": "voetbal, schaatsen, judo en padel"},
+            "topic": {"kind": "hobby", "current_values": {"hobby_fav": "schaatsen"}},
+        }
+
+        app.actions.classify_with_repeat("Nee, schaatsen", turn)
+
+        _, transcript, context = app.clf.calls[0]
+        self.assertEqual(transcript, "Nee, schaatsen")
+        self.assertEqual(context["leo_previous"], app.last_leo_utterance)
+        self.assertEqual(context["response_mode"], "mistake_interpretation")
+        self.assertEqual(context["topic"], "hobby")
+        self.assertIn("hobby_fav", context["relevant_fields"])
+        self.assertIn("hobbies", context["relevant_fields"])
+
     def test_short_meaningful_replies_are_dialogue_answers_not_none(self):
         stub = cri_module.StubIntentClassifier(valid_fields=list(CRI.UM_FIELDS))
         self.assertEqual(stub.classify("Ja tuurlijk").intent, "dialogue_answer")
@@ -2167,6 +5846,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.local_child_name = "Noor"
         app.researcher_name = "Sander"
         app.last_um_preview = sample_um()
+        app.session_config = {
+            "child_name": "Noor",
+            "first_name_cri": "Noor",
+            "first_name_tablet": "Noortje",
+        }
         app.resume_from_log_path = r"C:\previous\Noor.json"
         app.resume_source_log = {
             "session_id": "old",
@@ -2175,15 +5859,177 @@ class CRIDialogue2Tests(unittest.TestCase):
             "last_completed_phase": 1,
         }
 
-        app.start_conversation_log([{"phase": 2, "name": "Tutorial", "layer": "L1", "content_plan": app.l1("Test")}])
+        turn = {
+            "phase": 2,
+            "part": 1,
+            "phase_id": "1.2",
+            "name": "Tutorial",
+            "layer": "L1",
+            "dialogue_case": "um_template",
+            "content_plan": app.l1("Test"),
+        }
+        app.start_conversation_log([turn])
+        app.start_turn_log(turn)
+        app.log_conversation_event("utterance", speaker="LEO", text="Hoi Noor")
+        app.log_conversation_event("utterance", speaker="CHILD", text="Ja")
+        app.finish_turn_log()
 
         log = app.conversation_log
         self.assertTrue(Path(log["folder"]).is_relative_to(Path(temp_dir)))
-        self.assertEqual(Path(log["json_path"]).name, "Noor.json")
-        self.assertEqual(Path(log["txt_path"]).name, "Noor.txt")
+        self.assertEqual(Path(log["json_path"]).name, "N_1001_debug.json")
+        self.assertEqual(Path(log["txt_path"]).name, "N_1001_conversation_debug.txt")
+        self.assertEqual(Path(log["omr_log_path"]).suffix, ".log")
         self.assertTrue(log["previous_log_included"])
         self.assertEqual(log["events"][0]["text"], "Hoi")
         self.assertEqual(log["timestamp_unit"], "seconds_from_interaction_start")
+
+        json_payload = Path(log["json_path"]).read_text(encoding="utf-8")
+        transcript_payload = Path(log["conversation_debug_path"]).read_text(encoding="utf-8")
+        omr_payload = Path(log["omr_log_path"]).read_text(encoding="utf-8")
+        for payload in (json_payload, transcript_payload, omr_payload):
+            self.assertNotIn("Noor", payload)
+            self.assertNotIn("Noortje", payload)
+        self.assertIn("[Leo] Hoi N_1001", transcript_payload)
+        self.assertIn("[N_1001] Ja", transcript_payload)
+        self.assertIn("Part 1 phase 2: Tutorial", transcript_payload)
+        self.assertNotIn("[um_template]", transcript_payload)
+
+        omr_log = json.loads(omr_payload)
+        self.assertEqual(omr_log["session_metadata"]["child_label"], "N_1001")
+        self.assertIn("mistakes_and_corrections", omr_log)
+        self.assertIn("memory_acts", omr_log)
+        self.assertIn("um_updates", omr_log)
+        self.assertIn("tablet_events", omr_log)
+
+    def test_omr_log_formats_timestamps_and_dedupes_confirmed_memory_acts(self):
+        app = make_app()
+        log = {
+            "session_id": "session-test",
+            "child_id": "1001",
+            "child_label": "N_1001",
+            "tutorial_condition": "E",
+            "started_at": 0.0,
+            "started_wall_time": "1970-01-01T00:00:00+00:00",
+            "ended_at": 240.0,
+            "ended_wall_time": "1970-01-01T00:04:00+00:00",
+            "events": [
+                {
+                    "type": "mistake_outcome",
+                    "timestamp": 120.2,
+                    "phase": 6,
+                    "mistake_id": "M1",
+                    "field": "hobby_fav",
+                    "wrong_value": "padel",
+                    "real_value": "voetbal",
+                    "corrected": True,
+                },
+                {
+                    "type": "action_handler",
+                    "timestamp": 184.391,
+                    "phase": 6,
+                    "action": "confirm_update",
+                    "change_confirmed": True,
+                    "change": {"action": "update", "field": "hobby_fav", "new_value": "gamen"},
+                },
+                {
+                    "type": "action_handler",
+                    "timestamp": 193.031,
+                    "phase": 6,
+                    "action": "confirm_update",
+                    "change_confirmed": True,
+                    "change": {"action": "update", "field": "hobby_fav", "new_value": "gamen"},
+                },
+            ],
+        }
+
+        omr_log = app.conv_log.build_omr_log(log)
+
+        self.assertEqual(omr_log["mistakes_and_corrections"][0]["timestamp"], "02:00")
+        self.assertEqual(omr_log["mistakes_and_corrections"][0]["child_initiated"], "yes")
+        self.assertEqual(len(omr_log["memory_acts"]), 1)
+        self.assertEqual(omr_log["memory_acts"][0]["timestamp"], "03:04")
+        self.assertEqual(omr_log["memory_acts"][0]["target_field"], "hobby_fav")
+        self.assertIn(
+            {
+                "type": "session_start",
+                "timestamp": "00:00",
+            },
+            omr_log["tablet_events"],
+        )
+        self.assertIn(
+            {
+                "type": "session_end",
+                "timestamp": "04:00",
+            },
+            omr_log["tablet_events"],
+        )
+
+    def test_omr_log_imports_matching_tablet_json_events(self):
+        app = make_app()
+        temp_dir = tempfile.mkdtemp(prefix="cri_tablet_events_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        event_path = Path(temp_dir) / "tablet_events.jsonl"
+        app.TABLET_EVENTS_LOG_PATH = str(event_path)
+        event_path.write_text(
+            "\n".join([
+                json.dumps({
+                    "type": "shown",
+                    "session_id": "session-test",
+                    "child_id": "1001",
+                    "server_wall_time": 62.4,
+                    "category": "hobby",
+                    "memory_item": "Hobby's",
+                    "screen": "category",
+                    "phase": 6,
+                }),
+                json.dumps({
+                    "type": "shown",
+                    "session_id": "other-session",
+                    "child_id": "1001",
+                    "server_wall_time": 90.0,
+                    "category": "school",
+                }),
+                json.dumps({
+                    "type": "tablet_display_changed",
+                    "session_id": "session-test",
+                    "child_id": "1001",
+                    "server_wall_time": 125.0,
+                    "field": "hobby_fav",
+                    "old_value": "padel",
+                    "new_value": "gamen",
+                }),
+            ]),
+            encoding="utf-8",
+        )
+        log = {
+            "session_id": "session-test",
+            "child_id": "1001",
+            "child_label": "N_1001",
+            "tutorial_condition": "E",
+            "started_at": 0.0,
+            "started_wall_time": "1970-01-01T00:00:00+00:00",
+            "events": [],
+        }
+
+        omr_log = app.conv_log.build_omr_log(log)
+        tablet_events = omr_log["tablet_events"]
+
+        self.assertIn({
+            "type": "shown",
+            "timestamp": "01:02",
+            "memory_item": "Hobby's",
+            "category": "hobby",
+            "screen": "category",
+            "phase": 6,
+        }, tablet_events)
+        self.assertIn({
+            "type": "tablet_display_changed",
+            "timestamp": "02:05",
+            "field": "hobby_fav",
+            "old_value": "padel",
+            "new_value": "gamen",
+        }, tablet_events)
+        self.assertNotIn("school", json.dumps(tablet_events))
 
     def test_conversation_log_write_error_does_not_crash_dialogue(self):
         app = make_app()

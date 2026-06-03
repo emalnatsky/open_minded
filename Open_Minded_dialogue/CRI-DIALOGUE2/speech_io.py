@@ -30,6 +30,7 @@ class SpeechIO:
         nao=None,
         whisper=None,
         use_desktop_mic: bool = False,
+        use_nao_output: bool = None,
         simulation_mode: bool = False,
         use_keyboard_input_fn=None,
         stt_timeout: int = 20,
@@ -44,7 +45,8 @@ class SpeechIO:
         Args:
             nao:                          SIC NAO device handle (or None for desktop mode)
             whisper:                      SIC Whisper handle (or None for keyboard mode)
-            use_desktop_mic:              True → skip NAO, print Leo's lines to terminal
+            use_desktop_mic:              True -> Whisper input comes from desktop/laptop/DJI mic
+            use_nao_output:               True -> Leo speaks through NAO TTS and uses NAO LEDs
             simulation_mode:              True → use simulated child responses
             use_keyboard_input_fn:        callable() → bool, returns True when in keyboard mode
             stt_timeout:                  seconds Whisper waits for any speech
@@ -58,6 +60,7 @@ class SpeechIO:
         self.nao = nao
         self.whisper = whisper
         self.use_desktop_mic = use_desktop_mic
+        self.use_nao_output = bool(nao) and not use_desktop_mic if use_nao_output is None else bool(use_nao_output)
         self.simulation_mode = simulation_mode
         self._use_keyboard_input = use_keyboard_input_fn or (lambda: False)
         self.stt_timeout = stt_timeout
@@ -80,7 +83,7 @@ class SpeechIO:
         if self.simulation_mode:
             self._simulated_history.append({"speaker": "LEO", "text": text})
         self._log_event("utterance", speaker="LEO", text=text)
-        if self.simulation_mode or self.use_desktop_mic:
+        if self.simulation_mode or not self.use_nao_output or not self.nao:
             print(f"\n[LEO]: {text}\n")
         else:
             from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
@@ -163,7 +166,7 @@ class SpeechIO:
 
     def _set_eyes(self, color: str):
         """Change NAO eye LED color. Silently ignored in desktop/simulation mode."""
-        if not self.nao or self.use_desktop_mic or self.simulation_mode:
+        if not self.nao or not self.use_nao_output or self.simulation_mode:
             return
         try:
             from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest

@@ -21,6 +21,34 @@ window.liveUM = {};
 let liveUM = window.liveUM;
 let currentCategory = null;
 let currentScreen = "welcome";
+let currentChildId = "";
+let currentSessionId = "";
+let currentPhase = null;
+let tabletEventSessionStarted = false;
+const TABLET_EVENT_URL = `${window.location.protocol}//${window.location.hostname}:8081/tablet-event`;
+
+function logTabletEvent(type, extra = {}) {
+  if (!type) return;
+  const payload = {
+    type,
+    session_id: currentSessionId || "",
+    child_id: currentChildId || "",
+    phase: currentPhase,
+    screen: currentScreen,
+    client_wall_time: Date.now() / 1000,
+    ...extra,
+  };
+  try {
+    fetch(TABLET_EVENT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {
+    // Logging must never interrupt the tablet UI.
+  }
+}
 
 // ── Phase-gated category locking ─────────────────────────────────────
 // Set by the dialogue via session_state.json → um_update broadcast.
@@ -29,14 +57,18 @@ let currentScreen = "welcome";
 let unlockedCategories = new Set();
 let memoryAccessActive = false;
 let visibleFields = new Set();
+let lastMemoryAccessPromptId = null;
 let currentMistakes = {};
+let lastTabletRevealId = null;
+let pendingTabletReveal = null;
+let lastTabletCommandId = null;
+const TABLET_REVEAL_MAX_AGE_SECONDS = 30;
 
 function shouldShowFieldInMemoryAccess(field) {
   return !memoryAccessActive || visibleFields.has(field);
 }
 
 function unresolvedMistakeForField(field) {
-  if (!memoryAccessActive) return null;
   for (const mistake of Object.values(currentMistakes || {})) {
     if (!mistake || mistake.corrected) continue;
     if (mistake.field === field && mistake.wrong) return mistake;
@@ -52,6 +84,12 @@ function displayValueForField(field, meta) {
 
 function hasDisplayValue(value) {
   return value && value !== "\u2014" && value !== "â€”";
+}
+
+function pendingRevealForField(field) {
+  if (!pendingTabletReveal || pendingTabletReveal.field !== field) return null;
+  if (!hasDisplayValue(pendingTabletReveal.old_value) || !hasDisplayValue(pendingTabletReveal.new_value)) return null;
+  return pendingTabletReveal;
 }
 
 function isCategoryUnlocked(catKey) {
@@ -191,11 +229,19 @@ function fieldValue(field, value) {
 // SCREEN NAVIGATION
 // =====================================================================
 function showScreen(name) {
+  const previousScreen = currentScreen;
+  const previousCategory = currentCategory;
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   const target = document.getElementById("screen-" + name);
   if (!target) return;
   target.classList.add("active");
   currentScreen = name;
+  if (previousScreen === "category" && name !== "category" && previousCategory) {
+    logTabletEvent("hidden", {
+      category: previousCategory,
+      memory_item: CATEGORIES[previousCategory] ? CATEGORIES[previousCategory].label : previousCategory,
+    });
+  }
 
   // Trigger TOC book entrance animation
   if (name === "toc") {
@@ -249,6 +295,8 @@ function buildTOC() {
       <span class="toc-page">p.${i + 1}</span>
     `;
     li.addEventListener("click", () => {
+      const locked = !isCategoryUnlocked(key);
+      logTabletEvent("item_tap", { category: key, memory_item: cat.label, locked });
       if (!isCategoryUnlocked(key)) return;  // locked — ignore tap
       openCategory(key);
     });
@@ -262,6 +310,13 @@ function buildTOC() {
 function openCategory(catKey) {
   const cat = CATEGORIES[catKey];
   if (!cat) return;
+  const previousCategory = currentCategory;
+  if (currentScreen === "category" && previousCategory && previousCategory !== catKey) {
+    logTabletEvent("hidden", {
+      category: previousCategory,
+      memory_item: CATEGORIES[previousCategory] ? CATEGORIES[previousCategory].label : previousCategory,
+    });
+  }
   currentCategory = catKey;
 
   // Update header
@@ -288,6 +343,7 @@ function openCategory(catKey) {
   renderPills(catKey, /*initial*/ true);
 
   showScreen("category");
+  logTabletEvent("shown", { category: catKey, memory_item: cat.label });
 }
 
 function renderPills(catKey, initial) {
@@ -332,7 +388,49 @@ function buildPill(field, value, color) {
     <span class="pill-label">${fieldLabel(field)}</span>
     <span class="pill-value">${escapeHTML(fieldValue(field, value))}</span>
   `;
+  pill.addEventListener("click", () => {
+    logTabletEvent("item_tap", {
+      field,
+      memory_item: fieldLabel(field),
+      category: currentCategory,
+    });
+  });
   return pill;
+}
+
+function runTabletReveal(reveal) {
+  if (!reveal || reveal.id === undefined || reveal.id === lastTabletRevealId) return false;
+
+  const field = reveal.field;
+  const catKey = reveal.category;
+  const oldValue = reveal.old_value;
+  const newValue = reveal.new_value;
+  const createdAt = Number(reveal.created_at || 0);
+  const cat = CATEGORIES[catKey];
+  if (!field || !catKey || !cat || !createdAt || !hasDisplayValue(oldValue) || !hasDisplayValue(newValue)) return false;
+  if ((Date.now() / 1000) - createdAt > TABLET_REVEAL_MAX_AGE_SECONDS) return false;
+
+  lastTabletRevealId = reveal.id;
+  pendingTabletReveal = null;
+
+  if (!liveUM[catKey]) liveUM[catKey] = {};
+  liveUM[catKey][field] = { value: oldValue, updated: false };
+
+  openCategory(catKey);
+
+  setTimeout(() => {
+    liveUM[catKey][field] = { value: newValue, updated: true };
+    applyDiffToOpenCategory(catKey, [{ field, oldValue, newValue }]);
+    logTabletEvent("tablet_display_changed", {
+      field,
+      category: catKey,
+      memory_item: fieldLabel(field),
+      old_value: oldValue,
+      new_value: newValue,
+    });
+  }, 700);
+
+  return true;
 }
 
 // =====================================================================
@@ -387,6 +485,18 @@ function applyDiffToOpenCategory(catKey, changedFields) {
   }, 2700);
 }
 
+function runTabletCommand(command) {
+  if (!command || command.id === undefined || command.id === lastTabletCommandId) return false;
+  lastTabletCommandId = command.id;
+
+  if (command.type === "memory_access_home") {
+    showScreen("welcome");
+    return true;
+  }
+
+  return false;
+}
+
 // =====================================================================
 // handleUMUpdate — CRITICAL: signature & socket contract unchanged
 // =====================================================================
@@ -394,9 +504,32 @@ function handleUMUpdate(data) {
   console.log("handleUMUpdate called with", Object.keys(data.fields || {}).length, "fields");
   const fields    = data.fields    || {};
   const timestamp = data.timestamp || "";
+  const previousUnlockedCategories = new Set(unlockedCategories);
+  const previousMemoryAccessActive = memoryAccessActive;
+  const previousVisibleFieldsKey = [...visibleFields].sort().join("|");
+  const incomingMemoryAccessPromptId = data.memory_access_prompt_id || null;
+  currentChildId = data.child_id || currentChildId;
+  currentSessionId = data.session_id || currentSessionId;
+  currentPhase = data.current_phase || currentPhase;
+  if (!tabletEventSessionStarted && currentSessionId) {
+    tabletEventSessionStarted = true;
+    logTabletEvent("session_start");
+  }
   memoryAccessActive = Boolean(data.memory_access_active);
   visibleFields = new Set(Array.isArray(data.visible_fields) ? data.visible_fields : []);
   currentMistakes = data.mistakes || {};
+  pendingTabletReveal = data.tablet_reveal_pending || null;
+  const isNewMemoryAccessPrompt =
+    memoryAccessActive &&
+    incomingMemoryAccessPromptId &&
+    incomingMemoryAccessPromptId !== lastMemoryAccessPromptId;
+  if (incomingMemoryAccessPromptId) {
+    lastMemoryAccessPromptId = incomingMemoryAccessPromptId;
+  }
+  const currentVisibleFieldsKey = [...visibleFields].sort().join("|");
+  const memoryAccessShapeChanged =
+    previousMemoryAccessActive !== memoryAccessActive ||
+    previousVisibleFieldsKey !== currentVisibleFieldsKey;
 
   // Update child name on the closed book cover (Screen 1)
   if (data.child_name) setChildName(data.child_name);
@@ -404,32 +537,50 @@ function handleUMUpdate(data) {
   // Update phase-gated locking
   if (Array.isArray(data.unlocked_categories)) {
     unlockedCategories = new Set(data.unlocked_categories);
+    data.unlocked_categories.forEach(catKey => {
+      if (!previousUnlockedCategories.has(catKey)) {
+        logTabletEvent("category_unlocked", {
+          category: catKey,
+          memory_item: CATEGORIES[catKey] ? CATEGORIES[catKey].label : catKey,
+        });
+      }
+    });
     applyLocking();
   }
+
+  runTabletCommand(data.tablet_command);
 
   // Group by category & detect per-field changes vs. prior liveUM
   const grouped = {};
   const diffsByCategory = {}; // { catKey: [{field, oldValue, newValue}, ...] }
+  const instantUpdatesByCategory = {}; // category changed without eraser animation
 
   Object.entries(fields).forEach(([field, meta]) => {
     if (!shouldShowFieldInMemoryAccess(field)) return;
 
     const rawCat = meta.category || "";
     const catKey = mapCategory(rawCat);
+    const unresolvedMistake = unresolvedMistakeForField(field);
+    const pendingReveal = pendingRevealForField(field);
 
     if (!grouped[catKey]) grouped[catKey] = {};
     if (!diffsByCategory[catKey]) diffsByCategory[catKey] = [];
 
     const prevMeta  = liveUM[catKey] && liveUM[catKey][field];
     const prevValue = prevMeta ? prevMeta.value : null;
-    const newValue  = displayValueForField(field, meta);
+    const newValue  = pendingReveal ? pendingReveal.old_value : displayValueForField(field, meta);
 
     grouped[catKey][field] = {
       value:   newValue,
       updated: prevValue !== null && prevValue !== newValue && hasDisplayValue(newValue),
     };
 
-    if (prevValue !== newValue) {
+    if (pendingReveal) {
+      return;
+    }
+    if (prevValue !== newValue && unresolvedMistake) {
+      instantUpdatesByCategory[catKey] = true;
+    } else if (prevValue !== newValue) {
       diffsByCategory[catKey].push({ field, oldValue: prevValue, newValue });
     }
   });
@@ -439,18 +590,28 @@ function handleUMUpdate(data) {
   Object.keys(liveUM).forEach(catKey => delete liveUM[catKey]);
   Object.assign(liveUM, grouped);
 
+  if (isNewMemoryAccessPrompt) {
+    showScreen("welcome");
+  }
+
   // Connection / status indicator
   setConn("connected", "Live ✓ " + (timestamp || ""));
 
+  if (runTabletReveal(data.tablet_reveal)) {
+    return;
+  }
+
   // If a category screen is open, apply per-field eraser/write diffs
   if (currentScreen === "category" && currentCategory) {
-    if (memoryAccessActive) {
+    if (memoryAccessShapeChanged) {
       renderPills(currentCategory, true);
       return;
     }
     const diffs = diffsByCategory[currentCategory] || [];
     if (diffs.length > 0) {
       applyDiffToOpenCategory(currentCategory, diffs);
+    } else if (instantUpdatesByCategory[currentCategory]) {
+      renderPills(currentCategory, true);
     } else {
       // No diffs for current category, but ensure pills exist (first poll)
       const panel = document.getElementById("pillsContainer");
@@ -537,6 +698,11 @@ function fitToViewport() {
 }
 window.addEventListener("resize", fitToViewport);
 window.addEventListener("orientationchange", fitToViewport);
+window.addEventListener("beforeunload", () => {
+  if (tabletEventSessionStarted) {
+    logTabletEvent("session_end");
+  }
+});
 
 // =====================================================================
 // Init

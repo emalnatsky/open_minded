@@ -288,6 +288,11 @@ def log_interaction_event(
     event_type: str,
     mistake_id: str | None,
     field: str | None,
+    outcome: str | None,
+    real_value: str | None,
+    mistake_value: str | None,
+    leo_memory_key: str | None,
+    leo_memory_value: str | None,
     wrong_value: str | None,
     child_response: str | None,
     corrected: bool,
@@ -315,6 +320,16 @@ def log_interaction_event(
         triples += f'    <{evt_uri}> um:mistakeId "{_escape_sparql_string(mistake_id)}" .\n'
     if field:
         triples += f'    <{evt_uri}> um:field "{_escape_sparql_string(field)}" .\n'
+    if outcome:
+        triples += f'    <{evt_uri}> um:mistakeOutcome "{_escape_sparql_string(outcome)}" .\n'
+    if real_value:
+        triples += f'    <{evt_uri}> um:realValue "{_escape_sparql_string(real_value)}" .\n'
+    if mistake_value:
+        triples += f'    <{evt_uri}> um:mistakeValue "{_escape_sparql_string(mistake_value)}" .\n'
+    if leo_memory_key:
+        triples += f'    <{evt_uri}> um:leoMemoryKey "{_escape_sparql_string(leo_memory_key)}" .\n'
+    if leo_memory_value:
+        triples += f'    <{evt_uri}> um:leoMemoryValue "{_escape_sparql_string(leo_memory_value)}" .\n'
     if wrong_value:
         triples += f'    <{evt_uri}> um:wrongValue "{_escape_sparql_string(wrong_value)}" .\n'
     if child_response:
@@ -334,8 +349,8 @@ def get_interaction_events(child_id: str) -> list[dict]:
     scen_uri = _scenario_uri(child_id)
     r = sparql_query(f"""
     {_PREFIXES}
-    SELECT ?eventType ?mistakeId ?field ?wrongValue ?childResponse
-           ?corrected ?phase ?step ?timestamp ?sessionId
+    SELECT ?eventType ?mistakeId ?field ?outcome ?realValue ?mistakeValue ?leoMemoryKey ?leoMemoryValue
+           ?wrongValue ?childResponse ?corrected ?phase ?step ?timestamp ?sessionId
     WHERE {{
         <{scen_uri}> um:hasEvent ?evt .
         ?evt um:eventType ?eventType ;
@@ -343,6 +358,11 @@ def get_interaction_events(child_id: str) -> list[dict]:
              um:eventTimestamp ?timestamp .
         OPTIONAL {{ ?evt um:mistakeId ?mistakeId }}
         OPTIONAL {{ ?evt um:field ?field }}
+        OPTIONAL {{ ?evt um:mistakeOutcome ?outcome }}
+        OPTIONAL {{ ?evt um:realValue ?realValue }}
+        OPTIONAL {{ ?evt um:mistakeValue ?mistakeValue }}
+        OPTIONAL {{ ?evt um:leoMemoryKey ?leoMemoryKey }}
+        OPTIONAL {{ ?evt um:leoMemoryValue ?leoMemoryValue }}
         OPTIONAL {{ ?evt um:wrongValue ?wrongValue }}
         OPTIONAL {{ ?evt um:childResponse ?childResponse }}
         OPTIONAL {{ ?evt um:phase ?phase }}
@@ -357,6 +377,11 @@ def get_interaction_events(child_id: str) -> list[dict]:
             "event_type":     b["eventType"]["value"],
             "mistake_id":     b.get("mistakeId", {}).get("value"),
             "field":          b.get("field", {}).get("value"),
+            "outcome":        b.get("outcome", {}).get("value"),
+            "real_value":     b.get("realValue", {}).get("value"),
+            "mistake_value":  b.get("mistakeValue", {}).get("value"),
+            "leo_memory_key": b.get("leoMemoryKey", {}).get("value"),
+            "leo_memory_value": b.get("leoMemoryValue", {}).get("value"),
             "wrong_value":    b.get("wrongValue", {}).get("value"),
             "child_response": b.get("childResponse", {}).get("value"),
             "corrected":      b["corrected"]["value"] == "true",

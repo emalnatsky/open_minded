@@ -11,6 +11,7 @@ userId('3'). % Participant id
 localVariable(first_name_cri, "Unika"). % First name at session start
 localVariable(first_name_tablet, "Eunike"). % Child name displayed on tablet, set at session start
 localVariable(operator_name, "Julianna"). % Researcher name, set at session start
+localVariable(nao_ip, "10.0.0.241"). % NAOs IP address, set at session start
 
 %%% Session settings		    %%%
 multiSessionDesignId(open_minded_memory). % Experimental: open_minded_memory | Control: open_minded_control

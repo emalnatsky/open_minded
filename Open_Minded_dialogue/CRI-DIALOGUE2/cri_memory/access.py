@@ -29,6 +29,8 @@ register_mentioned_memory_fields (called when Leo finishes a turn).
 
 import logging
 
+from tablet_state import FIELD_TO_CATEGORY
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +69,24 @@ class MemoryAccess:
             if self.is_child_facing_memory_field(field)
         ]
 
+    def chapter_fields_for(self, fields) -> list:
+        """Expand mentioned fields to all public UM fields in those tablet chapters."""
+        categories = []
+        uncategorized = []
+        for field in self.public_memory_fields(fields):
+            category = FIELD_TO_CATEGORY.get(field)
+            if not category:
+                if field not in uncategorized:
+                    uncategorized.append(field)
+            elif category not in categories:
+                categories.append(category)
+
+        expanded = [
+            field for field in self.d.UM_FIELDS
+            if FIELD_TO_CATEGORY.get(field) in categories
+        ]
+        return self.public_memory_fields(uncategorized + expanded)
+
     # ── phase-scoped sets ────────────────────────────────────────────────────
 
     def current_phase_memory_fields(self, turn: dict) -> list:
@@ -78,7 +98,7 @@ class MemoryAccess:
         if turn.get("mistake_field"):
             fields.append(turn["mistake_field"])
 
-        return self.child_facing_memory_fields(fields)
+        return self.public_memory_fields(fields)
 
     def register_mentioned_memory_fields(self, turn: dict):
         """Remember which UM fields Leo has already brought into this conversation."""
@@ -91,10 +111,10 @@ class MemoryAccess:
             mentioned.add(field)
 
     def memory_access_scope(self, turn: dict) -> list:
-        """Memory Leo may reveal now: previous mentions plus current phase fields."""
+        """Memory Leo may reveal now, expanded to whole mentioned tablet chapters."""
         mentioned = getattr(self.d, "memory_fields_mentioned_so_far", set())
         fields = list(mentioned) + self.current_phase_memory_fields(turn)
-        return self.child_facing_memory_fields(fields)
+        return self.chapter_fields_for(fields)
 
     # ── response generation ──────────────────────────────────────────────────
 
@@ -206,7 +226,9 @@ class MemoryAccess:
         aspiration = value("aspiration")
         if interest:
             future_bits.append(f"je interesse hebt in {interest}")
-        if role_model:
+        if role_model and not self.d.um.is_meaningful_role_model(role_model):
+            future_bits.append("je niet echt een vaste persoon hebt naar wie je opkijkt")
+        elif role_model:
             future_bits.append(f"{role_model} iemand is naar wie je opkijkt")
         if aspiration:
             profession = aspiration[:-len("worden")].strip() if aspiration.lower().endswith("worden") else aspiration
@@ -235,13 +257,6 @@ class MemoryAccess:
         scope = self.memory_access_scope(turn)
         requested_field = getattr(result, "field", None)
 
-        if requested_field and requested_field in scope:
-            value = self.d.memory_value(requested_field)
-            returned = [requested_field] if self.d.is_known(value) else []
-            if returned:
-                return f"Ik weet dat {self.d.field_label(requested_field)} {value} is.", scope, returned
-            return f"Over {self.d.field_label(requested_field)} weet ik nu nog niets zeker.", scope, returned
-
         summary = self.memory_review_text(scope)
         if requested_field and requested_field not in scope:
             if summary:
@@ -259,6 +274,6 @@ class MemoryAccess:
                 field for field in scope
                 if self.d.is_known(self.d.memory_value(field))
             ]
-            return f"Ik heb vandaag al gebruikt: {summary}", scope, returned
+            return summary, scope, returned
 
         return "Ik heb vandaag nog niet zoveel uit mijn geheugen genoemd.", scope, []

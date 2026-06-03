@@ -6,9 +6,11 @@ import copy
 import unicodedata
 import logging
 import re
+import socket
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from sic_framework.core import sic_logging
@@ -26,8 +28,9 @@ from cri_script import ContentPlan, Segments, ScriptBuilder
 
 from sic_framework.devices import Nao
 from sic_framework.devices.common_naoqi.naoqi_autonomous import (
-    NaoRestRequest,
     NaoWakeUpRequest,
+    NaoRestRequest,
+    NaoSetAutonomousLifeRequest,
 )
 from sic_framework.services.openai_whisper_stt.whisper_stt import (
     SICWhisper,
@@ -75,6 +78,8 @@ class CRI_ScriptedDialogue(SICApplication):
     UNKNOWN_VALUE  = config.UNKNOWN_VALUE
     UM_FIELDS      = config.UM_FIELDS
     SCRIPT_TABLE_FIELDS = config.SCRIPT_TABLE_FIELDS
+    STARTUP_OVERVIEW_UM_FIELDS = config.STARTUP_OVERVIEW_UM_FIELDS
+    STARTUP_OVERVIEW_SCENARIO_FIELDS = config.STARTUP_OVERVIEW_SCENARIO_FIELDS
     FIELD_LABELS   = config.FIELD_LABELS
 
     STT_TIMEOUT      = config.STT_TIMEOUT
@@ -90,6 +95,8 @@ class CRI_ScriptedDialogue(SICApplication):
     CONDITION_CONTROL             = config.CONDITION_CONTROL
     CONDITION_EXPERIMENT          = config.CONDITION_EXPERIMENT
     CONDITION_LABELS              = config.CONDITION_LABELS
+    CONDITION_ALIASES             = config.CONDITION_ALIASES
+    TABLET_REVEAL_WAIT_SECONDS    = config.TABLET_REVEAL_WAIT_SECONDS
     MEMORY_ACCESS_EXCLUDED_FIELDS = config.MEMORY_ACCESS_EXCLUDED_FIELDS
     OPPOSITE_VALUE_FALLBACKS      = config.OPPOSITE_VALUE_FALLBACKS
 
@@ -104,7 +111,7 @@ class CRI_ScriptedDialogue(SICApplication):
     SCENARIO_UTTERANCE_ALIASES = config.SCENARIO_UTTERANCE_ALIASES
 
     USE_DESKTOP_MIC               = config.USE_DESKTOP_MIC
-    CONNECT_NAO = config.CONNECT_NAO
+    CONNECT_NAO                   = config.CONNECT_NAO
     ASK_RUN_MODE_AT_START         = config.ASK_RUN_MODE_AT_START
     SIMULATION_MODE               = config.SIMULATION_MODE
     SIMULATED_PERSONA_DIR         = config.SIMULATED_PERSONA_DIR
@@ -126,7 +133,7 @@ class CRI_ScriptedDialogue(SICApplication):
     CONVERSATION_LOG_ENABLED = config.CONVERSATION_LOG_ENABLED
     CONVERSATION_LOG_ROOT    = config.CONVERSATION_LOG_ROOT
 
-    def __init__(self, openai_env_path=None, nao_ip="10.0.0.241"):
+    def __init__(self, openai_env_path=None, nao_ip="192.168.1.2"):
         super(CRI_ScriptedDialogue, self).__init__()
         self.nao_ip = nao_ip
         self.openai_env_path = openai_env_path
@@ -166,6 +173,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.memory_review_requested = False
         self.last_cri_scenario = {}
         self.last_cri_scenario_loaded = False
+        self.pregenerated_rewrite_cache = {}
 
         # Conversation logger — reads/writes the logging state above.
         # Methods in this class delegate to self.conv_log.X.
@@ -218,6 +226,7 @@ class CRI_ScriptedDialogue(SICApplication):
             get_child_name_fn=lambda: getattr(self, "local_child_name_cri", "") or getattr(self, "local_child_name", "") or self.CHILD_ID,
             get_tablet_name_fn=lambda: getattr(self, "local_child_name_tablet", "") or getattr(self, "local_child_name", "") or self.CHILD_ID,
             get_condition_fn=lambda: getattr(self, "local_condition", ""),
+            get_session_id_fn=lambda: self.current_session_id(),
             get_mistake_states_fn=lambda: getattr(self, "mistake_states", {}) or {},
             enabled=True,
         )
@@ -226,6 +235,51 @@ class CRI_ScriptedDialogue(SICApplication):
         self.configure_session_interface()
         self.configure_run_mode()
         self.setup()
+
+    def normalize_network_host(self, value):
+        clean = str(value or "").strip()
+        if "://" in clean:
+            parsed = urlparse(clean)
+            clean = parsed.hostname or clean
+        return clean.strip().strip("/")
+
+    def local_ip_for_target(self, target_ip):
+        target_ip = self.normalize_network_host(target_ip)
+        if not target_ip:
+            return ""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect((target_ip, 9559))
+            return sock.getsockname()[0]
+        except OSError:
+            return ""
+        finally:
+            sock.close()
+
+    def configure_sic_db_ip_for_nao(self):
+        target_ip = self.normalize_network_host(self.nao_ip)
+        if target_ip:
+            self.nao_ip = target_ip
+
+        local_ip = self.local_ip_for_target(self.nao_ip)
+        if not local_ip:
+            self.logger.warning(
+                "Could not determine local IP for NAO %s; keeping SIC Redis DB_IP=%s.",
+                self.nao_ip,
+                os.environ.get("DB_IP", ""),
+            )
+            return
+
+        previous = os.environ.get("DB_IP", "")
+        os.environ["DB_IP"] = local_ip
+        if previous != local_ip:
+            self.logger.info(
+                "Setting SIC Redis DB_IP to %s for NAO route to %s.",
+                local_ip,
+                self.nao_ip,
+            )
+        else:
+            self.logger.info("SIC Redis DB_IP already set to %s.", local_ip)
 
     # Setup
 
@@ -393,8 +447,8 @@ class CRI_ScriptedDialogue(SICApplication):
 
     # --- ActionHandler (cri_actions/handler.py) -------------------------------
 
-    def classify_with_repeat(self, transcript):
-        return self.actions.classify_with_repeat(transcript)
+    def classify_with_repeat(self, transcript, turn_context=None):
+        return self.actions.classify_with_repeat(transcript, turn_context)
 
     def llm_response(self, child_input, turn=None):
         return self.actions.llm_response(child_input, turn)
@@ -461,6 +515,166 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def mark_current_mistake_corrected(self):
         return self.nudge.mark_current_mistake_corrected()
+
+    def current_session_id(self):
+        log = getattr(self, "conversation_log", None) or {}
+        return log.get("session_id") or "unknown"
+
+    def current_mistake_memory_value(self, field: str, corrected: bool, mistake_value: str = "") -> str:
+        if corrected and field:
+            return self.known(self.last_um_preview, field, "") or mistake_value
+        return mistake_value
+
+    def mistake_memory_key(self, mistake_id: str, outcome: str, field: str, leo_memory_value: str = "") -> str:
+        if outcome != "not_corrected":
+            return ""
+        if not (mistake_id and field and self.is_known(leo_memory_value)):
+            return ""
+        return f"{mistake_id}_mistake_not_corrected_{field}"
+
+    def m3_school_difficulty_resolution_pending(self, state: dict) -> bool:
+        return bool(state.get("m3_requires_school_difficulty_resolution"))
+
+    def mistake_outcome_payload(self, turn: dict) -> dict:
+        mistake_id = turn.get("mistake_id")
+        state = (self.mistake_states or {}).get(mistake_id, {}) if mistake_id else {}
+        corrected = bool(state.get("corrected"))
+        rejected_without_value = bool(state.get("wrong_value_rejected")) and not corrected
+        if corrected:
+            outcome = "corrected"
+        elif state.get("m3_not_corrected_by_difficulty_change"):
+            outcome = "not_corrected"
+        elif rejected_without_value:
+            outcome = "rejected_unresolved"
+        elif mistake_id == "M3" and self.m3_school_difficulty_resolution_pending(state):
+            outcome = "unresolved"
+        else:
+            outcome = "not_corrected"
+        event_type = f"mistake_{outcome}"
+        field = turn.get("mistake_field") or state.get("field")
+        real_value = turn.get("mistake_actual") or state.get("actual")
+        mistake_value = turn.get("mistake_wrong") or state.get("wrong")
+        leo_memory_value = (
+            None
+            if outcome in ("rejected_unresolved", "unresolved")
+            else self.current_mistake_memory_value(field, corrected, mistake_value)
+        )
+        leo_memory_key = self.mistake_memory_key(mistake_id, outcome, field, leo_memory_value)
+        return {
+            "event_type": event_type,
+            "mistake_id": mistake_id,
+            "field": field,
+            "outcome": outcome,
+            "real_value": real_value,
+            "mistake_value": mistake_value,
+            "wrong_value": mistake_value,
+            "leo_memory_key": leo_memory_key,
+            "leo_memory_value": leo_memory_value,
+            "corrected": corrected,
+            "phase": turn.get("phase_id") or str(self.turn_phase(turn) or ""),
+            "step": self.turn_phase(turn),
+            "session_id": self.current_session_id(),
+        }
+
+    def record_mistake_outcome(self, turn: dict):
+        mistake_id = turn.get("mistake_id")
+        if not mistake_id:
+            return
+        state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
+        if state.get("outcome_logged"):
+            return
+        payload = self.mistake_outcome_payload(turn)
+        state["outcome"] = payload.get("outcome")
+        state["real_value"] = payload.get("real_value")
+        state["mistake_value"] = payload.get("mistake_value")
+        state["leo_memory_key"] = payload.get("leo_memory_key")
+        state["leo_memory_value"] = payload.get("leo_memory_value")
+        state["outcome_logged"] = True
+        log_payload = dict(payload)
+        log_payload["logged_event_type"] = log_payload.pop("event_type", None)
+        self.log_conversation_event("mistake_outcome", **log_payload)
+        self.log_cri_interaction_event(payload)
+
+    def m3_school_difficulty_resolution_context(self, turn: dict) -> bool:
+        return bool(
+            (turn or {}).get("m3_school_difficulty_resolution")
+            and (turn or {}).get("mistake_id") == "M3"
+        )
+
+    def mark_m3_corrected_by_school_difficulty_ack(self, turn: dict):
+        if not self.m3_school_difficulty_resolution_context(turn):
+            return
+        mistake_id = turn.get("mistake_id")
+        state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
+        if state.get("m3_not_corrected_by_difficulty_change"):
+            return
+        state["corrected"] = True
+        state["corrected_at_phase"] = self.turn_phase(turn)
+        state["corrected_by_school_difficulty_ack"] = True
+
+    def handle_confirmed_mistake_related_change(self, change: dict, turn: dict = None) -> bool:
+        context = turn or self.current_turn_context or {}
+        mistake_id = context.get("mistake_id") or change.get("visible_mistake_id")
+        if not mistake_id:
+            return False
+
+        state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
+        field = change.get("field")
+        mistake_field = context.get("mistake_field") or change.get("visible_mistake_field")
+        if field == mistake_field:
+            if context.get("mistake_id"):
+                self.mark_current_mistake_corrected()
+            else:
+                state["corrected"] = True
+                state["corrected_at_phase"] = self.turn_phase(context)
+            return True
+
+        if (
+            self.m3_school_difficulty_resolution_context(context)
+            and field == "school_difficulty"
+            and self.is_known(change.get("new_value"))
+            and self.is_known(context.get("mistake_wrong"))
+            and not self.actions.field_values_match("school_difficulty", change.get("new_value"), context.get("mistake_wrong"))
+        ):
+            state["m3_not_corrected_by_difficulty_change"] = True
+            state["school_difficulty_changed_from"] = change.get("old_value")
+            state["school_difficulty_changed_to"] = change.get("new_value")
+        return False
+
+    def visible_mistake_state_for_field(self, field: str, turn: dict = None) -> dict:
+        """Return the unresolved mistake whose wrong value is child-visible for a field."""
+        if not field:
+            return {}
+        turn = turn or {}
+        mistake_id = turn.get("mistake_id")
+        if turn.get("mistake_field") == field and self.is_known(turn.get("mistake_wrong")):
+            state = (self.mistake_states or {}).get(mistake_id, {}) if mistake_id else {}
+            if not state.get("corrected"):
+                visible = dict(state)
+                visible.setdefault("id", mistake_id)
+                visible.setdefault("field", field)
+                visible.setdefault("actual", turn.get("mistake_actual"))
+                visible.setdefault("wrong", turn.get("mistake_wrong"))
+                return visible
+
+        for state_id, state in (self.mistake_states or {}).items():
+            if state.get("field") != field:
+                continue
+            if not state.get("mentioned") or state.get("corrected"):
+                continue
+            if not self.is_known(state.get("wrong")):
+                continue
+            visible = dict(state)
+            visible.setdefault("id", state_id)
+            return visible
+        return {}
+
+    def visible_memory_value(self, field: str, turn: dict = None) -> str:
+        """Memory value as the child currently sees/hears it, including active mistakes."""
+        visible_mistake = self.visible_mistake_state_for_field(field, turn)
+        if visible_mistake and self.is_known(visible_mistake.get("wrong")):
+            return str(visible_mistake["wrong"])
+        return self.memory_value(field)
 
     def mistake_field_label(self, turn):
         return self.nudge.mistake_field_label(turn)
@@ -574,6 +788,7 @@ class CRI_ScriptedDialogue(SICApplication):
             self.load_simulated_persona()
             self.CHILD_ID = str(self.simulated_persona.get("child_id", self.CHILD_ID))
             self.USE_DESKTOP_MIC = True
+            self.CONNECT_NAO = False
             self.clf = StubIntentClassifier(valid_fields=list(self.UM_FIELDS))
             self.logger.info(
                 "Simulation mode enabled with fake persona %s (child=%s).",
@@ -589,16 +804,25 @@ class CRI_ScriptedDialogue(SICApplication):
                 openai_key=os.environ["OPENAI_API_KEY"],
                 valid_fields=list(self.UM_FIELDS),
             )
-            self.logger.info("GPTIntentClassifier ready.")
+            self.logger.info("GPTIntentClassifier ready (%s).", self.clf.__class__.__module__)
         except Exception as e:
             self.logger.warning("GPTIntentClassifier failed (%s) - using stub.", e)
             self.clf = StubIntentClassifier(valid_fields=list(self.UM_FIELDS))
 
         self.logger.info("UM: LIVE - %s, child=%s", self.UM_API_BASE, self.CHILD_ID)
         self.logger.info("Child input mode: %s", self.child_input_mode)
+        self.logger.info("NAO connected for output: %s", bool(self.CONNECT_NAO))
+        self.logger.info(
+            "Whisper input source: %s",
+            "desktop/laptop/DJI microphone" if self.USE_DESKTOP_MIC else "NAO microphone",
+        )
+
+        if not self.USE_DESKTOP_MIC and not self.CONNECT_NAO:
+            raise RuntimeError("NAO microphone selected, but CONNECT_NAO is False.")
 
         # NAO
         if self.CONNECT_NAO:
+            self.configure_sic_db_ip_for_nao()
             self.logger.info("Connecting to NAO at %s...", self.nao_ip)
             self.nao = Nao(ip=self.nao_ip)
             self.logger.info("NAO connected.")
@@ -633,7 +857,8 @@ class CRI_ScriptedDialogue(SICApplication):
         self.speech = SpeechIO(
             nao=self.nao,
             whisper=self.whisper,
-            use_desktop_mic=not self.CONNECT_NAO,
+            use_desktop_mic=self.USE_DESKTOP_MIC,
+            use_nao_output=self.CONNECT_NAO,
             simulation_mode=self.simulation_mode,
             use_keyboard_input_fn=self.use_keyboard_input,
             stt_timeout=self.STT_TIMEOUT,
@@ -828,6 +1053,12 @@ class CRI_ScriptedDialogue(SICApplication):
     def write_um_change(self, change):
         return self.um.write_um_change(change)
 
+    def write_pet_pair_change(self, change):
+        return self.um.write_pet_pair_change(change)
+
+    def log_cri_interaction_event(self, payload):
+        return self.um.log_cri_interaction_event(payload)
+
     def pull_cri_scenario(self):
         return self.um.pull_cri_scenario()
 
@@ -938,6 +1169,152 @@ class CRI_ScriptedDialogue(SICApplication):
             self.logger.error("Could not generate opposite memory value: %s", e)
 
         return fallback
+
+    def rewrite_value_map(self, input_fields: list, values_override: dict = None) -> dict:
+        values = {}
+        for field in input_fields or []:
+            value = (values_override or {}).get(field)
+            if not self.is_known(value):
+                value = (self.last_um_preview or {}).get(field)
+            if self.is_known(value):
+                values[field] = str(value).strip()
+        return values
+
+    def validate_rewritten_pregenerated_utterance(self, text: str, values: dict, original_text: str = "") -> str:
+        candidate = str(text or "").strip().strip('"').strip("'")
+        candidate = re.sub(r"^(?:leo|antwoord|output)\s*:\s*", "", candidate, flags=re.IGNORECASE).strip()
+        if not candidate:
+            return ""
+        candidate = re.sub(r"\s+", " ", candidate)
+        if len(candidate.split()) > 45:
+            return ""
+
+        lowered = candidate.casefold()
+        for field, value in (values or {}).items():
+            value_clean = str(value or "").strip()
+            if not value_clean:
+                continue
+            if value_clean.casefold() not in lowered:
+                return ""
+
+        pet_type = str((values or {}).get("pet_type") or "").strip().casefold()
+        if pet_type:
+            stale_pet_words = ("vis", "hond", "poes", "kat", "konijn", "hamster", "vogel", "schildpad")
+            original_lower = str(original_text or "").casefold()
+            for word in stale_pet_words:
+                if word != pet_type and word in original_lower and word in lowered:
+                    return ""
+
+        return candidate
+
+    def rewrite_stale_pregenerated_utterance(
+        self,
+        original_text: str,
+        fallback: str,
+        input_fields: list = None,
+        values_override: dict = None,
+        key: str = "",
+        purpose: str = "",
+    ) -> str:
+        """Rewrite stale topic-sensitive scenario text with live UM values."""
+        fallback_text = self.render_template_text(fallback, {})
+        values = self.rewrite_value_map(input_fields or [], values_override or {})
+        if not values:
+            return fallback_text
+
+        cache_key = (
+            str(key or ""),
+            str(purpose or ""),
+            str(original_text or ""),
+            tuple(sorted(values.items())),
+        )
+        cache = getattr(self, "pregenerated_rewrite_cache", None)
+        if cache is None:
+            self.pregenerated_rewrite_cache = {}
+            cache = self.pregenerated_rewrite_cache
+        if cache_key in cache:
+            return cache[cache_key]
+
+        final_text = fallback_text
+        raw_output = ""
+        used_fallback = True
+        validation = "fallback_before_model"
+
+        prompt = {
+            "task": (
+                "Rewrite this stale Dutch CRI scenario line so Leo says the same kind of line, "
+                "but with the live UM values. Keep the original intent and style. "
+                "Only replace the outdated memory reference."
+            ),
+            "purpose": purpose or "topic_sensitive",
+            "original_scenario_line": original_text,
+            "live_um_values": values,
+            "fallback_if_needed": fallback_text,
+            "rules": [
+                "Return plain Dutch text only.",
+                "Do not add labels, quotes, markdown, or explanation.",
+                "Mention every live UM value exactly enough that the sentence is no longer stale.",
+                "Do not mention the outdated value from the original line.",
+                "Keep it child-friendly and short.",
+                "Use one sentence for an open line; a short question is allowed for a follow-up line.",
+            ],
+        }
+        user_prompt = json.dumps(prompt, ensure_ascii=False)
+
+        try:
+            if self.gpt is not None:
+                request = GPTRequest(
+                    prompt=(
+                        "You rewrite one Dutch child-robot dialogue sentence.\n"
+                        "Return only the rewritten sentence.\n\n"
+                        f"{user_prompt}"
+                    ),
+                    stream=False,
+                )
+                response = self.gpt.request(request)
+                raw_output = response.response.strip() if response and response.response else ""
+            elif self.openai_client is not None:
+                response = self.openai_client.chat.completions.create(
+                    model=self.TOPIC_CHANGE_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You rewrite one Dutch child-robot dialogue sentence. "
+                                "Return only the rewritten sentence."
+                            ),
+                        },
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=100,
+                    temperature=0.2,
+                )
+                raw_output = response.choices[0].message.content.strip()
+
+            candidate = self.validate_rewritten_pregenerated_utterance(raw_output, values, original_text)
+            if candidate:
+                final_text = candidate
+                used_fallback = False
+                validation = "ok"
+            else:
+                validation = "invalid_or_empty_model_output" if raw_output else "no_model_available"
+        except Exception as e:
+            validation = f"exception:{e}"
+            self.logger.error("Could not rewrite stale pregenerated utterance: %s", e)
+
+        cache[cache_key] = final_text
+        self.log_conversation_event(
+            "l3_script_rewrite",
+            key=key,
+            purpose=purpose,
+            original_text=original_text,
+            live_um_values=values,
+            raw_output=raw_output,
+            final_output=final_text,
+            used_fallback=used_fallback,
+            validation=validation,
+        )
+        return final_text
 
     def split_memory_values(self, value: str) -> list:
         """Split simple comma/and-separated UM strings into speakable values."""
@@ -1112,7 +1489,10 @@ class CRI_ScriptedDialogue(SICApplication):
     def tutorial_memory_line(self, condition: str) -> str:
         condition = self.normalize_condition_value(condition, default=self.CONDITION_CONTROL)
         if condition == self.CONDITION_EXPERIMENT:
-            return "Dan kan je jouw geheugenboek op de tablet bekijken om te zien waar we het over gehad hebben."
+            return (
+                "Dan kan je jouw geheugenboek op de tablet bekijken om te zien waar we het over gehad hebben. "
+                "Je kan op het geheugenboek tikken en daarna op de categorieen tikken om erdoorheen te bladeren."
+            )
         return "Dan herhaal ik waar we het over gehad hebben."
 
     def greeting_text(self, um: dict) -> str:
@@ -1572,6 +1952,44 @@ class CRI_ScriptedDialogue(SICApplication):
         ("boeken", ("p1_books_open", "p1_books_ack", "p1_books_followup")),
     )
 
+    PART1_GENERIC_TOPIC_METADATA = (
+        ("topic_1", ("p1_t1_recall", "p1_t1_open", "p1_t1_question", "p1_t1_followup")),
+        ("topic_2", ("p1_t2_recall", "p1_t2_open", "p1_t2_followup", "p1_t2_close")),
+    )
+
+    def scenario_step_text(self, step_id: str) -> str:
+        branches = (self.cri_scenario().get("utterances") or {}).get(step_id)
+        if not isinstance(branches, dict) or not branches:
+            return ""
+        for branch in ("default", "corrected", "not_corrected"):
+            value = branches.get(branch)
+            if self.is_known(value):
+                return str(value).strip()
+        for value in branches.values():
+            if self.is_known(value):
+                return str(value).strip()
+        return ""
+
+    def normalize_scenario_topic_domain(self, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        normalized = normalized.replace("-", "_").replace(" ", "_")
+        aliases = {
+            "sport": "sport",
+            "sports": "sport",
+            "muziek": "muziek",
+            "music": "muziek",
+            "huisdier": "huisdier",
+            "huisdieren": "huisdier",
+            "dieren": "huisdier",
+            "animal": "huisdier",
+            "animals": "huisdier",
+            "boeken": "boeken",
+            "boek": "boeken",
+            "books": "boeken",
+            "book": "boeken",
+        }
+        return aliases.get(normalized, "")
+
     def part1_scenario_topic_domains(self) -> list:
         """Infer Part 1 topic order from authored CRI scenario utterance IDs."""
         utterances = self.cri_scenario().get("utterances") or {}
@@ -1579,9 +1997,16 @@ class CRI_ScriptedDialogue(SICApplication):
             return []
         present = set(str(step_id) for step_id in utterances)
         domains = []
+        for metadata_key, generic_steps in self.PART1_GENERIC_TOPIC_METADATA:
+            if metadata_key not in present and not any(step_id in present for step_id in generic_steps):
+                continue
+            domain = self.normalize_scenario_topic_domain(self.scenario_step_text(metadata_key))
+            if domain and domain not in domains:
+                domains.append(domain)
         for domain, step_ids in self.PART1_SCENARIO_TOPIC_STEPS:
             if any(step_id in present for step_id in step_ids):
-                domains.append(domain)
+                if domain not in domains:
+                    domains.append(domain)
         return domains
 
     def part1_topic_candidate_for_domain(self, um: dict, domain: str) -> dict:
@@ -1740,6 +2165,9 @@ class CRI_ScriptedDialogue(SICApplication):
     def topic2_phase_segments(self, topic):
         return self.segments.topic2_phase_segments(topic)
 
+    def subject_phase_segments(self, topic):
+        return self.script.subject_phase_segments(self.last_um_preview, topic)
+
     # --- ContentPlan (cri_script/content_plan.py) -----------------------------
 
     def turn_text(self, turn):
@@ -1760,8 +2188,21 @@ class CRI_ScriptedDialogue(SICApplication):
     def render_template_text(self, template, values=None):
         return self.cp.render_template_text(template, values)
 
-    def pregenerated_utterance(self, key, fallback=""):
-        return self.cp.pregenerated_utterance(key, fallback)
+    def pregenerated_utterance(
+        self,
+        key,
+        fallback="",
+        branch="default",
+        input_fields=None,
+        require_input_values=False,
+    ):
+        return self.cp.pregenerated_utterance(
+            key,
+            fallback,
+            branch,
+            input_fields,
+            require_input_values,
+        )
 
     def render_content_plan(self, plan, turn=None):
         return self.cp.render_content_plan(plan, turn)
@@ -1772,8 +2213,33 @@ class CRI_ScriptedDialogue(SICApplication):
     def l2_slot(self, template, values=None, wrong=False):
         return self.cp.l2_slot(template, values, wrong)
 
-    def l2_pregen(self, key, fallback, input_fields=None, require_input_values=False):
-        return self.cp.l2_pregen(key, fallback, input_fields, require_input_values)
+    def l2_pregen(
+        self,
+        key,
+        fallback,
+        input_fields=None,
+        require_input_values=False,
+        branch="default",
+        topic_sensitive=False,
+        rewrite_when_stale=False,
+        rewrite_purpose="",
+        fit_validator="",
+        fit_values=None,
+        rewrite_values=None,
+    ):
+        return self.cp.l2_pregen(
+            key,
+            fallback,
+            input_fields,
+            require_input_values,
+            branch,
+            topic_sensitive,
+            rewrite_when_stale,
+            rewrite_purpose,
+            fit_validator,
+            fit_values,
+            rewrite_values,
+        )
 
     def sequence(self, *parts):
         return self.cp.sequence(*parts)
@@ -1878,6 +2344,137 @@ class CRI_ScriptedDialogue(SICApplication):
             ]
             print("  " + " | ".join(clipped[i].ljust(widths[i]) for i in range(len(widths))))
 
+    def retrieval_value(self, value, missing_label="<empty / unknown>") -> str:
+        return str(value).strip() if self.is_known(value) else missing_label
+
+    def db_um_retrieval_rows(self, um: dict) -> list:
+        profile = um or {}
+        return [
+            {
+                "field": field,
+                "value": self.retrieval_value(profile.get(field)),
+            }
+            for field in self.STARTUP_OVERVIEW_UM_FIELDS
+        ]
+
+    def preferred_scenario_step_id(self, key: str, utterances: dict = None) -> str:
+        candidates = self.um.scenario_keys_for(key)
+        if not candidates:
+            return str(key or "").strip()
+        utterances = utterances or {}
+        for candidate in candidates:
+            if candidate in utterances:
+                return candidate
+        return candidates[1] if len(candidates) > 1 else candidates[0]
+
+    def add_scenario_expectation(self, rows: list, seen: set, step_id: str, branch: str):
+        step_id = str(step_id or "").strip()
+        branch = str(branch or "default").strip() or "default"
+        if not step_id:
+            return
+        key = (step_id, branch)
+        if key in seen:
+            return
+        rows.append({"step_id": step_id, "branch": branch})
+        seen.add(key)
+
+    def collect_scenario_expectations_from_plan(
+        self,
+        plan,
+        rows: list,
+        seen: set,
+        utterances: dict,
+    ):
+        if isinstance(plan, list):
+            for part in plan:
+                self.collect_scenario_expectations_from_plan(part, rows, seen, utterances)
+            return
+        if not isinstance(plan, dict):
+            return
+
+        if plan.get("type") == self.CASE_LLM_PREGENERATED:
+            step_id = self.preferred_scenario_step_id(plan.get("key"), utterances)
+            self.add_scenario_expectation(rows, seen, step_id, plan.get("branch", "default"))
+
+        if plan.get("type") == self.CONTENT_PLAN_SEQUENCE:
+            for part in plan.get("parts") or []:
+                self.collect_scenario_expectations_from_plan(part, rows, seen, utterances)
+
+    def scenario_expectation_rows_from_script(self, script: list) -> list:
+        scenario = getattr(self, "last_cri_scenario", {}) or {}
+        utterances = scenario.get("utterances") or {}
+        rows = []
+        seen = set()
+        for turn in script or []:
+            self.collect_scenario_expectations_from_plan(
+                turn.get("content_plan"),
+                rows,
+                seen,
+                utterances,
+            )
+            for segment in turn.get("segments") or []:
+                self.collect_scenario_expectations_from_plan(
+                    segment.get("content_plan"),
+                    rows,
+                    seen,
+                    utterances,
+                )
+        return rows
+
+    def scenario_branch_order(self, branch: str):
+        order = {"default": 0, "not_corrected": 1, "corrected": 2}
+        return (order.get(str(branch), 99), str(branch))
+
+    def db_scenario_retrieval_rows(self, script: list) -> list:
+        scenario = getattr(self, "last_cri_scenario", {}) or {}
+        utterances = scenario.get("utterances") or {}
+
+        result = []
+        for step_id, branch in self.STARTUP_OVERVIEW_SCENARIO_FIELDS:
+            branches = utterances.get(step_id) or {}
+            if isinstance(branches, dict) and branch in branches:
+                value = self.retrieval_value(branches.get(branch))
+            elif branch != "default" and isinstance(branches, dict) and "default" in branches:
+                value = f"<stored as default> {self.retrieval_value(branches.get('default'))}"
+            elif isinstance(branches, dict) and branches:
+                branch_names = ", ".join(sorted(str(name) for name in branches))
+                value = f"<stored as other branch: {branch_names}>"
+            else:
+                value = "<missing>"
+            result.append({"step_id": step_id, "branch": branch, "value": value})
+        return result
+
+    def print_table_rows(self, headers: tuple, widths: list, rows: list):
+        print("  " + " | ".join(header.ljust(widths[i]) for i, header in enumerate(headers)))
+        print("  " + "-+-".join("-" * width for width in widths))
+        for row in rows:
+            clipped = [
+                (str(value)[:width - 3] + "...") if len(str(value)) > width else str(value)
+                for value, width in zip(row, widths)
+            ]
+            print("  " + " | ".join(clipped[i].ljust(widths[i]) for i in range(len(widths))))
+
+    def print_db_retrieval_overview(self, script: list, um: dict):
+        print("\nDB RETRIEVAL OVERVIEW")
+
+        print("\nUM fields:")
+        self.print_table_rows(
+            ("field", "value from DB"),
+            [24, 48],
+            [(row["field"], row["value"]) for row in self.db_um_retrieval_rows(um)],
+        )
+
+        print("\nCRI scenario lines:")
+        scenario_rows = self.db_scenario_retrieval_rows(script)
+        if not scenario_rows:
+            print("  <no CRI scenario lines expected or retrieved>")
+            return
+        self.print_table_rows(
+            ("step_id", "value from DB"),
+            [34, 64],
+            [(row["step_id"], row["value"]) for row in scenario_rows],
+        )
+
     def print_cri_scenario_summary(self):
         scenario = getattr(self, "last_cri_scenario", {}) or {}
         mistakes = scenario.get("mistakes") or []
@@ -1904,7 +2501,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 print(f"    ... plus {len(step_ids) - 12} more")
 
     def print_prestart_preview(self, script: list):
-        """Print the walkthrough memory table before interaction starts."""
+        """Print raw UM and CRI scenario retrieval before interaction starts."""
         if not self.WAIT_FOR_PREVIEW_CONFIRMATION:
             return
 
@@ -1916,6 +2513,8 @@ class CRI_ScriptedDialogue(SICApplication):
         else:
             print("Mode:     real microphone/NAO stack")
         print(f"Input:    {self.child_input_mode}")
+        print(f"Mic:      {'desktop/laptop/DJI' if self.USE_DESKTOP_MIC else 'NAO'}")
+        print(f"NAO:      {'connected' if self.CONNECT_NAO else 'not connected'}")
         print(f"Child id: {self.CHILD_ID}")
         print(f"Child:    {self.child_display_name(self.last_um_preview)}")
         print(f"Researcher: {self.researcher_name or '(not set)'}")
@@ -1925,8 +2524,7 @@ class CRI_ScriptedDialogue(SICApplication):
             print(f"Restored mentioned memory fields: {len(self.memory_fields_mentioned_so_far)}")
         print(f"UM API:   {self.UM_API_BASE}")
 
-        self.print_cri_scenario_summary()
-        self.print_script_memory_table(self.script_memory_table(script, self.last_um_preview))
+        self.print_db_retrieval_overview(script, self.last_um_preview)
 
         print("=" * 72)
         input("Press Enter to start the interaction...")
@@ -1945,16 +2543,60 @@ class CRI_ScriptedDialogue(SICApplication):
             return any(segment.get("expects_response", True) for segment in turn["segments"])
         return turn.get("expects_response", True)
 
+    def phase_display_label(self, turn: dict) -> str:
+        part = turn.get("part") or 1
+        phase = self.turn_phase(turn)
+        phase_id = str(turn.get("phase_id") or "").strip()
+        if "." in phase_id:
+            part_text, phase_text = phase_id.split(".", 1)
+            part = part_text.strip() or part
+            phase = phase_text.strip() or phase
+        name = turn.get("name") or ""
+        return f"Part {part} phase {phase}: {name}"
+
+    def phase_finished_label(self, turn: dict) -> str:
+        label = self.phase_display_label(turn)
+        if ":" in label:
+            prefix, name = label.split(":", 1)
+            return f"{prefix} finished:{name}"
+        return f"{label} finished"
+
+    def reset_phase_attempt_state(self, turn: dict) -> None:
+        """Clear per-attempt flags before a tester repeats a phase."""
+        phase = self.turn_phase(turn)
+        self.phases_with_confirmed_change.discard(phase)
+        self.phases_with_confirmed_change.discard(turn.get("phase"))
+        mistake_id = turn.get("mistake_id")
+        if mistake_id:
+            self.mistake_states.pop(mistake_id, None)
+        self.rebuild_phase_segments_for_repeat(turn)
+
+    def rebuild_phase_segments_for_repeat(self, turn: dict) -> None:
+        """Rebuild repeated topic phases from live UM/topic values."""
+        topic = turn.get("topic")
+        if not isinstance(topic, dict):
+            return
+        phase = self.turn_phase(turn)
+        if phase == 5:
+            turn["segments"] = self.topic1_phase_segments(topic)
+        elif phase == 7:
+            turn["segments"] = self.topic2_phase_segments(topic)
+        elif phase == 12:
+            turn["segments"] = self.subject_phase_segments(topic)
+
+    def print_phase_start_banner(self, turn: dict):
+        print("\n" + "=" * 72)
+        print(self.phase_display_label(turn))
+        print("=" * 72)
+
     def post_phase_control(self, turn: dict) -> str:
         """Testing checkpoint after a full phase finishes."""
         if not self.POST_PHASE_TEST_CONTROLS:
             return "continue"
-        if not self.phase_expects_response(turn):
-            return "continue"
 
         while True:
             print("\n" + "=" * 72)
-            print(f"Phase {self.turn_phase(turn)} finished: {turn.get('name')}")
+            print(self.phase_finished_label(turn))
             choice = input("Press Enter for next phase, T + Enter to repeat this phase, or Q + Enter to quit: ")
             choice = choice.strip().lower()
             print("=" * 72)
@@ -1971,31 +2613,165 @@ class CRI_ScriptedDialogue(SICApplication):
 
             print("Please press Enter, or type T to repeat, or Q to quit.")
 
-    def memory_access_interrupt_control(self, action: dict) -> str:
-        """Testing checkpoint after memory access, then resume the same phase."""
+    def memory_access_change_context(self, action: dict, source_turn: dict) -> dict:
+        fields = list(dict.fromkeys(action.get("visible_fields") or action.get("memory_scope") or []))
+        field_labels = {field: self.field_label(field) for field in fields}
+        current_values = {field: self.visible_memory_value(field, source_turn) for field in fields}
+        stored_values = {field: self.memory_value(field) for field in fields}
+        visible_mistakes = {}
+        for field in fields:
+            mistake = self.visible_mistake_state_for_field(field, source_turn)
+            if mistake:
+                visible_mistakes[field] = mistake
+        return {
+            "phase": self.turn_phase(source_turn),
+            "phase_id": source_turn.get("phase_id"),
+            "name": source_turn.get("name", "Memory access"),
+            "response_mode": "memory_access_change",
+            "allow_memory_change": True,
+            "memory_correction_requested": True,
+            "memory_review_fields": fields,
+            "topic": {
+                "fields": fields,
+                "field_labels": field_labels,
+                "current_values": current_values,
+                "stored_values": stored_values,
+                "visible_mistakes": visible_mistakes,
+            },
+            "used_fields": {},
+        }
+
+    def memory_access_change_control(self, action: dict, source_turn: dict) -> dict:
+        fields = list(dict.fromkeys(action.get("visible_fields") or action.get("memory_scope") or []))
+        if not fields:
+            response = "Ik weet nog niet genoeg om iets te veranderen."
+            self.speech.say(response)
+            return self.action_result(
+                "memory_access_change_no_visible_fields",
+                True,
+                "Researcher requested memory change, but no visible memory fields were available.",
+                leo_response=response,
+            )
+
+        prompt = "Wat wil je veranderen?"
+        self.speech.say(prompt)
+        change_context = self.memory_access_change_context(action, source_turn)
+        self.current_turn_context = change_context
+
+        transcript = self.speech.listen_with_review()
+        result = self.classify_with_repeat(transcript, change_context)
+        change_action = self.action_handler(result, transcript, change_context)
+        self.log_action_handler_result(change_action)
+        self.current_turn_context = source_turn
+
+        if not change_action.get("handled"):
+            response = (
+                "Ik weet nog niet goed wat ik moet veranderen. "
+                "Zeg bijvoorbeeld: verander mijn lievelingssport naar hockey."
+            )
+            self.speech.say(response)
+            change_action = self.action_result(
+                "memory_access_change_unclear",
+                True,
+                "Child wanted to change visible memory, but no clear UM change was extracted.",
+                leo_response=response,
+            )
+        return change_action
+
+    def memory_access_interrupt_control(self, action: dict) -> dict:
+        """Researcher checkpoint after memory access, then resume the same phase."""
         if not self.POST_PHASE_TEST_CONTROLS:
-            return "continue"
+            return self.action_result(
+                "memory_access_continue",
+                True,
+                "Memory access completed; continue the current phase.",
+            )
 
         leo_response = action.get("leo_response") or ""
+        source_turn = self.current_turn_context or {}
+        pending_resume_action = None
         while True:
             print("\n" + "=" * 72)
-            choice = input("Memory shown. Press Enter to continue this phase, or M + Enter to repeat memory: ")
+            choice = input(
+                "Memory access. Press Enter to continue, C + Enter to change something, "
+                "or M + Enter to repeat memory instructions: "
+            )
             choice = choice.strip().lower()
             print("=" * 72)
 
             if choice == "":
                 self.log_conversation_event("tester_control", action="continue_after_memory_access")
-                return "continue"
+                return pending_resume_action or self.action_result(
+                    "memory_access_continue",
+                    True,
+                    "Memory access completed without a confirmed memory change.",
+                )
+            if choice in ("c", "change", "change memory", "verander", "wijzig"):
+                self.log_conversation_event("tester_control", action="memory_access_change")
+                change_action = self.memory_access_change_control(action, source_turn)
+                if change_action.get("change_confirmed") and change_action.get("change"):
+                    pending_resume_action = dict(change_action)
+                    pending_resume_action["action"] = "memory_access_change_confirmed"
+                    pending_resume_action["memory_access_change_confirmed"] = True
+                    pending_resume_action["stop_phase_after_change"] = False
+                continue
             if choice in ("m", "memory", "repeat", "r"):
                 self.log_conversation_event("tester_control", action="repeat_memory_access")
                 if leo_response:
                     self.speech.say(leo_response)
                 continue
 
-            print("Please press Enter to continue, or type M to repeat the memory answer.")
+            print("Please press Enter to continue, C to change something, or M to repeat memory.")
 
     def is_memory_access_action(self, action: dict) -> bool:
         return action.get("action") in ("memory_access", "memory_access_tablet")
+
+    def should_reroute_after_memory_change(self, action: dict) -> bool:
+        return bool(action and action.get("memory_access_change_confirmed") and action.get("change"))
+
+    def apply_memory_access_change_to_phase(self, phase: dict, action: dict) -> None:
+        change = action.get("change") or {}
+        field = change.get("field")
+        new_value = change.get("new_value")
+        if not (field and self.is_known(new_value)):
+            return
+
+        def update_used_fields(container: dict) -> None:
+            used_fields = container.get("used_fields")
+            if isinstance(used_fields, dict) and field in used_fields:
+                used_fields[field] = new_value
+
+        update_used_fields(phase)
+        for segment in phase.get("segments") or []:
+            update_used_fields(segment)
+
+        for topic_key in ("topic", "mistake_topic"):
+            topic = phase.get(topic_key)
+            if not isinstance(topic, dict):
+                continue
+            current_values = topic.get("current_values")
+            if isinstance(current_values, dict) and field in current_values:
+                current_values[field] = new_value
+            if field in self.topic_label_fields_for_domain(topic.get("domain")):
+                topic["label"] = new_value
+
+        if phase.get("mistake_field") == field:
+            phase["mistake_actual"] = new_value
+            state = self.mistake_states.get(phase.get("mistake_id"))
+            if state is not None:
+                state["actual"] = new_value
+                state["corrected_value"] = new_value
+
+        topic = phase.get("topic")
+        if isinstance(topic, dict) and field in (topic.get("fields") or []):
+            action["continue_phase_after_change"] = True
+            action["stop_phase_after_change"] = False
+        elif (phase.get("phase_id") == "3.3" or self.turn_phase(phase) == 16) and field == "role_model":
+            action["continue_phase_after_change"] = True
+            action["stop_phase_after_change"] = False
+        else:
+            action["continue_phase_after_change"] = False
+            action["stop_phase_after_change"] = False
 
     def should_skip_phase(self, turn: dict) -> bool:
         condition = turn.get("condition")
@@ -2006,6 +2782,148 @@ class CRI_ScriptedDialogue(SICApplication):
         if condition == "run_if_memory_review_requested":
             return not getattr(self, "memory_review_requested", False)
         return False
+
+    def topic_label_fields_for_domain(self, domain: str) -> tuple:
+        return {
+            "sport": ("sports_fav_play",),
+            "boeken": ("books_fav_title",),
+            "muziek": ("music_enjoys",),
+            "huisdier": ("pet_name", "animal_fav", "pet_type"),
+            "hobby": ("hobby_fav", "hobbies", "freetime_fav"),
+            "school_subject": ("fav_subject",),
+        }.get(domain, ())
+
+    def refresh_topic_after_change(self, turn: dict, action: dict):
+        if not action or not action.get("continue_phase_after_change"):
+            return
+        phase = self.turn_phase(turn)
+        change = action.get("change") or {}
+        changes = change.get("changes") if change.get("action") == "multi_update" else [change]
+        changed_fields = {
+            single_change.get("field")
+            for single_change in changes or []
+            if single_change.get("field")
+        }
+
+        if (phase == 16 or turn.get("phase_id") == "3.3") and "role_model" in changed_fields:
+            local_um = dict(self.last_um_preview or {})
+            role_model = ""
+            for single_change in changes or []:
+                if single_change.get("field") == "role_model" and self.is_known(single_change.get("new_value")):
+                    role_model = single_change.get("new_value")
+                    local_um["role_model"] = role_model
+                    break
+            if not self.is_known(role_model):
+                role_model = self.known(local_um, "role_model")
+            if self.is_known(role_model):
+                turn["used_fields"] = {"role_model": role_model}
+                replacement = self.script.role_model_rapport_segments(local_um, post_correction=True)
+                current_segment = (self.current_turn_context or {}).get("segment") or 0
+                existing_segments = turn.get("segments") or []
+                prefix = existing_segments[:current_segment] if current_segment else []
+                turn["segments"] = prefix + replacement if prefix and replacement else replacement
+            return
+
+        phase_id = str(turn.get("phase_id") or "")
+        if (phase == 17 or phase_id in {"3.4", "3.5", "3.4/5"}) and "aspiration" in changed_fields:
+            local_um = dict(self.last_um_preview or {})
+            aspiration = ""
+            for single_change in changes or []:
+                if single_change.get("field") == "aspiration" and self.is_known(single_change.get("new_value")):
+                    aspiration = single_change.get("new_value")
+                    local_um["aspiration"] = aspiration
+                    break
+                if (
+                    single_change.get("field") == "aspiration"
+                    and (
+                        single_change.get("sets_unknown_value")
+                        or str(single_change.get("new_value") or "").strip().lower() == self.UNKNOWN_VALUE
+                    )
+                ):
+                    turn["mistake_actual"] = self.UNKNOWN_VALUE
+                    if isinstance(turn.get("used_fields"), dict):
+                        turn["used_fields"]["aspiration"] = self.UNKNOWN_VALUE
+                    topic = turn.get("mistake_topic")
+                    if isinstance(topic, dict):
+                        topic.setdefault("current_values", {})["aspiration"] = self.UNKNOWN_VALUE
+                        topic["label"] = "dat je nog niet weet wat je later wilt worden"
+                        topic["memory_link"] = "dat je nog niet weet wat je later wilt worden"
+                    replacement = self.script.aspiration_unknown_segments(condition_phase=17)
+                    current_segment = (self.current_turn_context or {}).get("segment") or 0
+                    existing_segments = turn.get("segments") or []
+                    prefix = existing_segments[:current_segment] if current_segment else []
+                    turn["segments"] = prefix + replacement if prefix and replacement else replacement
+                    return
+            if not self.is_known(aspiration):
+                aspiration = self.known(local_um, "aspiration")
+            if self.is_known(aspiration):
+                actual = self.script.aspiration_later_phrase(aspiration)
+                turn["mistake_actual"] = actual
+                if isinstance(turn.get("used_fields"), dict):
+                    turn["used_fields"]["aspiration"] = actual
+                topic = turn.get("mistake_topic")
+                if isinstance(topic, dict):
+                    topic.setdefault("current_values", {})["aspiration"] = actual
+                    topic["label"] = actual
+                    topic["memory_link"] = f"je later {actual} wilt"
+                replacement = self.script.aspiration_postcorrection_segments(local_um, condition_phase=17)
+                current_segment = (self.current_turn_context or {}).get("segment") or 0
+                existing_segments = turn.get("segments") or []
+                prefix = existing_segments[:current_segment] if current_segment else []
+                turn["segments"] = prefix + replacement if prefix and replacement else replacement
+            return
+
+        topic = turn.get("topic")
+        if not isinstance(topic, dict):
+            return
+
+        if action.get("topic_neutral_after_correction"):
+            topic["neutral_after_correction"] = True
+        else:
+            change = action.get("change") or {}
+            changes = change.get("changes") if change.get("action") == "multi_update" else [change]
+            for single_change in changes or []:
+                field = single_change.get("field")
+                new_value = single_change.get("new_value")
+                if not (field and self.is_known(new_value)):
+                    continue
+                current_values = topic.setdefault("current_values", {})
+                current_values[field] = new_value
+                if isinstance(turn.get("used_fields"), dict) and field in turn["used_fields"]:
+                    turn["used_fields"][field] = new_value
+                if field in self.topic_label_fields_for_domain(topic.get("domain")):
+                    topic["label"] = new_value
+
+        pet_topic_change = (
+            phase == 7
+            and topic.get("domain") == "huisdier"
+            and changed_fields.intersection({"pet_type", "pet_name"})
+        )
+        turn["force_topic_fallback"] = not pet_topic_change
+
+        if pet_topic_change:
+            rebuilt = self.topic2_phase_segments(topic)
+            corrected_followup = next(
+                (
+                    segment for segment in rebuilt
+                    if segment.get("expects_response")
+                    and segment.get("response_mode") == "listen_only"
+                    and {"pet_type", "pet_name"}.intersection((segment.get("used_fields") or {}).keys())
+                ),
+                None,
+            )
+            close_segment = rebuilt[-1] if rebuilt else None
+            current_segment = (self.current_turn_context or {}).get("segment") or 0
+            existing_segments = turn.get("segments") or []
+            prefix = existing_segments[:current_segment] if current_segment else []
+            replacement = [segment for segment in (corrected_followup, close_segment) if segment]
+            turn["segments"] = prefix + replacement if prefix and replacement else rebuilt
+        elif phase == 5:
+            turn["segments"] = self.topic1_phase_segments(topic)
+        elif phase == 7:
+            turn["segments"] = self.topic2_phase_segments(topic)
+        elif phase == 12:
+            turn["segments"] = self.subject_phase_segments(topic)
 
     def segment_context(self, phase: dict, segment: dict, segment_index: int = None) -> dict:
         context = dict(phase)
@@ -2025,26 +2943,72 @@ class CRI_ScriptedDialogue(SICApplication):
                     context["next_script_line"] = self.turn_text(next_context)
         return context
 
+    def should_run_segment(self, phase: dict, segment: dict) -> bool:
+        condition = segment.get("condition")
+        if condition == "run_if_memory_review_requested" and not getattr(self, "memory_review_requested", False):
+            return False
+        condition_phase = segment.get("condition_phase", self.turn_phase(phase))
+        if segment.get("run_if_phase_confirmed_change") and condition_phase not in self.phases_with_confirmed_change:
+            return False
+        if segment.get("skip_if_phase_confirmed_change") and condition_phase in self.phases_with_confirmed_change:
+            return False
+        return True
+
+    def memory_access_resume_contexts(self, phase: dict, context: dict) -> list:
+        segments = phase.get("segments") or []
+        segment_index = context.get("segment")
+        if not segments or not segment_index:
+            return [context]
+
+        current_idx = max(0, min(int(segment_index) - 1, len(segments) - 1))
+        start_idx = current_idx
+        while start_idx > 0:
+            previous = segments[start_idx - 1]
+            if previous.get("expects_response", True):
+                break
+            start_idx -= 1
+
+        replay = []
+        for idx in range(start_idx, current_idx + 1):
+            segment = segments[idx]
+            if self.should_run_segment(phase, segment):
+                replay.append(self.segment_context(phase, segment, idx + 1))
+        return replay or [context]
+
+    def replay_after_memory_access(self, phase: dict, context: dict) -> None:
+        for replay_context in self.memory_access_resume_contexts(phase, context):
+            self.speech.say(self.turn_text(replay_context))
+            self.register_mentioned_memory_fields(replay_context)
+
     def run_phase_segment(self, phase: dict, segment: dict, segment_index: int = None):
         context = self.segment_context(phase, segment, segment_index)
         self.current_turn_context = context
 
-        condition_phase = segment.get("condition_phase", self.turn_phase(phase))
-        if segment.get("run_if_phase_confirmed_change") and condition_phase not in self.phases_with_confirmed_change:
+        if not self.should_run_segment(phase, segment):
             return
-        if segment.get("skip_if_phase_confirmed_change") and condition_phase in self.phases_with_confirmed_change:
-            return
+
+        runtime_memory_review_fields = None
+        if context.get("memory_review_from_access_scope"):
+            runtime_memory_review_fields = list(self.memory_access_scope(context))
+            context["memory_review_fields"] = runtime_memory_review_fields
+            context["spoken_fields"] = runtime_memory_review_fields
 
         if context.get("activate_tablet_memory_access"):
             fields = context.get("memory_review_fields") or self.memory_access_scope(context)
             self.actions.activate_tablet_memory_access(fields, context)
 
         self.speech.say(self.turn_text(context))
+        if context.get("speak_memory_review_from_access_scope"):
+            for line in self.memory_review_lines(runtime_memory_review_fields or context.get("memory_review_fields") or []):
+                self.speech.say(line)
         self.register_mentioned_memory_fields(context)
+        tablet_update = getattr(self.tablet_state, "update", None)
+        if callable(tablet_update):
+            tablet_update(context)
 
         if not context.get("expects_response", True):
             self.logger.info("No child response expected for this phase segment.")
-            return
+            return None
 
         shutdown_event = getattr(self, "shutdown_event", None)
         while not (shutdown_event and shutdown_event.is_set()):
@@ -2052,28 +3016,36 @@ class CRI_ScriptedDialogue(SICApplication):
             transcript = self.speech.listen_with_review()
             time.sleep(0.8)
 
-            result = self.classify_with_repeat(transcript)
+            result = self.classify_with_repeat(transcript, context)
             action = self.action_handler(result, transcript, context)
             self.log_action_handler_result(action)
 
             if self.is_memory_access_action(action):
-                self.memory_access_interrupt_control(action)
-                self.speech.say(self.turn_text(context))
+                memory_action = self.memory_access_interrupt_control(action)
+                self.current_turn_context = context
+                if self.should_reroute_after_memory_change(memory_action):
+                    self.apply_memory_access_change_to_phase(phase, memory_action)
+                    return memory_action
+                self.replay_after_memory_access(phase, context)
                 continue
 
             if action.get("follow_up_needed"):
-                self.follow_up_action_handler(context)
-                return
+                return self.follow_up_action_handler(context)
 
             if not action.get("handled"):
                 if context.get("llm_turn") and transcript:
                     self.speech.say(self.llm_response(transcript, context))
                 else:
                     self.speech.say(context.get("follow_up", ""))
-            return
+            return action
 
     def run_phase(self, turn: dict, phase_index: int, total_phases: int):
         self.current_turn_context = turn
+        if turn.get("mistake_id"):
+            self.mistakes_mentioned += 1
+            self.register_mistake_phase(turn)
+
+        self.print_phase_start_banner(turn)
         self.start_turn_log(turn)
         try:
             self.logger.info(
@@ -2085,8 +3057,6 @@ class CRI_ScriptedDialogue(SICApplication):
             )
 
             if turn.get("mistake_id"):
-                self.mistakes_mentioned += 1
-                self.register_mistake_phase(turn)
                 self.logger.info(
                     "Mistake %s mentioned; count is now %d.",
                     turn["mistake_id"],
@@ -2095,14 +3065,25 @@ class CRI_ScriptedDialogue(SICApplication):
 
             segments = turn.get("segments")
             if segments:
-                for index, segment in enumerate(segments, start=1):
+                index = 1
+                while index <= len(turn.get("segments") or []):
                     if self.shutdown_event.is_set():
                         break
-                    self.run_phase_segment(turn, segment, index)
+                    segments = turn.get("segments") or []
+                    segment = segments[index - 1]
+                    action = self.run_phase_segment(turn, segment, index)
+                    if action and action.get("stop_phase_after_change"):
+                        break
+                    self.refresh_topic_after_change(turn, action)
+                    if action and action.get("repeat_current_segment_after_rejected_correction"):
+                        continue
+                    index += 1
                 return
 
             self.run_phase_segment(turn, turn)
         finally:
+            if turn.get("mistake_id"):
+                self.record_mistake_outcome(turn)
             self.finish_turn_log()
             self.current_turn_context = None
 
@@ -2120,9 +3101,10 @@ class CRI_ScriptedDialogue(SICApplication):
         self.print_prestart_preview(script)
         self.print_resume_context_before_interaction()
 
-        try: 
+        try:
             if not self.simulation_mode and self.CONNECT_NAO:
                 self.nao.autonomous.request(NaoWakeUpRequest())
+                self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
             while i < len(script):
@@ -2155,6 +3137,7 @@ class CRI_ScriptedDialogue(SICApplication):
                     action = self.post_phase_control(turn)
                     if action == "repeat":
                         self.logger.info("Repeating Phase %s on tester request.", self.turn_phase(turn) or i + 1)
+                        self.reset_phase_attempt_state(turn)
                         repeat_phase = True
                     elif action == "quit":
                         self.logger.info("Tester requested quit after Phase %s.", self.turn_phase(turn) or i + 1)
@@ -2174,17 +3157,21 @@ class CRI_ScriptedDialogue(SICApplication):
         finally:
             try:
                 if not self.simulation_mode and self.CONNECT_NAO:
+                    self.nao.autonomous.request(NaoSetAutonomousLifeRequest("disabled"))
                     self.nao.autonomous.request(NaoRestRequest())
             except Exception:
                 pass
             self.finish_conversation_log()
             self.logger.info("Shutting down.")
+            # ↓ Add this
+            if hasattr(self, "speech") and self.speech is not None:
+                self.speech.shutdown()
             self.shutdown()
 
 
 if __name__ == "__main__":
     dialogue_app = CRI_ScriptedDialogue(
         openai_env_path=config.LOCAL_ENV_PATH,
-        nao_ip="10.0.0.241",  # Replace with your NAO's IP.
+        nao_ip="192.168.1.2",  # Replace with your NAO's IP.
     )
     dialogue_app.run()

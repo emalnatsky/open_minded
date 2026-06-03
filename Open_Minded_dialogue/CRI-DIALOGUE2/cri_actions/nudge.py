@@ -58,6 +58,9 @@ class NudgeManager:
             "actual": turn.get("mistake_actual"),
             "wrong": turn.get("mistake_wrong"),
             "type": turn.get("mistake_type"),
+            "m3_requires_school_difficulty_resolution": bool(
+                turn.get("m3_requires_school_difficulty_resolution")
+            ),
         })
 
     def mark_current_mistake_corrected(self):

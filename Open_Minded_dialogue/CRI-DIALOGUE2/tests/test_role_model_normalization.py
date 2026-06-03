@@ -32,7 +32,7 @@ class RoleModelNormalizationTests(unittest.TestCase):
                 self.assertIn("is er niet echt een vaste persoon", app.turn_text(segments[0]))
                 self.assertNotIn(empty_value, app.turn_text(segments[0]).lower())
 
-    def test_memory_review_omits_empty_meaning_role_model_values(self):
+    def test_memory_review_speaks_empty_meaning_role_model_naturally(self):
         app = make_app()
         um = sample_um()
         um["role_model"] = "niemand"
@@ -42,10 +42,14 @@ class RoleModelNormalizationTests(unittest.TestCase):
         future_segment = segments[-1]
         future_text = app.turn_text(future_segment)
 
-        self.assertNotIn("role_model", fields)
+        self.assertIn("role_model", fields)
         self.assertNotIn("niemand", future_text.lower())
+        self.assertIn("niet echt een vaste persoon", future_text)
         self.assertIn("je later dierenarts wilt worden", future_text)
-        self.assertEqual(future_segment["used_fields"], {"aspiration": "dierenarts worden"})
+        self.assertEqual(
+            future_segment["used_fields"],
+            {"aspiration": "dierenarts worden", "role_model": "niemand"},
+        )
 
 
 if __name__ == "__main__":

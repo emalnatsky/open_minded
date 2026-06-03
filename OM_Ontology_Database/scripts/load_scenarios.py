@@ -26,7 +26,7 @@ UPDATING UTTERANCES LATER:
     curl -X POST http://localhost:8000/api/um/701/scenario/utterance \\
          -H "Content-Type: application/json" \\
          -d '{"step_id": "m1_followup", "layer": "L2-pregen",
-              "branch": "corrected", "text": "Real final text here"}'
+              "branch": "default", "text": "Real final text here"}'
 """
 
 import json
