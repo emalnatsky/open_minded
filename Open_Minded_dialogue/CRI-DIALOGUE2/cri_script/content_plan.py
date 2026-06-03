@@ -172,6 +172,15 @@ class ContentPlan:
             return True
 
         values = fit_values or {}
+        if fit_validator == "role_model_recall":
+            if "  " in str(text or ""):
+                return False
+            if values.get("role_model_multiple"):
+                lowered = str(text or "").casefold()
+                if "iemand is" in lowered or "die persoon" in lowered:
+                    return False
+            return True
+
         if fit_validator in {"sport_open", "sport_question", "sport_followup"}:
             sport = values.get("sports_fav_play") or values.get("sport") or ""
             if not sport:

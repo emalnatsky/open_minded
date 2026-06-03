@@ -454,14 +454,20 @@ class CRIDialogue2Tests(unittest.TestCase):
     def test_start_phase_parser_accepts_global_phase_numbers_and_script_ids(self):
         app = make_app()
 
-        self.assertEqual(app.TOTAL_SCRIPT_PHASES, 21)
+        self.assertEqual(app.TOTAL_SCRIPT_PHASES, 19)
         self.assertEqual(app.parse_phase_index("1"), 0)
         self.assertEqual(app.parse_phase_index("10"), 9)
-        self.assertEqual(app.parse_phase_index("21"), 20)
+        self.assertEqual(app.parse_phase_index("19"), 18)
         self.assertEqual(app.parse_phase_index("2.1"), 9)
         self.assertEqual(app.parse_phase_index("2.4"), 12)
         self.assertEqual(app.parse_phase_index("3.1"), 13)
-        self.assertEqual(app.parse_phase_index("3.8"), 20)
+        self.assertEqual(app.parse_phase_index("3.4"), 16)
+        self.assertEqual(app.parse_phase_index("3.5"), 16)
+        self.assertEqual(app.parse_phase_index("3.4/5"), 16)
+        self.assertEqual(app.parse_phase_index("3.6"), 17)
+        self.assertEqual(app.parse_phase_index("3.7"), 17)
+        self.assertEqual(app.parse_phase_index("3.6/7"), 17)
+        self.assertEqual(app.parse_phase_index("3.8"), 18)
         self.assertEqual(app.parse_phase_index("phase 2.1"), 9)
         self.assertEqual(app.parse_phase_index("2,1"), 9)
         self.assertEqual(app.parse_phase_index("2.5", default_index=4), 4)
@@ -471,7 +477,9 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(app.session_setup.start_phase_display(0), "1 (1.1)")
         self.assertEqual(app.session_setup.start_phase_display(9), "10 (2.1)")
-        self.assertEqual(app.session_setup.start_phase_display(20), "21 (3.8)")
+        self.assertEqual(app.session_setup.start_phase_display(16), "17 (3.4/5)")
+        self.assertEqual(app.session_setup.start_phase_display(17), "18 (3.6/7)")
+        self.assertEqual(app.session_setup.start_phase_display(18), "19 (3.8)")
 
     def test_graphdb_pet_nodes_are_exposed_as_dialogue_aliases(self):
         app = make_app()
@@ -610,18 +618,16 @@ class CRIDialogue2Tests(unittest.TestCase):
                 "Bridge from school to future",
                 "Leo self-disclosure",
                 "role_model rapport",
-                "Mistake 4 - aspiration",
-                "Space for correction + personalized reflection",
+                "Mistake 4 - aspiration + reflection",
                 "Explicit memory inspection",
-                "Memory review / co-construction",
                 "Closing",
             ],
         )
-        self.assertEqual([turn["phase"] for turn in script], list(range(1, 22)))
+        self.assertEqual([turn["phase"] for turn in script], list(range(1, 20)))
         self.assertEqual(
             [turn["phase_id"] for turn in script],
             [f"1.{phase}" for phase in range(1, 10)]
-            + ["2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"],
+            + ["2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3", "3.4/5", "3.6/7", "3.8"],
         )
         self.assertEqual(script[5]["part"], 1)
         self.assertEqual(script[5]["phase_id"], "1.6")
@@ -714,55 +720,44 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("Wat maakt die persoon voor jou zo bijzonder?", app.turn_text(phase33["segments"][0]))
         phase34 = script[16]
         self.assertEqual(phase34["part"], 3)
-        self.assertEqual(phase34["phase_id"], "3.4")
-        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
+        self.assertEqual(phase34["phase_aliases"], ["3.4", "3.5"])
+        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(phase34["mistake_id"], "M4")
         self.assertEqual(phase34["mistake_field"], "aspiration")
         self.assertEqual(phase34["mistake_actual"], "dierenarts worden")
-        self.assertEqual(len(phase34["segments"]), 4)
+        self.assertEqual(len(phase34["segments"]), 7)
         self.assertEqual(phase34["segments"][0]["response_mode"], "listen_only")
         self.assertFalse(phase34["segments"][1]["expects_response"])
         self.assertEqual(phase34["segments"][2]["response_mode"], "mistake_interpretation")
         self.assertTrue(phase34["segments"][3]["run_if_phase_confirmed_change"])
+        self.assertEqual(phase34["segments"][3]["condition_phase"], 17)
+        self.assertTrue(phase34["segments"][4]["skip_if_phase_confirmed_change"])
+        self.assertEqual(phase34["segments"][6]["response_mode"], "middle_school_feeling")
+        self.assertTrue(phase34["segments"][6]["llm_turn"])
         self.assertIn("Snap jij een beetje wat ik bedoel?", app.turn_text(phase34["segments"][0]))
         self.assertIn("En volgens mij wil jij later", app.turn_text(phase34["segments"][2]))
-        phase35 = script[17]
-        self.assertEqual(phase35["part"], 3)
-        self.assertEqual(phase35["phase_id"], "3.5")
-        self.assertEqual(phase35["script_phase"], "part3_aspiration_reflection")
-        self.assertEqual(len(phase35["segments"]), 7)
-        self.assertTrue(phase35["segments"][0]["run_if_phase_confirmed_change"])
-        self.assertEqual(phase35["segments"][0]["condition_phase"], 17)
-        self.assertTrue(phase35["segments"][1]["run_if_phase_confirmed_change"])
-        self.assertEqual(phase35["segments"][1]["condition_phase"], 17)
-        self.assertTrue(phase35["segments"][2]["skip_if_phase_confirmed_change"])
-        self.assertEqual(phase35["segments"][2]["condition_phase"], 17)
-        self.assertEqual(phase35["segments"][4]["response_mode"], "middle_school_feeling")
-        self.assertFalse(phase35["segments"][6]["expects_response"])
-        self.assertIn("Wat lijkt jou daar dan zo leuk aan?", app.turn_text(phase35["segments"][0]))
-        self.assertIn("middelbare school", app.turn_text(phase35["segments"][3]))
-        self.assertIn("goed kijken of ik nu alles goed over jou heb onthouden", app.turn_text(phase35["segments"][6]))
-        phase36 = script[18]
+        self.assertIn("Wat lijkt jou daar het mooiste aan?", app.turn_text(phase34["segments"][3]))
+        self.assertIn("middelbare school", app.turn_text(phase34["segments"][5]))
+        phase36 = script[17]
         self.assertEqual(phase36["part"], 3)
-        self.assertEqual(phase36["phase_id"], "3.6")
-        self.assertEqual(phase36["script_phase"], "part3_explicit_memory_inspection")
-        self.assertEqual(phase36["response_mode"], "explicit_memory_inspection_offer")
-        self.assertEqual(phase36["used_fields"], {})
+        self.assertEqual(phase36["phase_id"], "3.6/7")
+        self.assertEqual(phase36["phase_aliases"], ["3.6", "3.7"])
+        self.assertEqual(phase36["script_phase"], "part3_explicit_memory_inspection_review")
+        self.assertEqual(phase36["segments"][0]["response_mode"], "explicit_memory_inspection_offer")
+        self.assertEqual(phase36["segments"][0]["used_fields"], {})
         self.assertEqual(
-            app.turn_text(phase36),
+            app.turn_text(phase36["segments"][0]),
             "Wil je misschien zien wat ik allemaal over jou onthoud?",
         )
-        phase37 = script[19]
-        self.assertEqual(phase37["part"], 3)
-        self.assertEqual(phase37["phase_id"], "3.7")
-        self.assertEqual(phase37["script_phase"], "part3_memory_review_co_construction")
-        self.assertEqual(phase37["condition"], "run_if_memory_review_requested")
-        self.assertEqual(phase37["segments"][0]["expects_response"], False)
-        self.assertEqual(phase37["segments"][1]["response_mode"], "memory_review_group")
-        self.assertEqual(phase37["segments"][-1]["response_mode"], "memory_review_add_final")
-        self.assertIn("Klopt dat een beetje", app.turn_text(phase37["segments"][1]))
-        self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase37["segments"][-1]))
-        phase38 = script[20]
+        self.assertEqual(phase36["segments"][1]["condition"], "run_if_memory_review_requested")
+        self.assertEqual(phase36["segments"][1]["expects_response"], False)
+        self.assertTrue(phase36["segments"][1]["memory_review_from_access_scope"])
+        self.assertTrue(phase36["segments"][1]["speak_memory_review_from_access_scope"])
+        self.assertEqual(phase36["segments"][2]["response_mode"], "memory_review_add_final")
+        self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase36["segments"][2]))
+        self.assertIn("gewoon nog even verder", app.turn_text(phase36["segments"][-1]))
+        phase38 = script[18]
         self.assertEqual(phase38["part"], 3)
         self.assertEqual(phase38["phase_id"], "3.8")
         self.assertEqual(phase38["script_phase"], "part3_closing")
@@ -850,11 +845,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase33["phase_id"], "3.3")
         self.assertEqual(phase33["used_fields"], {})
         self.assertEqual(len(segments), 2)
-        self.assertEqual(segments[0]["response_mode"], "listen_only")
+        self.assertEqual(segments[0]["response_mode"], "role_model_absence_check")
+        self.assertEqual(segments[0]["memory_correction_field"], "role_model")
         self.assertIn("Als ik het goed heb", app.turn_text(segments[0]))
         self.assertIn("Klopt dat een beetje?", app.turn_text(segments[0]))
-        self.assertEqual(segments[1]["response_mode"], "acknowledge")
-        self.assertTrue(segments[1]["llm_turn"])
+        self.assertEqual(segments[1]["response_mode"], "role_model_discovery")
         self.assertIn("Wie is dat voor jou?", app.turn_text(segments[1]))
         self.assertEqual(segments[1]["l3"]["script_phase"], "part3_rolemodel")
         self.assertEqual(segments[1]["l3"]["topic"], "rolemodel")
@@ -864,6 +859,174 @@ class CRIDialogue2Tests(unittest.TestCase):
             segments[1]["l3"]["fallback"],
             "Dat snap ik. Soms leer je van verschillende mensen iets.",
         )
+
+    def test_part3_role_model_absence_rejection_asks_who_child_looks_up_to(self):
+        app = make_app()
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="role_model", value=None, confidence=0.92),
+            "Nee dat klopt niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "role_model_absence_ask_detail")
+        self.assertEqual(action["leo_response"], "Oeps, wie is dan iemand naar wie je opkijkt?")
+        self.assertTrue(action["follow_up_needed"])
+        self.assertTrue(turn["memory_correction_requested"])
+
+    def test_part3_role_model_absence_agreement_does_not_become_person(self):
+        app = make_app()
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Ja dat klopt",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "role_model_absence_continue")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.speech.spoken, [])
+
+    def test_part3_role_model_absence_inline_person_gets_confirmed_and_continues(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="role_model", value="mijn vader", confidence=0.95),
+            "Nee dat klopt niet, mijn vader",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_role_model_discovery")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["new_value"], "mijn vader")
+        self.assertIn("mijn vader iemand is naar wie je opkijkt", app.speech.spoken[0])
+
+    def test_part3_role_model_discovery_confirms_clear_person_but_not_vague_answer(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_discovery",
+            "used_fields": {},
+            "l3": {
+                "script_phase": "part3_rolemodel",
+                "topic": "rolemodel",
+                "response_function": "wrap_up",
+                "question_allowed": False,
+                "relevant_um_fields": [],
+                "fallback": "Dat snap ik wel. Soms kun je van allerlei mensen iets leren.",
+            },
+        }
+        app.current_turn_context = turn
+
+        clear_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="mijn trainer", confidence=0.92),
+            "mijn trainer",
+            turn,
+        )
+
+        self.assertEqual(clear_action["action"], "confirm_role_model_discovery")
+        self.assertTrue(clear_action["change_confirmed"])
+        self.assertTrue(clear_action["continue_phase_after_change"])
+        self.assertEqual(clear_action["change"]["new_value"], "mijn trainer")
+
+        vague_app = make_app()
+        vague_turn = dict(turn)
+        vague_turn["response_mode"] = "role_model_discovery"
+        vague_action = vague_app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.92),
+            "weet ik niet",
+            vague_turn,
+        )
+
+        self.assertEqual(vague_action["action"], "role_model_discovery_no_person")
+        self.assertFalse(vague_action.get("continue_phase_after_change", False))
+        self.assertEqual(vague_app.speech.spoken[-1], "Dat snap ik wel. Soms kun je van allerlei mensen iets leren.")
+
+    def test_part3_role_model_phase_uses_plural_grammar_for_multiple_role_models(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        um = sample_um()
+        um["role_model"] = "mijn vader  en moeder"
+        app.pull_um = lambda: um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {
+            "utterances": {
+                "p3_rolemodel_recall": {
+                    "default": "Ik weet nog dat mijn vader  en moeder voor jou iemand is naar wie je opkijkt."
+                },
+            },
+            "mistakes": [],
+        }
+
+        script = app.build_script()
+        phase33 = script[15]
+        text = app.turn_text(phase33["segments"][0])
+
+        self.assertIn("mijn vader en moeder voor jou mensen zijn", text)
+        self.assertIn("Wat maakt hen voor jou zo bijzonder?", text)
+        self.assertNotIn("vader  en", text)
+
+    def test_part3_role_model_correction_reasks_question_with_new_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["role_model"] = "mijn moeder"
+        turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "name": "role_model rapport",
+            "segments": app.script.role_model_rapport_segments(app.last_um_preview),
+            "used_fields": {"role_model": "mijn moeder"},
+        }
+        app.current_turn_context = app.segment_context(turn, turn["segments"][0], 1)
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "role_model",
+                "old_value": "mijn moeder",
+                "new_value": "Superman",
+            },
+        })
+
+        self.assertEqual(turn["used_fields"], {"role_model": "Superman"})
+        self.assertEqual(len(turn["segments"]), 2)
+        self.assertIn("mijn moeder", app.turn_text(turn["segments"][0]))
+        self.assertEqual(turn["segments"][1]["response_mode"], "acknowledge")
+        self.assertEqual("Wat maakt die persoon voor jou zo bijzonder?", app.turn_text(turn["segments"][1]))
 
     def test_part3_mistake4_uses_scenario_wrong_aspiration(self):
         app = make_app()
@@ -890,8 +1053,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase34 = script[16]
         segments = phase34["segments"]
 
-        self.assertEqual(phase34["phase_id"], "3.4")
-        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
+        self.assertEqual(phase34["phase_aliases"], ["3.4", "3.5"])
+        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(phase34["mistake_id"], "M4")
         self.assertEqual(phase34["mistake_field"], "aspiration")
         self.assertEqual(phase34["mistake_type"], "completely-wrong")
@@ -906,6 +1070,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(segments[2]["defer_corrected_response"])
         self.assertEqual(segments[2]["used_fields"], {"aspiration": "juf worden"})
         self.assertTrue(segments[3]["run_if_phase_confirmed_change"])
+        self.assertTrue(segments[4]["skip_if_phase_confirmed_change"])
         self.assertEqual(app.mistake_correction_question(phase34), "Oeps, wat wil jij dan later worden?")
 
     def test_part3_mistake4_uses_fallback_wrong_aspiration_when_um_missing(self):
@@ -931,7 +1096,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase34 = script[16]
         segments = phase34["segments"]
 
-        self.assertEqual(phase34["phase_id"], "3.4")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
         self.assertEqual(phase34["mistake_actual"], CRI.UNKNOWN_VALUE)
         self.assertEqual(phase34["mistake_wrong"], "architect worden")
         self.assertEqual(
@@ -941,7 +1106,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(segments[2]["used_fields"], {"aspiration": "architect worden"})
         self.assertEqual(phase34["mistake_topic"]["memory_link"], "wat je later wilt worden")
 
-    def test_part3_phase35_uses_postcorrection_reflection_scenario(self):
+    def test_part3_merged_phase_uses_postcorrection_reflection_scenario(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -956,25 +1121,22 @@ class CRIDialogue2Tests(unittest.TestCase):
         }
 
         script = app.build_script()
-        phase35 = script[17]
-        segments = phase35["segments"]
+        phase34 = script[16]
+        segments = phase34["segments"]
 
-        self.assertEqual(phase35["phase_id"], "3.5")
-        self.assertEqual(phase35["script_phase"], "part3_aspiration_reflection")
+        self.assertEqual(phase34["phase_id"], "3.4/5")
+        self.assertEqual(phase34["script_phase"], "part3_mistake4_aspiration_reflection")
         self.assertEqual(len(segments), 7)
-        self.assertTrue(segments[0]["run_if_phase_confirmed_change"])
-        self.assertEqual(segments[0]["condition_phase"], 17)
-        self.assertEqual(segments[0]["response_mode"], "listen_only")
-        self.assertEqual(app.turn_text(segments[1]), "Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?")
-        self.assertTrue(segments[1]["run_if_phase_confirmed_change"])
-        self.assertEqual(segments[1]["condition_phase"], 17)
-        self.assertEqual(segments[1]["used_fields"]["aspiration"], "dierenarts worden")
-        self.assertIn("dieren", segments[1]["used_fields"]["interest"])
-        self.assertTrue(segments[2]["skip_if_phase_confirmed_change"])
-        self.assertEqual(segments[4]["response_mode"], "middle_school_feeling")
-        self.assertFalse(segments[6]["expects_response"])
+        self.assertEqual(app.turn_text(segments[3]), "Dat past echt bij jou. Wat lijkt jou daar het mooiste aan?")
+        self.assertTrue(segments[3]["run_if_phase_confirmed_change"])
+        self.assertEqual(segments[3]["condition_phase"], 17)
+        self.assertEqual(segments[3]["used_fields"]["aspiration"], "dierenarts worden")
+        self.assertIn("dieren", segments[3]["used_fields"]["interest"])
+        self.assertTrue(segments[4]["skip_if_phase_confirmed_change"])
+        self.assertEqual(segments[6]["response_mode"], "middle_school_feeling")
+        self.assertTrue(segments[6]["llm_turn"])
 
-    def test_part3_phase35_fallback_reflection_uses_profile_cues(self):
+    def test_part3_merged_phase_fallback_reflection_uses_profile_cues(self):
         app = make_app()
         app.USE_FAKE_PERSONA_UM = False
         app.pull_um = sample_um
@@ -982,11 +1144,362 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.last_cri_scenario = {"utterances": {}, "mistakes": []}
 
         script = app.build_script()
-        reflection_text = app.turn_text(script[17]["segments"][1])
+        reflection_text = app.turn_text(script[16]["segments"][3])
 
         self.assertIn("Dat past ook wel mooi bij jou", reflection_text)
         self.assertIn("dierenarts bij jou past", reflection_text)
         self.assertIn("Wat lijkt jou daar het mooiste aan?", reflection_text)
+
+    def test_part3_mistake4_inline_aspiration_update_is_confirmed_and_continues(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "juf worden",
+            "used_fields": {"aspiration": "juf worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="tuinman", confidence=0.95),
+            "Nee ik wil tuinman worden",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["new_value"], "tuinman")
+
+    def test_part3_mistake4_multiple_aspirations_asks_for_one_profession(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["kok", "ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="kok", confidence=0.95),
+            "Nee kok en voetballer",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["field"], "aspiration")
+        self.assertEqual(action["change"]["new_value"], "kok")
+        self.assertEqual(app.last_um_preview["aspiration"], "kok")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier een beroep onthouden. Wat wil jij later worden? Noem een ding.",
+        )
+        self.assertIn("verander naar kok", app.speech.spoken[1])
+
+    def test_part3_mistake4_multiple_aspirations_without_clarification_does_not_update(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["kok of voetballer", ""]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="kok of voetballer", confidence=0.92),
+            "Nee ik wil kok of voetballer worden",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "change_value_limit_unresolved")
+        self.assertEqual(app.last_um_preview["aspiration"], "dierenarts worden")
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Ik kan hier een beroep onthouden. Wat wil jij later worden? Noem een ding.",
+        )
+        self.assertEqual(
+            app.speech.spoken[1],
+            "Dat zijn er nog te veel. Ik kan hier een beroep onthouden. Wat wil jij later worden? Noem een ding.",
+        )
+        self.assertIn("Dan verander ik het nu nog niet", app.speech.spoken[2])
+
+    def test_part3_mistake4_unknown_aspiration_answer_gets_confirmed_and_stored_unknown(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "aspiration",
+            "last_correction_question": "Oeps, wat wil jij dan later worden?",
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.95),
+            "Weet ik niet",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(action["continue_phase_after_change"])
+        self.assertEqual(action["change"]["field"], "aspiration")
+        self.assertEqual(action["change"]["new_value"], CRI.UNKNOWN_VALUE)
+        self.assertTrue(action["change"]["sets_unknown_value"])
+        self.assertEqual(app.last_um_preview["aspiration"], CRI.UNKNOWN_VALUE)
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Wil je dat ik onthoud dat je dat nog niet weet?",
+        )
+
+    def test_part3_mistake4_direct_unknown_aspiration_answer_is_not_stored_as_profession(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="niks", confidence=0.85),
+            "niks",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change_confirmed"])
+        self.assertEqual(action["change"]["new_value"], CRI.UNKNOWN_VALUE)
+        self.assertNotEqual(action["change"]["new_value"], "niks")
+        self.assertEqual(app.last_um_preview["aspiration"], CRI.UNKNOWN_VALUE)
+        self.assertEqual(
+            app.speech.spoken[0],
+            "Wil je dat ik onthoud dat je dat nog niet weet?",
+        )
+
+    def test_part3_mistake4_unknown_aspiration_refreshes_neutral_route(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        app.last_um_preview = sample_um()
+        turn = app.build_script()[16]
+        app.current_turn_context = app.segment_context(turn, turn["segments"][2], 3)
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "aspiration",
+                "old_value": "kapper worden",
+                "new_value": CRI.UNKNOWN_VALUE,
+                "sets_unknown_value": True,
+            },
+        })
+
+        self.assertEqual(turn["mistake_actual"], CRI.UNKNOWN_VALUE)
+        self.assertEqual(turn["used_fields"]["aspiration"], CRI.UNKNOWN_VALUE)
+        self.assertIn("dat je nog niet weet wat je later wilt worden", turn["mistake_topic"]["memory_link"])
+        self.assertIn("Je hoeft dat nu nog niet te weten", app.turn_text(turn["segments"][3]))
+        self.assertNotIn("bij jou past", app.turn_text(turn["segments"][3]))
+        self.assertEqual(turn["segments"][-1]["response_mode"], "middle_school_feeling")
+
+    def test_part3_mistake4_rejected_confirmation_clears_pending_correction_state(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["nee"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+            "memory_correction_requested": True,
+            "memory_correction_field": "aspiration",
+            "last_correction_question": "Oeps, wat wil jij dan later worden?",
+        }
+        app.current_turn_context = turn
+        app.mistake_states = {"M4": {"id": "M4", "wrong_value_rejected": True}}
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="kok", confidence=0.95),
+            "Kok",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertFalse(action["change_confirmed"])
+        self.assertTrue(action["repeat_current_segment_after_rejected_correction"])
+        self.assertFalse(turn.get("memory_correction_requested", False))
+        self.assertNotIn("memory_correction_field", turn)
+        self.assertNotIn("last_correction_question", turn)
+        self.assertFalse(app.mistake_states["M4"].get("wrong_value_rejected", False))
+        self.assertEqual(app.last_um_preview["aspiration"], "dierenarts worden")
+
+    def test_part3_mistake4_normal_answer_after_rejected_confirmation_is_not_update(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+        app.mistake_states = {"M4": {"id": "M4"}}
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+            "Dat ik lekker kan knippen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "continue_wrong_value_followup")
+        self.assertEqual(app.speech.spoken, [])
+        self.assertIsNone(getattr(app, "pending_change", None))
+        self.assertEqual(app.last_um_preview["aspiration"], "dierenarts worden")
+
+    def test_part3_mistake4_rejected_correction_repeats_current_segment(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech.heard = ["nee"]
+        app.write_um_change = lambda change: True
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "mistake_interpretation",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "used_fields": {"aspiration": "kapper worden"},
+        }
+        app.current_turn_context = turn
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="aspiration", value="niks", confidence=0.85),
+            "niks",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertFalse(action["change_confirmed"])
+        self.assertTrue(action["repeat_current_segment_after_rejected_correction"])
+        self.assertFalse(action["continue_phase_after_change"])
+        self.assertFalse(action["stop_phase_after_change"])
+
+    def test_run_phase_retries_segment_after_rejected_mistake_correction(self):
+        app = make_app()
+        app.shutdown_event = SimpleNamespace(is_set=lambda: False)
+        app.start_turn_log = lambda turn: None
+        app.finish_turn_log = lambda: None
+        app.record_mistake_outcome = lambda turn: None
+        app.refresh_topic_after_change = lambda turn, action: None
+        calls = []
+        actions = iter([
+            {"handled": True, "repeat_current_segment_after_rejected_correction": True},
+            {"handled": True},
+            {"handled": True},
+        ])
+
+        def fake_run_phase_segment(turn, segment, index=None):
+            calls.append(index)
+            return next(actions)
+
+        app.run_phase_segment = fake_run_phase_segment
+        phase = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "name": "Mistake 4 - aspiration + reflection",
+            "layer": "L1 + L2-pregen WRONG + reflection",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "kapper worden",
+            "segments": [
+                {"content_plan": app.l1("Ik weet ook nog dat jij later kapper wilt worden.")},
+                {"content_plan": app.l1("Ik weet ook nog dat jij later kapper wilt worden. Gaaf! Wat trekt je daarin aan?")},
+            ],
+        }
+
+        app.run_phase(phase, phase_index=16, total_phases=20)
+
+        self.assertEqual(calls, [1, 1, 2])
+
+    def test_part3_mistake4_refreshes_reflection_after_corrected_aspiration(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        app.last_um_preview = sample_um()
+        turn = app.build_script()[16]
+        app.current_turn_context = app.segment_context(turn, turn["segments"][2], 3)
+
+        app.refresh_topic_after_change(turn, {
+            "continue_phase_after_change": True,
+            "change_confirmed": True,
+            "change": {
+                "field": "aspiration",
+                "old_value": "juf worden",
+                "new_value": "tuinman",
+            },
+        })
+
+        self.assertEqual(turn["mistake_actual"], "tuinman worden")
+        self.assertEqual(len(turn["segments"]), 4)
+        self.assertIn("tuinman bij jou past", app.turn_text(turn["segments"][3]))
 
     def test_part2_subject_phase_uses_plural_for_multiple_favorite_subjects(self):
         app = make_app()
@@ -1095,7 +1608,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
 
     def test_part2_subject_agreement_does_not_start_memory_change(self):
-        for transcript in ("Ja dat klopt", "Oké"):
+        for transcript in ("Ja dat klopt", "Oké", "Ja inderdaad goed onthouden"):
             with self.subTest(transcript=transcript):
                 app = make_app()
                 turn = {
@@ -1364,8 +1877,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             ),
             (
                 {
-                    "phase": 18,
-                    "phase_id": "3.5",
+                    "phase": 17,
+                    "phase_id": "3.4/5",
                     "response_mode": "middle_school_feeling",
                     "used_fields": {"aspiration": "dierenarts worden"},
                 },
@@ -1398,6 +1911,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
 
         self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["continue_phase_after_change"])
         self.assertEqual(action["change"]["field"], "role_model")
         self.assertEqual(action["change"]["new_value"], "mijn vader")
         self.assertIn("naar wie je opkijkt verander naar mijn vader", app.speech.spoken[0])
@@ -2281,7 +2795,94 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("sports_fav_play", scope)
         self.assertNotIn("fav_food", scope)
 
-    def test_explicit_memory_inspection_accepts_and_defers_to_phase_37(self):
+    def test_memory_access_resume_replays_setup_bundle_before_current_question(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = {"interest"}
+        app.speech = FakeSpeech(["kan ik je geheugen zien?", "ja hoor"])
+        app.log_action_handler_result = lambda action: None
+
+        class SequenceClassifier:
+            def __init__(self):
+                self.results = [
+                    IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95),
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                ]
+
+            def classify(self, text, turn_context=None):
+                return self.results.pop(0)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = SequenceClassifier()
+        phase = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "name": "Mistake 4 - aspiration + reflection",
+            "layer": "test",
+            "segments": [
+                {
+                    "content_plan": app.l1("Vorige vraag die niet opnieuw moet."),
+                    "expects_response": True,
+                    "response_mode": "listen_only",
+                },
+                {
+                    "content_plan": app.l1("Later is trouwens niet alleen later-later."),
+                    "expects_response": False,
+                },
+                {
+                    "content_plan": app.l1("Voor kinderen in groep 7 en 8 komt de middelbare school dichtbij."),
+                    "expects_response": False,
+                },
+                {
+                    "content_plan": app.l1("Denk jij daar al een beetje over na?"),
+                    "expects_response": True,
+                    "response_mode": "listen_only",
+                },
+            ],
+        }
+
+        with patch("builtins.input", side_effect=[""]), patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, phase["segments"][3], 4)
+
+        self.assertEqual(action["action"], "listen_only")
+        self.assertEqual(app.speech.spoken.count("Denk jij daar al een beetje over na?"), 2)
+        self.assertIn("Later is trouwens niet alleen later-later.", app.speech.spoken)
+        self.assertIn(
+            "Voor kinderen in groep 7 en 8 komt de middelbare school dichtbij.",
+            app.speech.spoken,
+        )
+        self.assertEqual(app.speech.spoken.count("Vorige vraag die niet opnieuw moet."), 0)
+        replay_start = app.speech.spoken.index("Later is trouwens niet alleen later-later.")
+        self.assertEqual(
+            app.speech.spoken[replay_start:replay_start + 3],
+            [
+                "Later is trouwens niet alleen later-later.",
+                "Voor kinderen in groep 7 en 8 komt de middelbare school dichtbij.",
+                "Denk jij daar al een beetje over na?",
+            ],
+        )
+
+    def test_memory_access_mentions_no_fixed_role_model_in_inspiration_chapter(self):
+        app = make_app()
+        um = sample_um()
+        um["role_model"] = "niemand"
+        um["interest"] = "Verbetering van technologie"
+        um["aspiration"] = CRI.UNKNOWN_VALUE
+        app.last_um_preview = um
+        app.memory_fields_mentioned_so_far = {"aspiration"}
+        result = IntentResult(intent="um_inspect", field=None, value=None, confidence=0.95)
+
+        response, scope, returned = app.memory_access_response(result, {})
+
+        self.assertIn("role_model", scope)
+        self.assertIn("role_model", returned)
+        self.assertIn("je interesse hebt in Verbetering van technologie", response)
+        self.assertIn("je niet echt een vaste persoon hebt naar wie je opkijkt", response)
+        self.assertNotIn("niemand", response.lower())
+
+    def test_explicit_memory_inspection_accepts_and_unblocks_review_segments(self):
         app = make_app()
         app.last_um_preview = sample_um()
         app.memory_fields_mentioned_so_far = {
@@ -2329,10 +2930,7 @@ class CRIDialogue2Tests(unittest.TestCase):
                 "school_difficulty",
             },
         )
-        self.assertEqual(
-            app.speech.spoken,
-            ["Goed. Dan gaan we zo rustig samen door mijn geheugen heen."],
-        )
+        self.assertEqual(app.speech.spoken, [])
 
     def test_explicit_memory_inspection_decline_and_unclear_continue(self):
         app = make_app()
@@ -2380,10 +2978,7 @@ class CRIDialogue2Tests(unittest.TestCase):
             set(action["memory_scope"]),
             {"name", "hobbies", "hobby_fav", "freetime_fav", "fav_food", "aspiration", "role_model", "interest"},
         )
-        self.assertEqual(
-            app.speech.spoken,
-            ["Goed. Dan kunnen we zo samen op de tablet naar mijn geheugenboek kijken."],
-        )
+        self.assertEqual(app.speech.spoken, [])
 
     def test_memory_review_phase_groups_fields_in_script_order(self):
         app = make_app()
@@ -2423,8 +3018,8 @@ class CRIDialogue2Tests(unittest.TestCase):
     def test_memory_review_group_response_modes_confirm_repeat_and_ask_detail(self):
         app = make_app()
         turn = {
-            "phase": 20,
-            "phase_id": "3.7",
+            "phase": 18,
+            "phase_id": "3.6/7",
             "response_mode": "memory_review_group",
             "content_plan": app.l1("Over school weet ik iets. Klopt dat?"),
             "topic": {
@@ -2469,8 +3064,8 @@ class CRIDialogue2Tests(unittest.TestCase):
     def test_memory_review_final_can_decline_or_ask_for_extra_detail(self):
         app = make_app()
         turn = {
-            "phase": 20,
-            "phase_id": "3.7",
+            "phase": 18,
+            "phase_id": "3.6/7",
             "response_mode": "memory_review_add_final",
             "content_plan": app.l1("Is er nog iets dat ik moet onthouden?"),
             "topic": {"fields": list(CRI.UM_FIELDS), "field_labels": {}, "current_values": {}},
@@ -2498,7 +3093,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
         self.assertEqual(extra["action"], "memory_review_final_extra_unmapped")
 
-    def test_memory_review_phase_skips_unless_offer_was_accepted_and_can_activate_tablet(self):
+    def test_memory_review_segments_skip_unless_offer_was_accepted_and_can_activate_tablet(self):
         app = make_app()
         self.assertTrue(app.should_skip_phase({"condition": "run_if_memory_review_requested"}))
         app.memory_review_requested = True
@@ -2512,19 +3107,68 @@ class CRIDialogue2Tests(unittest.TestCase):
                 captured["phase"] = phase
 
         app.tablet_state = FakeTabletState()
-        phase = {"phase": 20, "phase_id": "3.7", "name": "Memory review / co-construction", "layer": "L1"}
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = {"fav_food"}
+        phase = {"phase": 18, "phase_id": "3.6/7", "name": "Explicit memory inspection", "layer": "L1"}
         segment = {
             "content_plan": app.l1("Kijk maar op de tablet."),
             "expects_response": False,
+            "condition": "run_if_memory_review_requested",
+            "memory_review_from_access_scope": True,
+            "speak_memory_review_from_access_scope": True,
             "activate_tablet_memory_access": True,
-            "memory_review_fields": ["hobbies", "fav_food", "aspiration"],
+            "memory_review_fallback_fields": ["hobbies", "fav_food", "aspiration"],
+        }
+
+        app.memory_review_requested = False
+        app.run_phase_segment(phase, segment)
+        self.assertEqual(captured, {})
+        self.assertEqual(app.speech.spoken, [])
+
+        app.memory_review_requested = True
+        app.run_phase_segment(phase, segment)
+
+        self.assertEqual(captured["phase"], 18)
+        self.assertEqual(captured["fields"], ["fav_food"])
+        self.assertEqual(
+            app.speech.spoken,
+            ["Kijk maar op de tablet.", "Ik weet ook nog dat je lievelingseten pannenkoeken is."],
+        )
+
+    def test_explicit_memory_review_direct_start_does_not_fall_back_to_static_um_fields(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.memory_fields_mentioned_so_far = set()
+        app.memory_review_requested = True
+        captured = {}
+
+        class FakeTabletState:
+            def activate_memory_access(self, fields, phase=None):
+                captured["fields"] = list(fields)
+                captured["phase"] = phase
+
+        app.tablet_state = FakeTabletState()
+        phase = {"phase": 18, "phase_id": "3.6/7", "name": "Explicit memory inspection", "layer": "L1"}
+        segment = {
+            "content_plan": app.l1("Kijk maar op de tablet."),
+            "expects_response": False,
+            "condition": "run_if_memory_review_requested",
+            "memory_review_from_access_scope": True,
+            "speak_memory_review_from_access_scope": True,
+            "activate_tablet_memory_access": True,
         }
 
         app.run_phase_segment(phase, segment)
 
-        self.assertEqual(captured["phase"], 20)
-        self.assertEqual(captured["fields"], ["hobbies", "fav_food", "aspiration"])
-        self.assertEqual(app.speech.spoken, ["Kijk maar op de tablet."])
+        self.assertEqual(captured["phase"], 18)
+        self.assertEqual(captured["fields"], [])
+        self.assertEqual(
+            app.speech.spoken,
+            [
+                "Kijk maar op de tablet.",
+                "Ik heb vandaag nog niet zoveel uit mijn geheugen gebruikt.",
+            ],
+        )
 
     def test_spontaneous_memory_access_condition_e_uses_same_tablet_visible_fields(self):
         app = make_app()
@@ -4866,11 +5510,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(action["leo_response"], "Oeps, wat wil jij dan later worden?")
         self.assertTrue(app.mistake_states["M4"].get("wrong_value_rejected"))
 
-    def test_middle_school_feeling_is_static_session_context_not_um_change(self):
+    def test_middle_school_feeling_speaks_flexible_wrap_without_um_change(self):
         app = make_app()
         turn = {
-            "phase": 18,
-            "phase_id": "3.5",
+            "phase": 17,
+            "phase_id": "3.4/5",
             "response_mode": "middle_school_feeling",
         }
         result = IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9)
@@ -4879,7 +5523,24 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(action["action"], "middle_school_feeling")
         self.assertEqual(action["middle_school_feeling"], "mixed")
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(action["leo_response"], "Dat snap ik. Je kunt er zin in hebben en het tegelijk spannend vinden.")
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
+
+    def test_middle_school_feeling_detects_not_spannend_as_calm(self):
+        app = make_app()
+        turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "response_mode": "middle_school_feeling",
+        }
+        result = IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85)
+
+        action = app.action_handler(result, "Nee hoor vind ik helemaal niet spannend", turn)
+
+        self.assertEqual(action["action"], "middle_school_feeling")
+        self.assertEqual(action["middle_school_feeling"], "calm")
+        self.assertEqual(action["leo_response"], "Fijn, dan kijk je er best rustig naar.")
+        self.assertEqual(app.speech.spoken, [action["leo_response"]])
 
     def test_school_joke_transition_uses_classifier_category(self):
         app = make_app()
@@ -5185,6 +5846,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.local_child_name = "Noor"
         app.researcher_name = "Sander"
         app.last_um_preview = sample_um()
+        app.session_config = {
+            "child_name": "Noor",
+            "first_name_cri": "Noor",
+            "first_name_tablet": "Noortje",
+        }
         app.resume_from_log_path = r"C:\previous\Noor.json"
         app.resume_source_log = {
             "session_id": "old",
@@ -5193,15 +5859,177 @@ class CRIDialogue2Tests(unittest.TestCase):
             "last_completed_phase": 1,
         }
 
-        app.start_conversation_log([{"phase": 2, "name": "Tutorial", "layer": "L1", "content_plan": app.l1("Test")}])
+        turn = {
+            "phase": 2,
+            "part": 1,
+            "phase_id": "1.2",
+            "name": "Tutorial",
+            "layer": "L1",
+            "dialogue_case": "um_template",
+            "content_plan": app.l1("Test"),
+        }
+        app.start_conversation_log([turn])
+        app.start_turn_log(turn)
+        app.log_conversation_event("utterance", speaker="LEO", text="Hoi Noor")
+        app.log_conversation_event("utterance", speaker="CHILD", text="Ja")
+        app.finish_turn_log()
 
         log = app.conversation_log
         self.assertTrue(Path(log["folder"]).is_relative_to(Path(temp_dir)))
-        self.assertEqual(Path(log["json_path"]).name, "Noor.json")
-        self.assertEqual(Path(log["txt_path"]).name, "Noor.txt")
+        self.assertEqual(Path(log["json_path"]).name, "N_1001_debug.json")
+        self.assertEqual(Path(log["txt_path"]).name, "N_1001_conversation_debug.txt")
+        self.assertEqual(Path(log["omr_log_path"]).suffix, ".log")
         self.assertTrue(log["previous_log_included"])
         self.assertEqual(log["events"][0]["text"], "Hoi")
         self.assertEqual(log["timestamp_unit"], "seconds_from_interaction_start")
+
+        json_payload = Path(log["json_path"]).read_text(encoding="utf-8")
+        transcript_payload = Path(log["conversation_debug_path"]).read_text(encoding="utf-8")
+        omr_payload = Path(log["omr_log_path"]).read_text(encoding="utf-8")
+        for payload in (json_payload, transcript_payload, omr_payload):
+            self.assertNotIn("Noor", payload)
+            self.assertNotIn("Noortje", payload)
+        self.assertIn("[Leo] Hoi N_1001", transcript_payload)
+        self.assertIn("[N_1001] Ja", transcript_payload)
+        self.assertIn("Part 1 phase 2: Tutorial", transcript_payload)
+        self.assertNotIn("[um_template]", transcript_payload)
+
+        omr_log = json.loads(omr_payload)
+        self.assertEqual(omr_log["session_metadata"]["child_label"], "N_1001")
+        self.assertIn("mistakes_and_corrections", omr_log)
+        self.assertIn("memory_acts", omr_log)
+        self.assertIn("um_updates", omr_log)
+        self.assertIn("tablet_events", omr_log)
+
+    def test_omr_log_formats_timestamps_and_dedupes_confirmed_memory_acts(self):
+        app = make_app()
+        log = {
+            "session_id": "session-test",
+            "child_id": "1001",
+            "child_label": "N_1001",
+            "tutorial_condition": "E",
+            "started_at": 0.0,
+            "started_wall_time": "1970-01-01T00:00:00+00:00",
+            "ended_at": 240.0,
+            "ended_wall_time": "1970-01-01T00:04:00+00:00",
+            "events": [
+                {
+                    "type": "mistake_outcome",
+                    "timestamp": 120.2,
+                    "phase": 6,
+                    "mistake_id": "M1",
+                    "field": "hobby_fav",
+                    "wrong_value": "padel",
+                    "real_value": "voetbal",
+                    "corrected": True,
+                },
+                {
+                    "type": "action_handler",
+                    "timestamp": 184.391,
+                    "phase": 6,
+                    "action": "confirm_update",
+                    "change_confirmed": True,
+                    "change": {"action": "update", "field": "hobby_fav", "new_value": "gamen"},
+                },
+                {
+                    "type": "action_handler",
+                    "timestamp": 193.031,
+                    "phase": 6,
+                    "action": "confirm_update",
+                    "change_confirmed": True,
+                    "change": {"action": "update", "field": "hobby_fav", "new_value": "gamen"},
+                },
+            ],
+        }
+
+        omr_log = app.conv_log.build_omr_log(log)
+
+        self.assertEqual(omr_log["mistakes_and_corrections"][0]["timestamp"], "02:00")
+        self.assertEqual(omr_log["mistakes_and_corrections"][0]["child_initiated"], "yes")
+        self.assertEqual(len(omr_log["memory_acts"]), 1)
+        self.assertEqual(omr_log["memory_acts"][0]["timestamp"], "03:04")
+        self.assertEqual(omr_log["memory_acts"][0]["target_field"], "hobby_fav")
+        self.assertIn(
+            {
+                "type": "session_start",
+                "timestamp": "00:00",
+            },
+            omr_log["tablet_events"],
+        )
+        self.assertIn(
+            {
+                "type": "session_end",
+                "timestamp": "04:00",
+            },
+            omr_log["tablet_events"],
+        )
+
+    def test_omr_log_imports_matching_tablet_json_events(self):
+        app = make_app()
+        temp_dir = tempfile.mkdtemp(prefix="cri_tablet_events_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        event_path = Path(temp_dir) / "tablet_events.jsonl"
+        app.TABLET_EVENTS_LOG_PATH = str(event_path)
+        event_path.write_text(
+            "\n".join([
+                json.dumps({
+                    "type": "shown",
+                    "session_id": "session-test",
+                    "child_id": "1001",
+                    "server_wall_time": 62.4,
+                    "category": "hobby",
+                    "memory_item": "Hobby's",
+                    "screen": "category",
+                    "phase": 6,
+                }),
+                json.dumps({
+                    "type": "shown",
+                    "session_id": "other-session",
+                    "child_id": "1001",
+                    "server_wall_time": 90.0,
+                    "category": "school",
+                }),
+                json.dumps({
+                    "type": "tablet_display_changed",
+                    "session_id": "session-test",
+                    "child_id": "1001",
+                    "server_wall_time": 125.0,
+                    "field": "hobby_fav",
+                    "old_value": "padel",
+                    "new_value": "gamen",
+                }),
+            ]),
+            encoding="utf-8",
+        )
+        log = {
+            "session_id": "session-test",
+            "child_id": "1001",
+            "child_label": "N_1001",
+            "tutorial_condition": "E",
+            "started_at": 0.0,
+            "started_wall_time": "1970-01-01T00:00:00+00:00",
+            "events": [],
+        }
+
+        omr_log = app.conv_log.build_omr_log(log)
+        tablet_events = omr_log["tablet_events"]
+
+        self.assertIn({
+            "type": "shown",
+            "timestamp": "01:02",
+            "memory_item": "Hobby's",
+            "category": "hobby",
+            "screen": "category",
+            "phase": 6,
+        }, tablet_events)
+        self.assertIn({
+            "type": "tablet_display_changed",
+            "timestamp": "02:05",
+            "field": "hobby_fav",
+            "old_value": "padel",
+            "new_value": "gamen",
+        }, tablet_events)
+        self.assertNotIn("school", json.dumps(tablet_events))
 
     def test_conversation_log_write_error_does_not_crash_dialogue(self):
         app = make_app()
