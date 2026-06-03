@@ -30,6 +30,9 @@ from sic_framework.devices.common_naoqi.naoqi_autonomous import (
     NaoRestRequest,
     NaoSetAutonomousLifeRequest,
 )
+from sic_framework.devices.common_naoqi.naoqi_motion import (
+    NaoqiAnimationRequest,
+)
 #from sic_framework.services.openai_whisper_stt.whisper_stt import (
     #SICWhisper,
     #WhisperConf,
@@ -454,6 +457,18 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def follow_up_action_handler(self, turn, max_rounds=3):
         return self.actions.follow_up_action_handler(turn, max_rounds)
+
+    def perform_greeting_wave(self):
+        """Play NAO's hello-wave animation. Safe no-op in sim/desktop mode."""
+        if self.simulation_mode or not self.CONNECT_NAO or not self.nao:
+            return
+        try:
+            self.logger.info("Playing NAO greeting wave.")
+            self.nao.motion.request(NaoqiAnimationRequest("animations/Stand/Gestures/Hey_1"))
+            self.log_conversation_event("nao_motion", action="greeting_wave")
+        except Exception as e:
+            self.logger.warning("Could not play NAO greeting wave: %s", e)
+            self.log_conversation_event("nao_motion_error", action="greeting_wave", error=str(e))
 
     def confirm_topic_change(self, change):
         return self.actions.confirm_topic_change(change)
@@ -2805,6 +2820,8 @@ class CRI_ScriptedDialogue(SICApplication):
             if not self.simulation_mode and self.CONNECT_NAO:
                 self.nao.autonomous.request(NaoWakeUpRequest())
                 self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
+                # Greeting wave the moment NAO wakes, before the dialogue starts.
+                self.perform_greeting_wave()
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
             while i < len(script):

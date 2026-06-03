@@ -1903,10 +1903,10 @@ class ActionHandler:
                 )
 
             response, memory_scope, returned_fields = self.d.memory_access_response(result, turn)
-            response = (
-                f"{response} Als iets niet klopt, kun je zeggen wat ik moet veranderen. "
-                "Als je mijn geheugen nog een keer wilt horen, kun je dat ook zeggen."
-            )
+            # Welcome opener; the explicit yes/no change flow that follows
+            # (memory_access_interrupt_control) handles corrections, so we no
+            # longer append the old "zeg wat ik moet veranderen" trailer here.
+            response = f"Welkom in mijn geheugen! {response}"
             self.d.speech.say(response)
             return self.action_result(
                 "memory_access",

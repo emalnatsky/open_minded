@@ -613,6 +613,15 @@ class ScriptBuilder:
                     self.d.l1("Vandaag ga ik mijn geheugen best veel gebruiken. Je mag altijd vragen wat ik over jou onthoud."),
                     self.d.l1(self.d.tutorial_memory_line(tutorial_condition)),
                     self.d.l1(
+                        "Als je wilt zien wat ik over jou onthoud, moet je dat hardop aan mij vragen. "
+                        "Je kunt bijvoorbeeld zeggen: wat weet je over mij? Dan vertel ik je wat ik nog weet."
+                    )
+                    if tutorial_condition == self.d.CONDITION_CONTROL
+                    else self.d.l1(
+                        "Als je wilt zien wat ik over jou onthoud, moet je dat hardop aan mij vragen. "
+                        "Je kunt bijvoorbeeld zeggen: mag ik je geheugen zien? Dan kun je op de tablet kijken."
+                    ),
+                    self.d.l1(
                         "Ik probeer alles netjes op de goede plek te bewaren, maar soms gaat dat nog een beetje robotachtig mis. "
                         "Dus als iets niet klopt, of als jij iets wilt veranderen, mag je dat gewoon zeggen."
                     ),
