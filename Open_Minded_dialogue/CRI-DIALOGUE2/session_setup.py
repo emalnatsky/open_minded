@@ -213,24 +213,27 @@ class SessionSetup:
 
     def script_phase_id_map(self) -> dict:
         """Map human script ids such as 2.1 to zero-based global phase indexes."""
-        starts = {
-            1: 0,
-            2: 9,
-            3: 13,
+        canonical_phase_ids = (
+            [f"1.{phase}" for phase in range(1, 10)]
+            + ["2.1", "2.2", "2.3", "2.4"]
+            + ["3.1", "3.2", "3.3", "3.4/5", "3.6/7", "3.8"]
+        )
+        mapping = {
+            phase_id: index
+            for index, phase_id in enumerate(canonical_phase_ids)
         }
-        counts = {
-            1: 9,
-            2: 4,
-            3: 8,
-        }
-        mapping = {}
-        for part, start in starts.items():
-            for phase in range(1, counts[part] + 1):
-                mapping[f"{part}.{phase}"] = start + phase - 1
+        mapping["3.4"] = mapping["3.4/5"]
+        mapping["3.5"] = mapping["3.4/5"]
+        mapping["3.6"] = mapping["3.6/7"]
+        mapping["3.7"] = mapping["3.6/7"]
         return mapping
 
     def script_phase_id_for_index(self, index: int) -> str:
-        reverse = {value: key for key, value in self.script_phase_id_map().items()}
+        reverse = {
+            value: key
+            for key, value in self.script_phase_id_map().items()
+            if key not in {"3.4", "3.5", "3.6", "3.7"}
+        }
         return reverse.get(index, "")
 
     def start_phase_display(self, index: int) -> str:
@@ -376,7 +379,7 @@ class SessionSetup:
 
         # 3. Start phase
         total = self.d.TOTAL_SCRIPT_PHASES
-        phase_raw = self.ask_session_value(f"Start phase (1-{total}, or 2.1/3.4)", "1")
+        phase_raw = self.ask_session_value(f"Start phase (1-{total}, or 2.1/3.6)", "1")
         start_phase_index = self.parse_phase_index(phase_raw, default_index=0)
 
         fake_persona_path = self.d.simulated_persona_path
