@@ -32,10 +32,14 @@ from sic_framework.devices.common_naoqi.naoqi_autonomous import (
     NaoRestRequest,
     NaoSetAutonomousLifeRequest,
 )
-from sic_framework.services.openai_whisper_stt.whisper_stt import (
-    SICWhisper,
-    WhisperConf,
+from sic_framework.devices.common_naoqi.naoqi_motion import (
+    NaoqiAnimationRequest,
 )
+# RealtimeSTT replaces SIC Whisper; recorder lives inside SpeechIO.
+# from sic_framework.services.openai_whisper_stt.whisper_stt import (
+#     SICWhisper,
+#     WhisperConf,
+# )
 from sic_framework.services.llm import GPT, GPTConf, GPTRequest
 from openai import OpenAI
 
@@ -505,6 +509,18 @@ class CRI_ScriptedDialogue(SICApplication):
     def follow_up_action_handler(self, turn, max_rounds=3):
         return self.actions.follow_up_action_handler(turn, max_rounds)
 
+    def perform_greeting_wave(self):
+        """Play NAO's hello-wave animation. Safe no-op in sim/desktop mode."""
+        if self.simulation_mode or not self.CONNECT_NAO or not self.nao:
+            return
+        try:
+            self.logger.info("Playing NAO greeting wave.")
+            self.nao.motion.request(NaoqiAnimationRequest("animations/Stand/Gestures/Hey_1"))
+            self.log_conversation_event("nao_motion", action="greeting_wave")
+        except Exception as e:
+            self.logger.warning("Could not play NAO greeting wave: %s", e)
+            self.log_conversation_event("nao_motion_error", action="greeting_wave", error=str(e))
+
     def confirm_topic_change(self, change):
         return self.actions.confirm_topic_change(change)
 
@@ -885,23 +901,11 @@ class CRI_ScriptedDialogue(SICApplication):
             self.nao = Nao(ip=self.nao_ip)
             self.logger.info("NAO connected.")
 
-        # Whisper
+        # RealtimeSTT (replaces SIC Whisper) - recorder lives inside SpeechIO.
         if self.use_keyboard_input():
-            self.logger.info("Skipping Whisper setup because keyboard child input is enabled.")
+            self.logger.info("Skipping STT setup because keyboard child input is enabled.")
         else:
-            if self.USE_DESKTOP_MIC:
-                from sic_framework.devices.desktop import Desktop
-                self.desktop = Desktop()
-                self.whisper = SICWhisper(
-                    input_source=self.desktop.mic,
-                    conf=WhisperConf(openai_key=os.environ["OPENAI_API_KEY"])
-                )
-            else:
-                self.whisper = SICWhisper(
-                    input_source=self.nao.mic,
-                    conf=WhisperConf(openai_key=os.environ["OPENAI_API_KEY"])
-                )
-            time.sleep(1.0)
+            self.logger.info("RealtimeSTT will use the system/default microphone.")
 
         # GPT for L3 responses
         self.gpt = GPT(conf=GPTConf(
@@ -911,21 +915,22 @@ class CRI_ScriptedDialogue(SICApplication):
             max_tokens=140,
             temp=0.7,
         ))
-        # Speech I/O wrapper
+        # Speech I/O wrapper (RealtimeSTT)
         self.speech = SpeechIO(
             nao=self.nao,
-            whisper=self.whisper,
-            use_desktop_mic=self.USE_DESKTOP_MIC,
             use_nao_output=self.CONNECT_NAO,
             simulation_mode=self.simulation_mode,
             use_keyboard_input_fn=self.use_keyboard_input,
-            stt_timeout=self.STT_TIMEOUT,
-            stt_phrase_limit=self.STT_PHRASE_LIMIT,
             review_transcripts=self.REVIEW_TRANSCRIPTS,
             log_event_fn=self.log_conversation_event,
             simulated_history=self.simulated_history,
             generate_simulated_response_fn=self.generate_simulated_child_response,
             set_last_utterance_fn=lambda t: setattr(self, "last_leo_utterance", t),
+            stt_model="small",
+            stt_language="nl",
+            stt_post_speech_silence=0.6,
+            stt_realtime_processing_pause=0.2,
+            stt_beam_size=5,
         )
         self.logger.info("Setup complete.")
 
@@ -2737,49 +2742,142 @@ class CRI_ScriptedDialogue(SICApplication):
         return change_action
 
     def memory_access_interrupt_control(self, action: dict) -> dict:
-        """Researcher checkpoint after memory access, then resume the same phase."""
-        if not self.POST_PHASE_TEST_CONTROLS:
-            return self.action_result(
-                "memory_access_continue",
-                True,
-                "Memory access completed; continue the current phase.",
-            )
+        """Explicit, gated voice flow for memory access (no researcher keyboard).
 
-        leo_response = action.get("leo_response") or ""
+        Flow:
+          Leo: "Wil je iets veranderen?"
+            NO  -> acknowledge, exit to script
+            YES -> "Wat wil je veranderen?" -> child says it ->
+                   action_handler confirms (X to Y?) and applies on yes ->
+                   acknowledge -> "Wil je nog iets anders veranderen?" -> loop
+        Unclear yes/no answers re-ask the same question.
+        """
         source_turn = self.current_turn_context or {}
         pending_resume_action = None
-        while True:
-            print("\n" + "=" * 72)
-            choice = input(
-                "Memory access. Press Enter to continue, C + Enter to change something, "
-                "or M + Enter to repeat memory instructions: "
-            )
-            choice = choice.strip().lower()
-            print("=" * 72)
+        max_changes = int(getattr(self, "MEMORY_ACCESS_MAX_CHANGES", 8))
 
-            if choice == "":
-                self.log_conversation_event("tester_control", action="continue_after_memory_access")
-                return pending_resume_action or self.action_result(
-                    "memory_access_continue",
-                    True,
-                    "Memory access completed without a confirmed memory change.",
+        # Gate #1: does the child want to change anything?
+        wants_change = self.memory_access_ask_yes_no("Wil je iets veranderen?")
+
+        changes_done = 0
+        while wants_change and changes_done < max_changes:
+            # Ask what to change, listen, and let the action handler run its
+            # own "Wil je dat ik X veranderen naar Y?" confirm + apply flow.
+            self.speech.say("Wat wil je veranderen?")
+            change_context = self.memory_access_change_context(action, source_turn)
+            self.current_turn_context = change_context
+            transcript = self.speech.listen_with_review()
+            result = self.classify_with_repeat(transcript, change_context)
+            change_action = self.action_handler(result, transcript, change_context)
+            self.log_action_handler_result(change_action)
+            self.current_turn_context = source_turn
+
+            if change_action.get("change_confirmed") and change_action.get("change"):
+                # Acknowledge is produced by the action handler; record it so
+                # the phase can re-ask the original turn with the new value.
+                pending_resume_action = dict(change_action)
+                pending_resume_action["action"] = "memory_access_change_confirmed"
+                pending_resume_action["memory_access_change_confirmed"] = True
+                pending_resume_action["stop_phase_after_change"] = False
+                changes_done += 1
+            elif not change_action.get("handled"):
+                # Couldn't tell what to change — say so and ask again.
+                self.speech.say(
+                    "Ik weet nog niet goed wat ik moet veranderen. "
+                    "Zeg bijvoorbeeld: verander mijn lievelingssport naar hockey."
                 )
-            if choice in ("c", "change", "change memory", "verander", "wijzig"):
-                self.log_conversation_event("tester_control", action="memory_access_change")
-                change_action = self.memory_access_change_control(action, source_turn)
-                if change_action.get("change_confirmed") and change_action.get("change"):
-                    pending_resume_action = dict(change_action)
-                    pending_resume_action["action"] = "memory_access_change_confirmed"
-                    pending_resume_action["memory_access_change_confirmed"] = True
-                    pending_resume_action["stop_phase_after_change"] = False
-                continue
-            if choice in ("m", "memory", "repeat", "r"):
-                self.log_conversation_event("tester_control", action="repeat_memory_access")
-                if leo_response:
-                    self.speech.say(leo_response)
-                continue
 
-            print("Please press Enter to continue, C to change something, or M to repeat memory.")
+            # Gate #2: any more changes?
+            wants_change = self.memory_access_ask_yes_no(
+                "Wil je nog iets anders veranderen?"
+            )
+
+        # Exit acknowledgement, then resume the normal script.
+        self.speech.say("Oke, we gaan verder.")
+        self.log_conversation_event(
+            "memory_access_voice_exit", changes_made=changes_done
+        )
+        return pending_resume_action or self.action_result(
+            "memory_access_continue",
+            True,
+            "Memory access completed via voice gates.",
+        )
+
+    def memory_access_ask_yes_no(self, question: str, max_tries: int = 3) -> bool:
+        """Ask a yes/no question by voice and return True for yes, False for no.
+
+        Re-asks (up to max_tries) when the child's answer is not clearly
+        yes or no. Defaults to False (no) if still unclear after max_tries,
+        so the dialogue always moves forward rather than getting stuck.
+        """
+        for attempt in range(max_tries):
+            self.speech.say(question)
+            transcript = self.speech.listen_with_review()
+            verdict = self.classify_yes_no(transcript)
+            self.log_conversation_event(
+                "memory_access_yes_no",
+                question=question,
+                transcript=transcript or "(nothing)",
+                verdict=verdict,
+                attempt=attempt + 1,
+            )
+            if verdict == "yes":
+                return True
+            if verdict == "no":
+                return False
+            # Unclear → gently re-ask the same question.
+            if attempt < max_tries - 1:
+                self.speech.say("Sorry, ik snapte het niet goed.")
+        # Still unclear after retries — default to no so we exit cleanly.
+        return False
+
+    def classify_yes_no(self, transcript: str) -> str:
+        """Return 'yes', 'no', or 'unclear' for a child's spoken answer."""
+        text = (transcript or "").strip().lower()
+        if not text:
+            return "unclear"
+
+        # Fast path: clear Dutch yes/no tokens.
+        yes_tokens = ("ja", "jawel", "jazeker", "yes", "klopt", "graag", "doe maar")
+        no_tokens = ("nee", "nope", "niet", "hoeft niet", "laat maar", "niks", "niets")
+        first = text.split()[0] if text.split() else ""
+        if first in ("ja", "jawel", "jazeker", "yes"):
+            return "yes"
+        if first in ("nee", "nope", "neenee"):
+            return "no"
+        if any(tok in text for tok in yes_tokens) and not any(tok in text for tok in no_tokens):
+            return "yes"
+        if any(tok in text for tok in no_tokens) and not any(tok in text for tok in yes_tokens):
+            return "no"
+
+        # GPT fallback for ambiguous phrasing.
+        try:
+            from sic_framework.services.llm import GPTRequest
+            prompt = (
+                "Een kind beantwoordt een ja/nee-vraag van een robot.\n"
+                f"Het kind zei: \"{transcript.strip()}\"\n\n"
+                "Is dit JA, NEE, of ONDUIDELIJK?\n"
+                "Antwoord met exact een woord: JA, NEE of ONDUIDELIJK."
+            )
+            if getattr(self, "gpt", None) is not None:
+                reply = self.gpt.request(GPTRequest(prompt=prompt, stream=False))
+                answer = (reply.response or "").strip().lower() if reply else ""
+            else:
+                completion = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4,
+                    temperature=0.0,
+                )
+                answer = completion.choices[0].message.content.strip().lower()
+            if answer.startswith("ja"):
+                return "yes"
+            if answer.startswith("nee"):
+                return "no"
+            return "unclear"
+        except Exception as e:
+            self.logger.warning("classify_yes_no GPT check failed: %s", e)
+            return "unclear"
 
     def is_memory_access_action(self, action: dict) -> bool:
         return action.get("action") in ("memory_access", "memory_access_tablet")
@@ -3164,6 +3262,7 @@ class CRI_ScriptedDialogue(SICApplication):
             if not self.simulation_mode and self.CONNECT_NAO:
                 self.nao.autonomous.request(NaoWakeUpRequest())
                 self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
+                self.perform_greeting_wave()
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
             while i < len(script):

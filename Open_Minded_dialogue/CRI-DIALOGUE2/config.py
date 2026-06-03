@@ -274,7 +274,7 @@ USE_DESKTOP_MIC = True
 
 # True = connect NAO for speech output, LEDs, wake/rest, and optional NAO mic input.
 # Launchers override this per run mode; direct script runs use this default.
-CONNECT_NAO = False
+CONNECT_NAO = True
 
 ASK_RUN_MODE_AT_START         = True
 SIMULATION_MODE               = False
@@ -288,8 +288,8 @@ SIMULATED_PERSONA_PATH = os.path.join(SIMULATED_PERSONA_DIR, "noor_1001.json")
 USE_FAKE_PERSONA_UM           = False
 SIMULATION_WRITE_PERSONA_FILE = False
 WAIT_FOR_PREVIEW_CONFIRMATION = True
-REVIEW_TRANSCRIPTS            = True
-POST_PHASE_TEST_CONTROLS      = True
+REVIEW_TRANSCRIPTS            = False
+POST_PHASE_TEST_CONTROLS      = False
 
 CHILD_INPUT_MODE = "microphone"   # or "keyboard"
 SCRIPT_VERSION   = "CRI-BRANCH-BASIC4.0"
