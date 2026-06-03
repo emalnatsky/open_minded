@@ -15,3 +15,7 @@ conf/
 _local/
 CRI-DIALOGUE2/conversations/
 CRI-DIALOGUE2/session_config.local.json
+
+.env
+.env.local
+.env.*.local

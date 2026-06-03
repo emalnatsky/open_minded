@@ -3222,6 +3222,9 @@ class CRI_ScriptedDialogue(SICApplication):
                 pass
             self.finish_conversation_log()
             self.logger.info("Shutting down.")
+            # ↓ Add this
+            if hasattr(self, "speech") and self.speech is not None:
+                self.speech.shutdown()
             self.shutdown()
 
 
