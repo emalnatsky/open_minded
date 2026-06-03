@@ -122,7 +122,7 @@ class ScriptBuilder:
                 ),
                 "expects_response": True,
                 "response_mode": "topic_interpretation",
-                "memory_correction_requested": True,
+                "memory_correction_available": True,
                 "memory_correction_field": "fav_subject",
                 "used_fields": {"fav_subject": fav_subject},
             },
@@ -331,9 +331,12 @@ class ScriptBuilder:
             )
 
         future_lines = []
+        role_model_raw = um.get("role_model", self.d.UNKNOWN_VALUE)
         role_model = self.d.known(um, "role_model")
         aspiration = self.d.known(um, "aspiration")
-        if role_model:
+        if self.d.is_known(role_model_raw) and not self.d.um.is_meaningful_role_model(role_model_raw):
+            future_lines.append("je niet echt een vaste persoon hebt naar wie je opkijkt")
+        elif role_model:
             future_lines.append(f"{role_model} iemand is naar wie je opkijkt")
         if aspiration:
             future_lines.append(self.aspiration_memory_clause(aspiration))
@@ -349,27 +352,67 @@ class ScriptBuilder:
 
         return segments, self.d.child_facing_memory_fields(all_fields)
 
-    def role_model_rapport_segments(self, um: dict) -> list:
+    def role_model_phrase(self, role_model: str) -> dict:
+        values = self.d.split_memory_values(role_model)
+        role_model_text = self.d.format_dutch_list(values, role_model)
+        role_model_text = " ".join(str(role_model_text or "").split())
+        multiple = len(values) > 1
+        return {
+            "text": role_model_text,
+            "person_noun": "mensen" if multiple else "iemand",
+            "verb": "zijn" if multiple else "is",
+            "question_target": "hen" if multiple else "die persoon",
+        }
+
+    def role_model_rapport_segments(self, um: dict, post_correction: bool = False) -> list:
         role_model = self.d.known(um, "role_model")
         if role_model:
+            phrase = self.role_model_phrase(role_model)
             rolemodel_ack_fallback = self.d.scenario_utterance(
                 "p3_rolemodel_ack",
                 fallback="Dat klinkt als iemand die echt belangrijk voor je is.",
             )
+            if post_correction:
+                return [
+                    {
+                        "content_plan": self.d.l1("Wat maakt die persoon voor jou zo bijzonder?"),
+                        "expects_response": True,
+                        "response_mode": "acknowledge",
+                        "llm_turn": True,
+                        "used_fields": {"role_model": phrase["text"]},
+                        "l3": {
+                            "script_phase": "part3_rolemodel",
+                            "topic": "rolemodel",
+                            "response_function": "wrap_up",
+                            "question_allowed": False,
+                            "relevant_um_fields": ["role_model"],
+                            "local_context": (
+                                "Leo updated the child's stored role model and asked "
+                                "what makes that person special."
+                            ),
+                            "fallback": rolemodel_ack_fallback,
+                        },
+                    },
+                ]
             return [
                 {
                     "content_plan": self.d.sequence(
                         self.d.l2_pregen(
                             "p3_rolemodel_recall",
-                            f"Ik weet nog dat {role_model} voor jou iemand is naar wie je echt opkijkt.",
+                            (
+                                f"Ik weet nog dat {phrase['text']} voor jou "
+                                f"{phrase['person_noun']} {phrase['verb']} naar wie je echt opkijkt."
+                            ),
                             ["role_model"],
+                            fit_validator="role_model_recall",
+                            fit_values={"role_model_multiple": len(self.d.split_memory_values(role_model)) > 1},
                         ),
-                        self.d.l1("Wat maakt die persoon voor jou zo bijzonder?"),
+                        self.d.l1(f"Wat maakt {phrase['question_target']} voor jou zo bijzonder?"),
                     ),
                     "expects_response": True,
                     "response_mode": "acknowledge",
                     "llm_turn": True,
-                    "used_fields": {"role_model": role_model},
+                    "used_fields": {"role_model": phrase["text"]},
                     "l3": {
                         "script_phase": "part3_rolemodel",
                         "topic": "rolemodel",
@@ -396,7 +439,10 @@ class ScriptBuilder:
                     "Klopt dat een beetje?"
                 ),
                 "expects_response": True,
-                "response_mode": "listen_only",
+                "response_mode": "role_model_absence_check",
+                "memory_correction_available": True,
+                "memory_correction_field": "role_model",
+                "used_fields": {"role_model": "niemand"},
             },
             {
                 "content_plan": self.d.l1(
@@ -405,8 +451,7 @@ class ScriptBuilder:
                     "Wie is dat voor jou?"
                 ),
                 "expects_response": True,
-                "response_mode": "acknowledge",
-                "llm_turn": True,
+                "response_mode": "role_model_discovery",
                 "used_fields": {},
                 "l3": {
                     "script_phase": "part3_rolemodel",
@@ -421,6 +466,106 @@ class ScriptBuilder:
                     "fallback": no_rolemodel_ack_fallback,
                 },
             },
+        ]
+
+    def aspiration_postcorrection_segments(self, um: dict, condition_phase: int = 17) -> list:
+        actual_raw = self.d.known(um, "aspiration")
+        actual = self.aspiration_later_phrase(actual_raw) or self.d.UNKNOWN_VALUE
+        actual_label = self.aspiration_profession_label(actual_raw) or "dat beroep"
+        subject_phrase = self.subject_memory_phrase(um)
+        difficulty_phrase = self.school_difficulty_phrase(um)
+        profile = self.aspiration_reflection_profile_summary(um)
+
+        return [
+            {
+                "content_plan": self.d.l2_pregen(
+                    "p3_m4_postcorrection_reflection",
+                    (
+                        "Dat past ook wel mooi bij jou, vind ik. "
+                        f"Jij houdt van {profile}, "
+                        f"en dan snap ik wel dat {actual_label} bij jou past. "
+                        "Wat lijkt jou daar het mooiste aan?"
+                    ),
+                    [
+                        "interest",
+                        "animals_enjoys",
+                        "animal_fav",
+                        "fav_subject",
+                        "school_strength",
+                        "school_difficulty",
+                        "aspiration",
+                    ],
+                ),
+                "expects_response": True,
+                "response_mode": "listen_only",
+                "run_if_phase_confirmed_change": True,
+                "condition_phase": condition_phase,
+                "used_fields": {
+                    "interest": self.d.known(um, "interest"),
+                    "animals_enjoys": self.d.known(um, "animals_enjoys"),
+                    "animal_fav": self.d.known(um, "animal_fav"),
+                    "fav_subject": subject_phrase["fav_subject"],
+                    "school_strength": self.d.known(um, "school_strength"),
+                    "school_difficulty": difficulty_phrase["school_difficulty"],
+                    "aspiration": actual,
+                },
+            },
+        ]
+
+    def middle_school_feeling_segment(self, condition_phase: int = 17, skip_if_confirmed: bool = True) -> dict:
+        segment = {
+            "content_plan": self.d.l1(
+                "Denk jij daar al een beetje over na? "
+                "Heb je er zin in, of vind je het ook een beetje spannend?"
+            ),
+            "expects_response": True,
+            "response_mode": "middle_school_feeling",
+            "llm_turn": True,
+            "condition_phase": condition_phase,
+            "l3": {
+                "script_phase": "part3_middle_school",
+                "topic": "middle_school",
+                "response_function": "wrap_up",
+                "question_allowed": False,
+                "relevant_um_fields": [],
+                "local_context": (
+                    "Leo asked whether the child thinks about secondary school "
+                    "and whether they look forward to it or find it exciting."
+                ),
+                "next_script_line": (
+                    "Ik vond het echt fijn om zo met jou te praten. "
+                    "Daarom wil ik graag even goed kijken of ik nu alles goed over jou heb onthouden."
+                ),
+                "fallback": "Dat snap ik wel. Zo'n nieuwe stap kan voor iedereen anders voelen.",
+            },
+        }
+        if skip_if_confirmed:
+            segment["skip_if_phase_confirmed_change"] = True
+        return segment
+
+    def aspiration_unknown_segments(self, condition_phase: int = 17) -> list:
+        return [
+            {
+                "content_plan": self.d.l1(
+                    "Dat is helemaal niet erg. Je hoeft dat nu nog niet te weten."
+                ),
+                "expects_response": False,
+            },
+            {
+                "content_plan": self.d.l1(
+                    "Beroepen zijn best bijzonder he. "
+                    "Soms weet iemand het al heel precies, en soms verandert het ook nog."
+                ),
+                "expects_response": False,
+            },
+            {
+                "content_plan": self.d.l1(
+                    "Later is trouwens niet alleen later-later. "
+                    "Voor kinderen in groep 7 en 8 komt de middelbare school ook al best dichtbij."
+                ),
+                "expects_response": False,
+            },
+            self.middle_school_feeling_segment(condition_phase=condition_phase, skip_if_confirmed=False),
         ]
 
     def build_script(self) -> list:
@@ -1149,10 +1294,11 @@ class ScriptBuilder:
             {
                 "phase": 17,
                 "part": 3,
-                "phase_id": "3.4",
-                "script_phase": "part3_mistake4_aspiration",
-                "name": "Mistake 4 - aspiration",
-                "layer": "L1 + L2-pregen WRONG",
+                "phase_id": "3.4/5",
+                "phase_aliases": ["3.4", "3.5"],
+                "script_phase": "part3_mistake4_aspiration_reflection",
+                "name": "Mistake 4 - aspiration + reflection",
+                "layer": "L1 + L2-pregen WRONG + reflection",
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M4",
                 "mistake_type": m4_type,
@@ -1190,71 +1336,7 @@ class ScriptBuilder:
                         "defer_corrected_response": True,
                         "used_fields": {m4_field: m4_wrong},
                     },
-                    {
-                        "content_plan": self.d.l1(""),
-                        "expects_response": False,
-                        "response_mode": "listen_only",
-                        "run_if_phase_confirmed_change": True,
-                        "used_fields": {m4_field: m4_actual},
-                    },
-                ],
-                "used_fields": {m4_field: m4_wrong},
-                "example_child": f"Nee, {m4_wrong} klopt niet.",
-                "example_leo_after": "Oeps, wat wil jij dan later worden?",
-            },
-            {
-                "phase": 18,
-                "part": 3,
-                "phase_id": "3.5",
-                "script_phase": "part3_aspiration_reflection",
-                "name": "Space for correction + personalized reflection",
-                "layer": "L1 + L2-pregen",
-                "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
-                "segments": [
-                    {
-                        "content_plan": self.d.l1(
-                            "Dat is natuurlijk ook een heel mooi beroep. "
-                            "Wat lijkt jou daar dan zo leuk aan?"
-                        ),
-                        "expects_response": True,
-                        "response_mode": "listen_only",
-                        "run_if_phase_confirmed_change": True,
-                        "condition_phase": 17,
-                        "used_fields": {m4_field: m4_actual},
-                    },
-                    {
-                        "content_plan": self.d.l2_pregen(
-                            "p3_m4_postcorrection_reflection",
-                            (
-                                "Dat past ook wel mooi bij jou, vind ik. "
-                                f"Jij houdt van {aspiration_reflection_profile}, "
-                                f"en dan snap ik wel dat {m4_actual_label} bij jou past. "
-                                "Wat lijkt jou daar het mooiste aan?"
-                            ),
-                            [
-                                "interest",
-                                "animals_enjoys",
-                                "animal_fav",
-                                "fav_subject",
-                                "school_strength",
-                                "school_difficulty",
-                                m4_field,
-                            ],
-                        ),
-                        "expects_response": True,
-                        "response_mode": "listen_only",
-                        "run_if_phase_confirmed_change": True,
-                        "condition_phase": 17,
-                        "used_fields": {
-                            "interest": self.d.known(um, "interest"),
-                            "animals_enjoys": self.d.known(um, "animals_enjoys"),
-                            "animal_fav": self.d.known(um, "animal_fav"),
-                            "fav_subject": subject_phrase["fav_subject"],
-                            "school_strength": self.d.known(um, "school_strength"),
-                            "school_difficulty": difficulty_phrase["school_difficulty"],
-                            m4_field: m4_actual,
-                        },
-                    },
+                    *self.aspiration_postcorrection_segments(um, condition_phase=17),
                     {
                         "content_plan": self.d.l1(
                             "Beroepen zijn best bijzonder he. "
@@ -1273,31 +1355,7 @@ class ScriptBuilder:
                         "skip_if_phase_confirmed_change": True,
                         "condition_phase": 17,
                     },
-                    {
-                        "content_plan": self.d.l1(
-                            "Denk jij daar al een beetje over na? "
-                            "Heb je er zin in, of vind je het ook een beetje spannend?"
-                        ),
-                        "expects_response": True,
-                        "response_mode": "middle_school_feeling",
-                        "skip_if_phase_confirmed_change": True,
-                        "condition_phase": 17,
-                    },
-                    {
-                        "content_plan": self.d.l1(
-                            "Dat snap ik wel. Het lijkt me ook best een grote stap."
-                        ),
-                        "expects_response": False,
-                        "skip_if_phase_confirmed_change": True,
-                        "condition_phase": 17,
-                    },
-                    {
-                        "content_plan": self.d.l1(
-                            "Ik vond het echt fijn om zo met jou te praten. "
-                            "Daarom wil ik graag even goed kijken of ik nu alles goed over jou heb onthouden."
-                        ),
-                        "expects_response": False,
-                    },
+                    self.middle_school_feeling_segment(condition_phase=17, skip_if_confirmed=True),
                 ],
                 "used_fields": {
                     "interest": self.d.known(um, "interest"),
@@ -1308,34 +1366,27 @@ class ScriptBuilder:
                     "school_difficulty": difficulty_phrase["school_difficulty"],
                     m4_field: m4_actual,
                 },
-                "example_child": "Omdat ik dieren wil helpen.",
+                "example_child": f"Nee, {m4_wrong} klopt niet.",
+                "example_leo_after": "Oeps, wat wil jij dan later worden?",
             },
             {
-                "phase": 19,
+                "phase": 18,
                 "part": 3,
-                "phase_id": "3.6",
-                "script_phase": "part3_explicit_memory_inspection",
+                "phase_id": "3.6/7",
+                "phase_aliases": ["3.6", "3.7"],
+                "script_phase": "part3_explicit_memory_inspection_review",
                 "name": "Explicit memory inspection",
                 "layer": "L1 + memory access script",
-                "dialogue_case": self.d.CASE_FULLY_SCRIPTED,
-                "content_plan": self.d.l1(
-                    "Wil je misschien zien wat ik allemaal over jou onthoud?"
-                ),
-                "expects_response": True,
-                "response_mode": "explicit_memory_inspection_offer",
-                "used_fields": {},
-                "example_child": "Ja.",
-            },
-            {
-                "phase": 20,
-                "part": 3,
-                "phase_id": "3.7",
-                "script_phase": "part3_memory_review_co_construction",
-                "name": "Memory review / co-construction",
-                "layer": "L1 + memory access script",
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
-                "condition": "run_if_memory_review_requested",
                 "segments": [
+                    {
+                        "content_plan": self.d.l1(
+                            "Wil je misschien zien wat ik allemaal over jou onthoud?"
+                        ),
+                        "expects_response": True,
+                        "response_mode": "explicit_memory_inspection_offer",
+                        "used_fields": {},
+                    },
                     {
                         "content_plan": self.d.l1(
                             (
@@ -1346,16 +1397,18 @@ class ScriptBuilder:
                             else "Goed. Dan vertel ik je wat ik tot nu toe over jou heb gebruikt."
                         ),
                         "expects_response": False,
+                        "condition": "run_if_memory_review_requested",
+                        "memory_review_from_access_scope": True,
+                        "speak_memory_review_from_access_scope": True,
                         "activate_tablet_memory_access": tutorial_condition == self.d.CONDITION_EXPERIMENT,
-                        "memory_review_fields": list(memory_review_fields),
                     },
-                    *memory_review_segments,
                     {
                         "content_plan": self.d.l1(
                             "Is er misschien ook nog iets dat jij wilt dat ik over jou weet, "
                             "wat ik nog niet heb onthouden?"
                         ),
                         "expects_response": True,
+                        "condition": "run_if_memory_review_requested",
                         "response_mode": "memory_review_add_final",
                         "topic": self.memory_review_topic(
                             self.d.child_facing_memory_fields(self.d.UM_FIELDS),
@@ -1363,15 +1416,19 @@ class ScriptBuilder:
                         ),
                         "used_fields": {},
                     },
+                    {
+                        "content_plan": self.d.l1(
+                            "Dat is ook goed. Dan gaan we gewoon nog even verder."
+                        ),
+                        "expects_response": False,
+                        "condition": "run_if_memory_review_requested",
+                    },
                 ],
-                "used_fields": {
-                    field: um.get(field)
-                    for field in memory_review_fields
-                },
+                "used_fields": {},
                 "example_child": "Ja, dat klopt.",
             },
             {
-                "phase": 21,
+                "phase": 19,
                 "part": 3,
                 "phase_id": "3.8",
                 "script_phase": "part3_closing",
@@ -1417,11 +1474,9 @@ class ScriptBuilder:
             14: "part3_future_bridge",
             15: "part3_leo_self_disclosure",
             16: "part3_rolemodel_rapport",
-            17: "part3_mistake4_aspiration",
-            18: "part3_aspiration_reflection",
-            19: "part3_explicit_memory_inspection",
-            20: "part3_memory_review_co_construction",
-            21: "part3_closing",
+            17: "part3_mistake4_aspiration_reflection",
+            18: "part3_explicit_memory_inspection_review",
+            19: "part3_closing",
         }
         for turn in script:
             phase = turn.get("phase")

@@ -17,6 +17,9 @@ import os
 # Where this config file lives — used to resolve roster/persona paths
 # relative to the dialogue project, not the current working directory.
 _HERE = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_ROOT = _HERE
+OUTER_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
+LOCAL_ROOT = os.path.abspath(os.path.join(OUTER_ROOT, "_local"))
 
 
 # ── UM connection ────────────────────────────────────────────────────────────
@@ -290,16 +293,16 @@ POST_PHASE_TEST_CONTROLS      = False
 
 CHILD_INPUT_MODE = "microphone"   # or "keyboard"
 SCRIPT_VERSION   = "CRI-BRANCH-BASIC4.0"
-TOTAL_SCRIPT_PHASES = 21
+TOTAL_SCRIPT_PHASES = 19
 
 ASK_SESSION_INTERFACE_AT_START = True
 
 
 # ── File paths (resolved to absolute paths relative to this config file) ─────
 
-SESSION_CONFIG_PATH = os.path.abspath(os.path.join(_HERE, "session_config.local.json"))
-SESSION_STATE_PATH  = os.path.abspath(os.path.join(_HERE, "..", "_local", "session_state.json"))
-LOCAL_ENV_PATH      = os.path.abspath(os.path.join(_HERE, "..", "conf", ".env"))
+SESSION_CONFIG_PATH = os.path.abspath(os.path.join(LOCAL_ROOT, "session_config.local.json"))
+SESSION_STATE_PATH  = os.path.abspath(os.path.join(LOCAL_ROOT, "session_state.json"))
+LOCAL_ENV_PATH      = os.path.abspath(os.path.join(OUTER_ROOT, "conf", ".env"))
 
 # Config file for session — Prolog-style, lives in util/ (gitignored).
 # Contains child ID, CRI name (for NAO TTS), tablet name (for book cover),
@@ -310,4 +313,4 @@ ROSTER_PATH = os.path.abspath(os.path.join(_HERE, "..", "util", "test_config.pl"
 # ── Conversation logging ─────────────────────────────────────────────────────
 
 CONVERSATION_LOG_ENABLED = True
-CONVERSATION_LOG_ROOT    = os.path.abspath(os.path.join(_HERE, "conversations"))
+CONVERSATION_LOG_ROOT    = os.path.abspath(os.path.join(LOCAL_ROOT, "conversations"))

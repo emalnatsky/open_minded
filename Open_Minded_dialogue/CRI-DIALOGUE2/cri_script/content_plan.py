@@ -53,6 +53,11 @@ class ContentPlan:
         require_input_values: bool = False,
         branch: str = "default",
         topic_sensitive: bool = False,
+        rewrite_when_stale: bool = False,
+        rewrite_purpose: str = "",
+        fit_validator: str = "",
+        fit_values: dict = None,
+        rewrite_values: dict = None,
     ) -> dict:
         return {
             "type": self.d.CASE_LLM_PREGENERATED,
@@ -63,6 +68,11 @@ class ContentPlan:
             "require_input_values": bool(require_input_values),
             "branch": branch or "default",
             "topic_sensitive": bool(topic_sensitive),
+            "rewrite_when_stale": bool(rewrite_when_stale),
+            "rewrite_purpose": rewrite_purpose or "",
+            "rewrite_values": rewrite_values or {},
+            "fit_validator": fit_validator or "",
+            "fit_values": fit_values or {},
         }
 
     def sequence(self, *parts) -> dict:
@@ -86,16 +96,126 @@ class ContentPlan:
             safe_values[missing] = self.d.UNKNOWN_VALUE
             return template.format(**safe_values)
 
-    def text_mentions_input_values(self, text: str, input_fields: list) -> bool:
+    def text_mentions_input_values(self, text: str, input_fields: list, values_override: dict = None) -> bool:
         """True when a pregenerated utterance still matches the current UM values."""
         text_norm = str(text or "").lower()
         for field in input_fields or []:
-            value = self.d.last_um_preview.get(field)
+            value = (values_override or {}).get(field)
+            if not self.d.is_known(value):
+                value = self.d.last_um_preview.get(field)
             if not self.d.is_known(value):
                 continue
             value_norm = str(value).strip().lower()
             if value_norm and value_norm not in text_norm:
                 return False
+        return True
+
+    @staticmethod
+    def _contains_any(text: str, words: tuple[str, ...]) -> bool:
+        text_norm = str(text or "").casefold()
+        return any(word in text_norm for word in words)
+
+    def sport_can_have_position(self, sport: str) -> bool:
+        clean = str(sport or "").casefold()
+        position_sports = (
+            "voetbal",
+            "hockey",
+            "basketbal",
+            "handbal",
+            "korfbal",
+            "volleybal",
+            "rugby",
+            "waterpolo",
+        )
+        return any(word in clean for word in position_sports)
+
+    def text_mentions_other_sport(self, text: str, sport: str) -> bool:
+        text_norm = str(text or "").casefold()
+        sport_norm = str(sport or "").casefold()
+        known_sports = (
+            "voetbal",
+            "hockey",
+            "basketbal",
+            "handbal",
+            "korfbal",
+            "volleybal",
+            "rugby",
+            "waterpolo",
+            "tennis",
+            "padel",
+            "badminton",
+            "tafeltennis",
+            "schaatsen",
+            "hardlopen",
+            "zwemmen",
+            "atletiek",
+            "rennen",
+            "judo",
+            "karate",
+            "turnen",
+            "dans",
+            "dansen",
+            "gymnastiek",
+            "vissen",
+            "paardrijden",
+            "skateboarden",
+            "fietsen",
+            "wielrennen",
+        )
+        for known_sport in known_sports:
+            if known_sport in text_norm and known_sport not in sport_norm:
+                return True
+        return False
+
+    def pregenerated_text_fits_context(self, text: str, fit_validator: str = "", fit_values: dict = None) -> bool:
+        if not fit_validator:
+            return True
+
+        values = fit_values or {}
+        if fit_validator == "role_model_recall":
+            if "  " in str(text or ""):
+                return False
+            if values.get("role_model_multiple"):
+                lowered = str(text or "").casefold()
+                if "iemand is" in lowered or "die persoon" in lowered:
+                    return False
+            return True
+
+        if fit_validator in {"sport_open", "sport_question", "sport_followup"}:
+            sport = values.get("sports_fav_play") or values.get("sport") or ""
+            if not sport:
+                return True
+            if self.text_mentions_other_sport(text, sport):
+                return False
+
+            if fit_validator == "sport_open":
+                position_question_words = (
+                    "positie",
+                    "posities",
+                    "keeper",
+                    "spits",
+                    "aanval",
+                    "verdedig",
+                    "verdediging",
+                    "middenveld",
+                    "doel",
+                )
+                if self._contains_any(text, position_question_words) and not self.sport_can_have_position(sport):
+                    return False
+
+            if fit_validator == "sport_followup":
+                team_followup_words = (
+                    "overspelen",
+                    "overpassen",
+                    "aanvallen",
+                    "verdedigen",
+                    "snel rennen",
+                    "fanatiek meedoen",
+                    "team",
+                )
+                if self._contains_any(text, team_followup_words) and not self.sport_can_have_position(sport):
+                    return False
+
         return True
 
     def pregenerated_utterance(
@@ -105,26 +225,58 @@ class ContentPlan:
         branch: str = "default",
         input_fields: list = None,
         require_input_values: bool = False,
+        rewrite_when_stale: bool = False,
+        rewrite_purpose: str = "",
+        rewrite_values: dict = None,
+        fit_validator: str = "",
+        fit_values: dict = None,
     ) -> str:
         """Read an L2-pregen utterance from the CRI scenario or UM profile."""
+        context_values = fit_values or rewrite_values or {}
         scenario_keys = self.d.um.scenario_keys_for(key)
         for scenario_key in scenario_keys:
             scenario_text = self.d.scenario_utterance(scenario_key, branch=branch, fallback="")
-            if self.d.is_known(scenario_text) and (
+            if not self.d.is_known(scenario_text):
+                continue
+            mentions_required_values = (
                 not require_input_values
-                or self.text_mentions_input_values(scenario_text, input_fields or [])
-            ):
+                or self.text_mentions_input_values(scenario_text, input_fields or [], rewrite_values or {})
+            )
+            fits_context = self.pregenerated_text_fits_context(scenario_text, fit_validator, context_values)
+            if mentions_required_values and fits_context:
                 return scenario_text
+            if rewrite_when_stale:
+                return self.d.rewrite_stale_pregenerated_utterance(
+                    original_text=scenario_text,
+                    fallback=fallback,
+                    input_fields=input_fields or [],
+                    values_override=rewrite_values or {},
+                    key=scenario_key,
+                    purpose=rewrite_purpose or "topic_sensitive",
+                )
 
         for scenario_key in scenario_keys:
             for prefix in self.d.PREGENERATED_UTTERANCE_PREFIXES:
                 field = f"{prefix}{scenario_key}"
                 value = self.d.last_um_preview.get(field)
-                if self.d.is_known(value) and (
+                if not self.d.is_known(value):
+                    continue
+                mentions_required_values = (
                     not require_input_values
-                    or self.text_mentions_input_values(value, input_fields or [])
-                ):
+                    or self.text_mentions_input_values(value, input_fields or [], rewrite_values or {})
+                )
+                fits_context = self.pregenerated_text_fits_context(value, fit_validator, context_values)
+                if mentions_required_values and fits_context:
                     return str(value)
+                if rewrite_when_stale:
+                    return self.d.rewrite_stale_pregenerated_utterance(
+                        original_text=str(value),
+                        fallback=fallback,
+                        input_fields=input_fields or [],
+                        values_override=rewrite_values or {},
+                        key=field,
+                        purpose=rewrite_purpose or "topic_sensitive",
+                    )
         return self.render_template_text(fallback, {})
 
     def render_content_plan(self, plan, turn: dict = None) -> str:
@@ -161,6 +313,11 @@ class ContentPlan:
                 plan.get("branch", "default"),
                 plan.get("input_fields", []),
                 plan.get("require_input_values", False),
+                plan.get("rewrite_when_stale", False),
+                plan.get("rewrite_purpose", ""),
+                plan.get("rewrite_values", {}),
+                plan.get("fit_validator", ""),
+                plan.get("fit_values", {}),
             )
 
         if plan_type == self.d.CASE_PREAUTHORED_POOL:

@@ -37,6 +37,11 @@ class Segments:
         fallback: str,
         input_fields: list = None,
         require_input_values: bool = False,
+        rewrite_when_stale: bool = False,
+        rewrite_purpose: str = "",
+        fit_validator: str = "",
+        fit_values: dict = None,
+        rewrite_values: dict = None,
     ) -> dict:
         return self.d.l2_pregen(
             self.topic_step_keys(generic_prefix, suffix, legacy_key),
@@ -44,7 +49,33 @@ class Segments:
             input_fields or [],
             require_input_values=require_input_values,
             topic_sensitive=True,
+            rewrite_when_stale=rewrite_when_stale,
+            rewrite_purpose=rewrite_purpose,
+            fit_validator=fit_validator,
+            fit_values=fit_values,
+            rewrite_values=rewrite_values,
         )
+
+    def stale_rewriting_topic_l2_pregen(
+        self,
+        generic_prefix: str | None,
+        suffix: str,
+        legacy_key: str,
+        fallback: str,
+        input_fields: list,
+        purpose: str,
+    ) -> dict:
+        plan = self.topic_l2_pregen(
+            generic_prefix,
+            suffix,
+            legacy_key,
+            fallback,
+            input_fields,
+            require_input_values=True,
+        )
+        plan["rewrite_when_stale"] = True
+        plan["rewrite_purpose"] = purpose
+        return plan
 
     def topic_label(self, topic: dict) -> str:
         domain = topic.get("domain")
@@ -76,7 +107,11 @@ class Segments:
     def pet_open_fallback(self, topic: dict) -> str:
         pet_name, pet_type, animal = self.pet_subject_parts(topic)
         if pet_name and pet_type and pet_name.casefold() != pet_type.casefold():
-            return f"Ik weet ook nog dat jij een {pet_type} hebt die {pet_name} heet."
+            return (
+                f"Ik weet ook nog dat jij een {pet_type} hebt die {pet_name} heet. "
+                f"Dat vind ik echt een mooie naam. {pet_name} klinkt alsof die stiekem "
+                "belangrijke plannen maakt als niemand kijkt."
+            )
         if pet_type:
             return f"Ik weet ook nog dat jij een {pet_type} als huisdier hebt."
         if pet_name:
@@ -112,6 +147,11 @@ class Segments:
         if any(word in clean for word in form_sports):
             return "Vind je vooral nieuwe bewegingen leren, sterk worden, of dat je goed moet opletten leuk?"
         return "Wat vind je daar meestal het fijnst aan: bezig zijn, beter worden, of samen met anderen iets doen?"
+
+    def sport_open_prompt(self, sport: str) -> str:
+        if self.d.cp.sport_can_have_position(sport):
+            return f"In welke positie speel jij met {sport}?"
+        return f"Hoe ziet dat er meestal uit als jij met {sport} bezig bent?"
 
     def neutral_topic_segments(self, topic: dict, include_close: bool) -> list:
         domain = topic.get("domain")
@@ -177,7 +217,7 @@ class Segments:
         input_fields = list((topic.get("current_values") or {}).keys())
         if domain == "sport":
             recall_fallback = f"Ik weet ook nog dat jij zelf {label} doet."
-            open_fallback = f"In welke positie speel jij met {label}?"
+            open_fallback = self.sport_open_prompt(label)
             question_fallback = (
                 "Ik vraag me wel eens af of ik een goede sportrobot zou kunnen zijn, "
                 f"maar ik val waarschijnlijk al om voor de warming-up. Wat vind jij zo leuk aan {label}?"
@@ -212,8 +252,11 @@ class Segments:
             field for field in value_fields
             if self.d.is_known((topic.get("current_values") or {}).get(field))
         ] or input_fields
+        fit_values = {}
+        if domain == "sport" and self.d.is_known(label):
+            fit_values = {"sports_fav_play": label}
         segments = []
-        include_recall = generic_prefix != "p1_t2" or self.scenario_has_any_steps([f"{generic_prefix}_recall"])
+        include_recall = generic_prefix != "p1_t2"
         if include_recall:
             segments.append({
                 "content_plan": self.d.l2_pregen(
@@ -235,6 +278,11 @@ class Segments:
                 open_fallback,
                 pregen_fields,
                 topic_sensitive=True,
+                rewrite_when_stale=domain == "sport",
+                rewrite_purpose="sport_open" if domain == "sport" else "",
+                fit_validator="sport_open" if domain == "sport" else "",
+                fit_values=fit_values,
+                rewrite_values=fit_values,
             ),
             "expects_response": open_expects_response,
             "used_fields": {} if generic_prefix == "p1_t1" else self.topic_used_fields(topic),
@@ -243,6 +291,15 @@ class Segments:
             open_segment.update({
                 "response_mode": "acknowledge",
                 "llm_turn": True,
+                "l3": {
+                    "script_phase": "part1_topic1",
+                    "topic": "sport" if domain == "sport" else domain or "topic",
+                    "response_function": "acknowledge",
+                    "question_allowed": False,
+                    "relevant_um_fields": ["sports_fav_play"] if domain == "sport" else pregen_fields,
+                    "local_context": f"Leo and the child are talking about {label}.",
+                    "fallback": "Dat snap ik wel.",
+                },
             })
         segments.append(open_segment)
 
@@ -252,8 +309,12 @@ class Segments:
                     f"{generic_prefix}_question",
                     question_fallback,
                     pregen_fields,
-                    require_input_values=domain == "sport",
                     topic_sensitive=True,
+                    rewrite_when_stale=domain == "sport",
+                    rewrite_purpose="sport_question" if domain == "sport" else "",
+                    fit_validator="sport_question" if domain == "sport" else "",
+                    fit_values=fit_values,
+                    rewrite_values=fit_values,
                 ),
                 "expects_response": True,
                 "response_mode": "listen_only",
@@ -266,10 +327,15 @@ class Segments:
                 followup_fallback,
                 pregen_fields,
                 topic_sensitive=True,
+                rewrite_when_stale=domain == "sport",
+                rewrite_purpose="sport_followup" if domain == "sport" else "",
+                fit_validator="sport_followup" if domain == "sport" else "",
+                fit_values=fit_values,
+                rewrite_values=fit_values,
             ),
             "expects_response": True,
             "response_mode": "listen_only",
-            "used_fields": {},
+            "used_fields": self.topic_used_fields(topic) if generic_prefix == "p1_t2" else {},
         })
 
         if include_close:
@@ -312,6 +378,7 @@ class Segments:
             return self.neutral_topic_segments(topic, include_close)
         if domain == "sport":
             sport = topic.get("current_values", {}).get("sports_fav_play") or label
+            fit_values = {"sports_fav_play": sport} if self.d.is_known(sport) else {}
             segments = [
                 {
                     "content_plan": self.topic_l2_pregen(
@@ -331,8 +398,13 @@ class Segments:
                         generic_prefix,
                         "open",
                         "sport_open",
-                        f"In welke positie speel jij met {sport}?",
+                        self.sport_open_prompt(sport),
                         ["sports_fav_play"],
+                        rewrite_when_stale=True,
+                        rewrite_purpose="sport_open",
+                        fit_validator="sport_open",
+                        fit_values=fit_values,
+                        rewrite_values=fit_values,
                     ),
                     "expects_response": True,
                     "response_mode": "acknowledge",
@@ -356,8 +428,12 @@ class Segments:
                             f"maar ik val waarschijnlijk al om voor de warming-up. Wat vind jij zo leuk aan {sport}?"
                         ),
                         ["sports_fav_play"],
-                        require_input_values=True,
                         topic_sensitive=True,
+                        rewrite_when_stale=True,
+                        rewrite_purpose="sport_question",
+                        fit_validator="sport_question",
+                        fit_values=fit_values,
+                        rewrite_values=fit_values,
                     ),
                     "expects_response": True,
                     "response_mode": "listen_only",
@@ -372,6 +448,11 @@ class Segments:
                             "sport_followup",
                             self.sport_followup_prompt(sport),
                             ["sports_fav_play"],
+                            rewrite_when_stale=True,
+                            rewrite_purpose="sport_followup",
+                            fit_validator="sport_followup",
+                            fit_values=fit_values,
+                            rewrite_values=fit_values,
                         ),
                     ),
                     "expects_response": True,
@@ -557,7 +638,7 @@ class Segments:
     def topic2_phase_segments(self, topic: dict) -> list:
         """Build the correct re-ground topic before M2."""
         if topic.get("domain") == "huisdier":
-            return self.pet_topic2_segments(topic)
+            return self.topic2_bridge_segments() + self.pet_topic2_segments(topic)
 
         if self.scenario_has_any_steps([
             "p1_t2_recall",
@@ -565,10 +646,10 @@ class Segments:
             "p1_t2_followup",
             "p1_t2_close",
         ]):
-            return self.generic_topic_segments(topic, "p1_t2", include_close=True)
+            return self.topic2_bridge_segments() + self.generic_topic_segments(topic, "p1_t2", include_close=True)
 
         if topic.get("domain") in ("sport", "muziek", "huisdier", "boeken"):
-            return self.part1_topic_segments(topic, include_close=False, generic_prefix="p1_t2") + [
+            return self.topic2_bridge_segments() + self.part1_topic_segments(topic, include_close=False, generic_prefix="p1_t2") + [
                 {
                     "content_plan": self.d.l2_pregen(
                         "p1_t2_close",
@@ -583,7 +664,7 @@ class Segments:
         label = topic.get("label")
 
         topic_fields = self.topic_label_fields(topic)
-        return [
+        return self.topic2_bridge_segments() + [
             {
                 "content_plan": self.d.l2_slot(
                     "Ik weet ook nog dat {topic} bij jou hoort.",
@@ -596,44 +677,70 @@ class Segments:
             }
         ]
 
+    def topic2_bridge_segments(self) -> list:
+        """Fixed comfort bridge before the second Part 1 topic."""
+        return [
+            {
+                "content_plan": self.d.l1(
+                    "Grappig eigenlijk, he. Mensen hebben vaak meer dan een ding dat ze leuk vinden. "
+                    "Ik heb dat ook een beetje."
+                ),
+                "expects_response": False,
+                "used_fields": {},
+            },
+            {
+                "content_plan": self.d.l1(
+                    "Bij boeken vind ik dat zo fijn: dan kan ik even allerlei verschillende levens proberen, "
+                    "zonder dat ik mijn robotbenen hoef te verplaatsen."
+                ),
+                "expects_response": False,
+                "used_fields": {},
+            },
+            {
+                "content_plan": self.d.l1(
+                    "En jij hebt volgens mij ook meer dingen die je leuk vindt."
+                ),
+                "expects_response": False,
+                "used_fields": {},
+            },
+        ]
+
     def pet_topic2_segments(self, topic: dict) -> list:
         segments = []
-        if self.scenario_has_any_steps(["p1_t2_recall"]):
-            segments.append({
-                "content_plan": self.d.l2_pregen(
-                    "p1_t2_recall",
-                    self.pet_open_fallback(topic),
-                    ["pet_name", "pet_type", "animal_fav", "has_pet"],
-                    topic_sensitive=True,
-                ),
-                "expects_response": True,
-                "response_mode": "listen_only",
-                "used_fields": self.topic_used_fields(topic),
-            })
-
+        rewrite_values = {
+            field: value
+            for field, value in (topic.get("current_values") or {}).items()
+            if field in ("pet_type", "pet_name") and self.d.is_known(value)
+        }
+        open_plan = self.stale_rewriting_topic_l2_pregen(
+            "p1_t2",
+            "open",
+            "animals_open",
+            self.pet_open_fallback(topic),
+            ["pet_type", "pet_name"],
+            "pet_open",
+        )
+        open_plan["rewrite_values"] = rewrite_values
+        followup_plan = self.stale_rewriting_topic_l2_pregen(
+            "p1_t2",
+            "followup",
+            "animals_followup",
+            self.pet_followup_fallback(topic),
+            ["pet_type", "pet_name"],
+            "pet_followup",
+        )
+        followup_plan["rewrite_values"] = rewrite_values
         segments.extend([
             {
-                "content_plan": self.topic_l2_pregen(
-                    "p1_t2",
-                    "open",
-                    "animals_open",
-                    self.pet_open_fallback(topic),
-                    ["pet_name", "pet_type", "animal_fav", "has_pet"],
-                ),
+                "content_plan": open_plan,
                 "expects_response": False,
                 "used_fields": self.topic_used_fields(topic),
             },
             {
-                "content_plan": self.topic_l2_pregen(
-                    "p1_t2",
-                    "followup",
-                    "animals_followup",
-                    self.pet_followup_fallback(topic),
-                    ["pet_name", "pet_type", "animal_fav"],
-                ),
+                "content_plan": followup_plan,
                 "expects_response": True,
                 "response_mode": "listen_only",
-                "used_fields": {},
+                "used_fields": self.topic_used_fields(topic),
             },
             {
                 "content_plan": self.d.l2_pregen(

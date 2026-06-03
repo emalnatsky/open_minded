@@ -100,6 +100,7 @@ class TabletStateWriter:
         get_child_name_fn=None,
         get_tablet_name_fn=None,
         get_condition_fn=None,
+        get_session_id_fn=None,
         get_mistake_states_fn=None,
         enabled: bool = True,
     ):
@@ -119,6 +120,7 @@ class TabletStateWriter:
         self._get_child_name = get_child_name_fn or (lambda: "")
         self._get_tablet_name = get_tablet_name_fn or get_child_name_fn or (lambda: "")
         self._get_condition = get_condition_fn or (lambda: "")
+        self._get_session_id = get_session_id_fn or (lambda: "")
         self._get_mistake_states = get_mistake_states_fn or (lambda: {})
 
         # Tracks which categories have been unlocked so far this session.
@@ -223,6 +225,7 @@ class TabletStateWriter:
     def _write_state(self, phase=None):
         mistake_summary = self._build_mistake_summary()
         state = {
+            "session_id":          self._get_session_id(),
             "child_id":            self._get_child_id(),
             "child_name":          self._get_tablet_name() or self._get_child_name(),
             "condition":           self._get_condition(),

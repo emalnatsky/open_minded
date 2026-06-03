@@ -226,7 +226,9 @@ class MemoryAccess:
         aspiration = value("aspiration")
         if interest:
             future_bits.append(f"je interesse hebt in {interest}")
-        if role_model:
+        if role_model and not self.d.um.is_meaningful_role_model(role_model):
+            future_bits.append("je niet echt een vaste persoon hebt naar wie je opkijkt")
+        elif role_model:
             future_bits.append(f"{role_model} iemand is naar wie je opkijkt")
         if aspiration:
             profession = aspiration[:-len("worden")].strip() if aspiration.lower().endswith("worden") else aspiration
