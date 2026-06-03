@@ -1180,6 +1180,7 @@ class ScriptBuilder:
                         "llm_turn": True,
                         "skip_if_phase_confirmed_change": True,
                         "used_fields": school_difficulty_followup_used_fields,
+                        "memory_correction_available": True,
                         "m3_school_difficulty_resolution": m3_wrong_conflicts_with_school_difficulty,
                         "l3": {
                             "script_phase": "part2_school",

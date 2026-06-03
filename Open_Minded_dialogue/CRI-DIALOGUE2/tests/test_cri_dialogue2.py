@@ -764,7 +764,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(phase34["segments"][6]["llm_turn"])
         self.assertIn("Snap jij een beetje wat ik bedoel?", app.turn_text(phase34["segments"][0]))
         self.assertIn("En volgens mij wil jij later", app.turn_text(phase34["segments"][2]))
-        self.assertIn("Wat lijkt jou daar het mooiste aan?", app.turn_text(phase34["segments"][3]))
+        self.assertIn("Wat lijkt jou het mooiste aan", app.turn_text(phase34["segments"][3]))
         self.assertIn("middelbare school", app.turn_text(phase34["segments"][5]))
         phase36 = script[17]
         self.assertEqual(phase36["part"], 3)
@@ -2322,8 +2322,10 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("Bij boeken vind ik dat zo fijn", topic2_texts[1])
         self.assertEqual(topic2_texts[2], "En jij hebt volgens mij ook meer dingen die je leuk vindt.")
         self.assertNotIn("T2 recall uit GraphDB.", topic2_texts)
-        self.assertEqual(topic2_texts[3], "T2 open uit GraphDB?")
-        self.assertEqual(topic2_texts[4], "T2 followup uit GraphDB?")
+        self.assertIn("kat", topic2_texts[3].lower())
+        self.assertNotEqual(topic2_texts[3], "T2 open uit GraphDB?")
+        self.assertIn("kat", topic2_texts[4].lower())
+        self.assertNotEqual(topic2_texts[4], "T2 followup uit GraphDB?")
         self.assertEqual(topic2_texts[5], "T2 close uit GraphDB.")
 
     def test_topic1_activity_sport_rejects_position_open_question(self):

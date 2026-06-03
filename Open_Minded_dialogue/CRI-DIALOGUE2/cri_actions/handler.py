@@ -393,8 +393,12 @@ class ActionHandler:
             return False
 
         allowed = self.allowed_change_fields(turn)
-        if (
+        correction_value_available = (
             turn.get("memory_correction_available")
+            or turn.get("m3_school_difficulty_resolution")
+        )
+        if (
+            correction_value_available
             and result.intent in ("um_add", "um_update", "dialogue_update")
             and result.field in allowed
             and self.meaningful_classifier_value(result.value)
