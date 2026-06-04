@@ -34,6 +34,7 @@ If the child says nothing (empty transcript), listen_with_retry() asks Leo
 to repeat the question up to max_listen_retries times before giving up.
 """
 
+import re
 import time
 import unicodedata
 import logging
@@ -103,6 +104,7 @@ class SpeechIO:
         stt_beam_size: int = 5,
         # ── Retry knob ───────────────────────────────────────────────────────
         max_listen_retries: int = 3,
+        pronunciation_overrides_path: str = None,
     ):
         """
         Args:
@@ -139,6 +141,15 @@ class SpeechIO:
         self._generate_simulated_response = generate_simulated_response_fn or (lambda: "")
         self._set_last_utterance = set_last_utterance_fn or (lambda t: None)
         self._max_listen_retries = max_listen_retries
+        self._pronunciation_overrides = {}
+        if pronunciation_overrides_path:
+            import json, os
+            if os.path.exists(pronunciation_overrides_path):
+                with open(pronunciation_overrides_path, "r", encoding="utf-8") as f:
+                    self._pronunciation_overrides = json.load(f)
+                logger.info("Loaded %d TTS pronunciation overrides.", len(self._pronunciation_overrides))
+
+
 
         # Tracks the last Leo utterance so Whisper gets question context next listen().
         self._last_leo_text: str = ""
@@ -218,6 +229,7 @@ class SpeechIO:
         if not text or not text.strip():
             return
         text = self.strip_non_bmp(text)
+        text = self._apply_pronunciation_overrides(text)
         self._last_leo_text = text   # kept for Whisper context on next listen()
         logger.info("LEO: %s", text)
         self._set_last_utterance(text)
@@ -441,6 +453,13 @@ class SpeechIO:
                 continue
             safe_chars.append(char)
         return "".join(safe_chars)
+
+    def _apply_pronunciation_overrides(self, text: str) -> str:
+        if not self._pronunciation_overrides:
+            return text
+        for word, pronunciation in self._pronunciation_overrides.items():
+            text = re.sub(r'\b' + re.escape(word) + r'\b', pronunciation, text, flags=re.IGNORECASE)
+        return text
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
