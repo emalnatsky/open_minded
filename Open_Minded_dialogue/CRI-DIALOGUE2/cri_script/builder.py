@@ -1453,9 +1453,7 @@ class ScriptBuilder:
                         "content_plan": self.d.l1(
                             "Zoals je misschien wel hebt gemerkt, maakte ik soms een foutje. "
                             "Dat deed ik soms expres, zodat we met mijn geheugen konden spelen. "
-                            "Maar ik kan natuurlijk ook in het echt fouten maken. "
-                            "Voor dit experiment is het belangrijk dat je hierover nog niets met je klasgenoten deelt. "
-                            "Dus: sssst."
+                            "Maar ik kan natuurlijk ook in het echt fouten maken."
                         ),
                         "expects_response": False,
                     },
