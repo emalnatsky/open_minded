@@ -1618,7 +1618,13 @@ class ActionHandler:
         if self.is_plain_memory_acknowledgement(transcript) and not turn.get("memory_correction_requested"):
             return {}
         repaired_answer_value = self.repair_value_from_short_answer(result, transcript, turn, mistake_state)
-        inline_memory_correction = self.has_inline_memory_correction_cue(result, transcript, turn)
+        inline_memory_correction = self.has_inline_memory_correction_cue(result, transcript, turn) or (
+            bool(self.mentioned_um_fields(turn))
+            and any(
+                phrase in str(transcript or "").lower()
+                for phrase in ("nee", "klopt niet", "niet waar", "verkeerd", "fout")
+            )
+        )
         clear_mistake_update = (
             turn.get("response_mode") == "mistake_interpretation"
             and bool(turn.get("mistake_field"))
@@ -1642,11 +1648,23 @@ class ActionHandler:
                 )
             )
         )
+        # RELAXED GATE: on a deliberate-mistake turn, let any clear child value
+        # through so the child's words are the trigger (restores pre-gate behaviour).
+        mistake_turn_correction = (
+            bool(
+                turn.get("mistake_id")
+                or turn.get("mistake_field")
+                or turn.get("response_mode") == "mistake_interpretation"
+            )
+            and intent in ("um_add", "um_update", "dialogue_update")
+            and self.meaningful_classifier_value(result.value)
+        )
         if (
             intent in ("um_add", "um_update", "dialogue_update", "um_delete")
             and not turn.get("memory_correction_requested")
             and not inline_memory_correction
             and not clear_mistake_update
+            and not mistake_turn_correction
             and not self.response_mode_allows_direct_memory_update(turn.get("response_mode"))
         ):
             return {}
@@ -1902,6 +1920,8 @@ class ActionHandler:
                     "current_values": {change.get("field"): change.get("old_value")},
                 },
                 "allow_memory_change": True,
+                "memory_correction_requested": True,
+                "response_mode": "change_confirmation",
             },
             transcript,
         )
@@ -2633,6 +2653,18 @@ class ActionHandler:
                 follow_up_needed=True,
             )
 
+        # Child provided content to add/change: build it, confirm it, and store it
+        # on yes. Falls through to the existing handling if nothing concrete was
+        # extracted, so we never write a guessed value.
+        addition_change = self.change_from_intent_result(result, turn, transcript)
+        if (
+            addition_change
+            and addition_change.get("field")
+            and self.d.is_known(addition_change.get("new_value"))
+            and addition_change.get("action") in ("update", "add", None)
+        ):
+            return self.confirm_memory_addition(addition_change, turn)
+
         if self.is_confirmation_yes(result, transcript):
             response = "Wat wil je dat ik nog onthoud?"
             self.d.speech.say(response)
@@ -2657,6 +2689,64 @@ class ActionHandler:
             True,
             "Child added something extra, but no UM field/value pair was extracted.",
             leo_response=response,
+        )
+
+    def confirm_memory_addition(self, change: dict, turn: dict) -> dict:
+        """Confirm a child-initiated addition/change in the co-construction phase.
+
+        Yes  -> store it and give the standard acknowledgement.
+        No   -> ask whether they want to add/change something else (the caller's
+                follow-up loop re-enters this phase until the child declines).
+        """
+        field_label = change.get("field_label") or self.d.field_label(change.get("field"))
+        value = change.get("new_value")
+        question = f"Wil je dat ik onthoud dat {field_label} {value} is?"
+        self.d.speech.say(question)
+        time.sleep(0.5)
+        answer = self.d.speech.listen_with_review()
+        time.sleep(0.8)
+
+        confirm_ctx = dict(turn or {})
+        confirm_ctx["response_mode"] = "change_confirmation"
+        if change.get("field"):
+            confirm_ctx["used_fields"] = {change["field"]: value}
+        result = self.classify_with_repeat(answer, confirm_ctx)
+
+        if self.is_confirmation_yes(result, answer):
+            stored_change = dict(change)
+            stored_change["action"] = "update"
+            self.apply_confirmed_change_and_acknowledge(stored_change)
+            followup = "Wil je nog iets toevoegen of veranderen?"
+            self.d.speech.say(followup)
+            return self.action_result(
+                "memory_review_addition_confirmed",
+                True,
+                "Child added a memory item; confirmed and stored.",
+                change=stored_change,
+                change_confirmed=True,
+                leo_response=followup,
+                follow_up_needed=True,
+            )
+
+        if self.is_confirmation_no(result, answer):
+            followup = "Oké, dat onthoud ik niet. Wil je iets anders toevoegen of veranderen?"
+            self.d.speech.say(followup)
+            return self.action_result(
+                "memory_review_addition_declined",
+                True,
+                "Child rejected the proposed addition; offering add/change again.",
+                leo_response=followup,
+                follow_up_needed=True,
+            )
+
+        # Unclear yes/no: re-ask the same confirmation.
+        self.d.speech.say(question)
+        return self.action_result(
+            "memory_review_addition_unclear",
+            True,
+            "Addition confirmation was unclear; re-asking.",
+            leo_response=question,
+            follow_up_needed=True,
         )
 
     def action_handler(self, result, transcript: str, turn: dict) -> dict:
@@ -3038,11 +3128,88 @@ class ActionHandler:
             ))
             self.d.speech.say(self.confirmation_text(change))
 
+    def apply_confirmed_change_and_acknowledge(self, change: dict) -> bool:
+        """Apply + persist a change and ALWAYS speak an acknowledgement.
+
+        Shared by the normal 'yes' path and the STT-fallback path so the child
+        always hears what changed before the dialogue moves to the next phase.
+        """
+        self.d.corrections_seen += 1
+        self.d.handle_confirmed_mistake_related_change(change, self.d.current_turn_context)
+        self.remember_confirmed_change_locally(change)
+        self.prepare_tablet_change_reveal(change, self.d.current_turn_context)
+        written = self.d.write_um_change(change)
+        if self.d.current_turn_context:
+            self.d.phases_with_confirmed_change.add(self.d.current_turn_context.get("phase"))
+        if written:
+            self.d.speech.say(self.successful_change_acknowledgement(change))
+            self.reveal_tablet_change_after_operator(change, self.d.current_turn_context)
+        else:
+            self.clear_pending_tablet_reveal(self.d.current_turn_context)
+            self.d.speech.say("Dankjewel, ik heb dat genoteerd, maar opslaan lukte nu niet.")
+        self.d.pending_change = None
+        return True
+
+    def reelicit_correction_value(self, change: dict) -> dict:
+        """Ask ONLY for the correct value (not the whole phase), listen once,
+        and return a refined change dict if a clear value came back, else {}."""
+        field = change.get("field")
+        question = self.correction_question_for_field(
+            field, change.get("field_label"), self.d.current_turn_context
+        )
+        self.d.speech.say(question)
+        time.sleep(0.5)
+        answer = self.d.speech.listen_with_review()
+        time.sleep(0.8)
+        reelicit_turn = {
+            "topic": {
+                "fields": [field],
+                "field_labels": {field: change.get("field_label")},
+                "current_values": {field: change.get("old_value")},
+            },
+            "allow_memory_change": True,
+            "memory_correction_requested": True,
+            "response_mode": "memory_access_change",
+        }
+        result = self.classify_with_repeat(answer, reelicit_turn)
+        refined = self.change_from_intent_result(result, reelicit_turn, answer)
+        if refined and self.d.is_known(refined.get("new_value")):
+            return refined
+        return {}
+
+    def db_fallback_change(self, change: dict) -> dict:
+        """Resolve the correct value from stored memory when STT keeps failing.
+
+        Source order: live UM snapshot for the field -> the scripted correct
+        value of the mistake (mistake_actual) -> the change's old_value. Adjust
+        this if your study wants a different 'ground truth'.
+        """
+        field = change.get("field")
+        source_turn = getattr(self.d, "current_turn_context", {}) or {}
+        fallback_value = self.d.known(getattr(self.d, "last_um_preview", {}) or {}, field)
+        if not self.d.is_known(fallback_value):
+            fallback_value = source_turn.get("mistake_actual")
+        if not self.d.is_known(fallback_value):
+            fallback_value = change.get("old_value")
+        resolved = dict(change)
+        resolved["new_value"] = fallback_value
+        resolved["confirmation_question"] = (
+            f"Wil je dat ik {change.get('field_label')} verander naar {fallback_value}?"
+        )
+        resolved["resolved_from_db"] = True
+        return resolved
+
     def confirm_topic_change(self, change: dict) -> bool:
         if change.get("action") == "multi_update":
             return self.confirm_multi_topic_change(change)
 
         self.d.pending_change = change
+
+        # How many times the child may reject a misheard value before Leo stops
+        # re-asking and falls back to the stored value. After this many rejects
+        # the change is still applied AND acknowledged so the session continues.
+        MAX_CONFIRM_REJECTS = int(getattr(self.d, "MAX_CONFIRM_REJECTS", 2))
+        reject_count = 0
 
         while True:
             self.d.speech.say(self.confirmation_text(change))
@@ -3059,31 +3226,44 @@ class ActionHandler:
             decision = self.confirmation_decision_from_intent(result, confirmation, change)
             self.d.log_action_handler_result(decision)
 
+            # Child supplied a new value in the same breath ("nee, het is X").
             if decision["action"] == "refine_confirmation_change":
                 change = decision["change"]
                 self.d.pending_change = change
                 continue
 
             if decision["action"] == "confirm_change":
-                self.d.corrections_seen += 1
-                self.d.handle_confirmed_mistake_related_change(change, self.d.current_turn_context)
-                self.remember_confirmed_change_locally(change)
-                self.prepare_tablet_change_reveal(change, self.d.current_turn_context)
-                written = self.d.write_um_change(change)
-                if self.d.current_turn_context:
-                    self.d.phases_with_confirmed_change.add(self.d.current_turn_context.get("phase"))
-                if written:
-                    self.d.speech.say(self.successful_change_acknowledgement(change))
-                    self.reveal_tablet_change_after_operator(change, self.d.current_turn_context)
-                else:
-                    self.clear_pending_tablet_reveal(self.d.current_turn_context)
-                    self.d.speech.say("Dankjewel, ik heb dat genoteerd, maar opslaan lukte nu niet.")
-                self.d.pending_change = None
-                return True
+                return self.apply_confirmed_change_and_acknowledge(change)
 
             if decision["action"] == "reject_change":
-                self.d.speech.say("Oké, dan verander ik niets.")
-                self.d.pending_change = None
-                return False
+                source_turn = getattr(self.d, "current_turn_context", {}) or {}
+                is_mistake_context = bool(
+                    source_turn.get("mistake_id") or source_turn.get("mistake_field")
+                )
+                # Outside a deliberate-mistake correction (e.g. additions, role-model
+                # discovery), a "no" is a genuine decline — no forced DB fallback.
+                if not is_mistake_context:
+                    self.d.speech.say("Oké, dan verander ik niets.")
+                    self.d.pending_change = None
+                    return False
+                reject_count += 1
+                # Repeated mishears on a mistake turn: stop re-asking, use the stored
+                # value, but ALWAYS acknowledge the change before moving on.
+                if reject_count >= MAX_CONFIRM_REJECTS:
+                    self.d.log_action_handler_result(self.action_result(
+                        "memory_change_db_fallback",
+                        True,
+                        "STT kept mishearing the correction; resolved from stored memory.",
+                        change=change,
+                    ))
+                    fallback = self.db_fallback_change(change)
+                    self.d.pending_change = fallback
+                    return self.apply_confirmed_change_and_acknowledge(fallback)
+                # Otherwise re-ask ONLY for the correct value (not the whole phase).
+                refined = self.reelicit_correction_value(change)
+                if refined:
+                    change = refined
+                    self.d.pending_change = change
+                continue
 
             self.d.speech.say(decision.get("leo_response") or self.confirmation_text(change))

@@ -334,7 +334,19 @@ class Segments:
                 rewrite_values=fit_values,
             ),
             "expects_response": True,
-            "response_mode": "listen_only",
+            #"response_mode": "listen_only",
+            "response_mode": "acknowledge" if domain == "sport" else "listen_only",
+            "llm_turn": domain == "sport",
+            "l3": {
+                "script_phase": "part1_topic1",
+                "topic": "sport",
+                "response_function": "acknowledge",
+                "question_allowed": False,
+                "relevant_um_fields": ["sports_fav_play"],
+                "local_context": f"Leo and the child are talking about {label}.",
+                "fallback": "Wauw, wat leuk!",
+            } if domain == "sport" else {},
+            ###################################################
             "used_fields": self.topic_used_fields(topic) if generic_prefix == "p1_t2" else {},
         })
 

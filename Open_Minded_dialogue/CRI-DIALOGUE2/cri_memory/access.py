@@ -121,7 +121,7 @@ class MemoryAccess:
     def memory_access_summary(self, fields: list, limit: int = None) -> str:
         parts = []
         for field in fields:
-            value = self.d.memory_value(field)
+            value = self.d.visible_memory_value(field)
             if self.d.is_known(value):
                 parts.append(f"{self.d.field_label(field)}: {value}")
             if limit and len(parts) >= limit:
@@ -137,7 +137,7 @@ class MemoryAccess:
         def value(field: str) -> str:
             if field not in field_set:
                 return ""
-            memory_value = self.d.memory_value(field)
+            memory_value = self.d.visible_memory_value(field)
             return str(memory_value) if self.d.is_known(memory_value) else ""
 
         lines = []
@@ -272,7 +272,7 @@ class MemoryAccess:
         if summary:
             returned = [
                 field for field in scope
-                if self.d.is_known(self.d.memory_value(field))
+                if self.d.is_known(self.d.visible_memory_value(field))
             ]
             return summary, scope, returned
 
