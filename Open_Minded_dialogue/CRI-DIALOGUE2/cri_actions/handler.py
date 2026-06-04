@@ -2807,10 +2807,7 @@ class ActionHandler:
                 )
 
             response, memory_scope, returned_fields = self.d.memory_access_response(result, turn)
-            response = (
-                f"{response} Als iets niet klopt, kun je zeggen wat ik moet veranderen. "
-                "Als je mijn geheugen nog een keer wilt horen, kun je dat ook zeggen."
-            )
+            response = f"Welkom in mijn geheugen! {response}"
             self.d.speech.say(response)
             return self.action_result(
                 "memory_access",
