@@ -102,6 +102,8 @@ class SpeechIO:
         stt_realtime_processing_pause: float = 0.2,
         stt_mic_index: int = None,
         stt_beam_size: int = 5,
+        stt_device: str = "cpu",
+        stt_compute_type: str = "int8",
         # ── Retry knob ───────────────────────────────────────────────────────
         max_listen_retries: int = 3,
         pronunciation_overrides_path: str = None,
@@ -127,6 +129,8 @@ class SpeechIO:
             stt_realtime_processing_pause:  VAD chunk interval in seconds
             stt_mic_index:                  Mic device index (None = OS default)
             stt_beam_size:                  Whisper beam search width
+            stt_device:                     RealtimeSTT device ("cpu" for study laptops)
+            stt_compute_type:               Faster-Whisper compute type
             max_listen_retries:             Total listen attempts before giving up
         """
         self.nao = nao
@@ -163,6 +167,8 @@ class SpeechIO:
                 post_speech_silence_duration=stt_post_speech_silence,
                 realtime_processing_pause=stt_realtime_processing_pause,
                 use_microphone=True,
+                device=stt_device,
+                compute_type=stt_compute_type,
                 enable_realtime_transcription=False,  # final result only
                 beam_size=stt_beam_size,
                 initial_prompt=_CONTEXT_PREFIX,       # updated per turn in listen()

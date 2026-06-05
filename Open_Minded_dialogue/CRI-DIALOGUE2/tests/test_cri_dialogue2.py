@@ -6194,6 +6194,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         spoken = []
         speech = cri_module.SpeechIO(
             use_desktop_mic=True,
+            use_keyboard_input_fn=lambda: True,
             log_event_fn=lambda event_type, **data: spoken.append(data.get("text", "")),
             set_last_utterance_fn=spoken.append,
         )

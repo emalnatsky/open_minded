@@ -3205,12 +3205,6 @@ class ActionHandler:
 
         self.d.pending_change = change
 
-        # How many times the child may reject a misheard value before Leo stops
-        # re-asking and falls back to the stored value. After this many rejects
-        # the change is still applied AND acknowledged so the session continues.
-        MAX_CONFIRM_REJECTS = int(getattr(self.d, "MAX_CONFIRM_REJECTS", 2))
-        reject_count = 0
-
         while True:
             self.d.speech.say(self.confirmation_text(change))
             time.sleep(0.5)
@@ -3236,34 +3230,8 @@ class ActionHandler:
                 return self.apply_confirmed_change_and_acknowledge(change)
 
             if decision["action"] == "reject_change":
-                source_turn = getattr(self.d, "current_turn_context", {}) or {}
-                is_mistake_context = bool(
-                    source_turn.get("mistake_id") or source_turn.get("mistake_field")
-                )
-                # Outside a deliberate-mistake correction (e.g. additions, role-model
-                # discovery), a "no" is a genuine decline — no forced DB fallback.
-                if not is_mistake_context:
-                    self.d.speech.say("Oké, dan verander ik niets.")
-                    self.d.pending_change = None
-                    return False
-                reject_count += 1
-                # Repeated mishears on a mistake turn: stop re-asking, use the stored
-                # value, but ALWAYS acknowledge the change before moving on.
-                if reject_count >= MAX_CONFIRM_REJECTS:
-                    self.d.log_action_handler_result(self.action_result(
-                        "memory_change_db_fallback",
-                        True,
-                        "STT kept mishearing the correction; resolved from stored memory.",
-                        change=change,
-                    ))
-                    fallback = self.db_fallback_change(change)
-                    self.d.pending_change = fallback
-                    return self.apply_confirmed_change_and_acknowledge(fallback)
-                # Otherwise re-ask ONLY for the correct value (not the whole phase).
-                refined = self.reelicit_correction_value(change)
-                if refined:
-                    change = refined
-                    self.d.pending_change = change
-                continue
+                self.d.speech.say("Oké, dan verander ik niets.")
+                self.d.pending_change = None
+                return False
 
             self.d.speech.say(decision.get("leo_response") or self.confirmation_text(change))

@@ -334,8 +334,7 @@ class Segments:
                 rewrite_values=fit_values,
             ),
             "expects_response": True,
-            #"response_mode": "listen_only",
-            "response_mode": "acknowledge" if domain == "sport" else "listen_only",
+            "response_mode": "listen_only",
             "llm_turn": domain == "sport",
             "l3": {
                 "script_phase": "part1_topic1",
