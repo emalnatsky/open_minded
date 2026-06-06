@@ -1,5 +1,6 @@
 """
 Speech input/output for the CRI dialogue.
+
 SpeechIO wraps:
   - NAO TTS (say)
   - RealtimeSTT AudioToTextRecorder (listen)
@@ -26,12 +27,17 @@ STT backend: RealtimeSTT (pip install RealtimeSTT)
     - post_speech_silence_duration=0.6      stops ~0.6s after child goes quiet
     - initial_prompt      updated each turn with Leo's last utterance so Whisper
                           knows the question context before decoding the answer
-
   The recorder is initialised once at construction time and reused across
   all listen() calls for the session.
 
 If the child says nothing (empty transcript), listen_with_retry() asks Leo
 to repeat the question up to max_listen_retries times before giving up.
+
+NAO TTS speed:
+  Every utterance is prefixed with the ACAPELA control tag \rspd=92\ which
+  slows NAO's speech to 92% of normal — slightly slower and clearer for
+  children. The prefix is applied to both the main say() path and the
+  retry-prompt path (_say_system).
 """
 
 import re
@@ -43,17 +49,42 @@ from RealtimeSTT import AudioToTextRecorder
 
 logger = logging.getLogger(__name__)
 
+# ── NAO TTS speed prefix ──────────────────────────────────────────────────────
+# ACAPELA control tag understood by NAO's TTS engine. \rspd=92\ sets the
+# speaking rate to 92% of normal. Prepended to every utterance Leo speaks.
+_TTS_SPEED_PREFIX = "\\rspd=92\\"
+
 # ── Whisper context prefix ────────────────────────────────────────────────────
 # Prepended to initial_prompt every turn. Primes Whisper's language model with
 # the domain before decoding — biggest single accuracy gain for Dutch children.
 _CONTEXT_PREFIX = (
-    "Dit is een gesprek in het Nederlands tussen een kind (8–12 jaar) en "
-    "een sociale robot genaamd Leo. "
-    "Het kind beantwoordt vragen over hobby's, school en interesses. "
-    "Veelvoorkomende woorden: tekenen, bakken, voetbal, hockey, rekenen, taal, "
-    "gym, lezen, katten, honden, pizza, pannenkoeken. "
+    "Dit is een gesprek in het Nederlands tussen een kind van 9 tot 11 jaar "
+    "en een sociale robot genaamd Leo. Het kind vertelt over hobby's, "
+    "lievelingseten, school en wat het later wil worden. "
+    "Mogelijke woorden: "
+    # food: p/b, loanwords, ones Whisper mis-decodes
+    "pasta, pizza, pannenkoeken, patat, friet, biefstuk, shoarma, kapsalon, "
+    "doner, lasagne, spaghetti, sushi, gyoza, dim sum, mochi, shakshuka; "
+    # hobby: voicing-confusable + niche terms
+    "voetbal, hockey, padel, gamen, tekenen, dansen, bakken, paardrijden, "
+    "skateboarden, turnen, acrogym, basketbal, badminton, keepen, "
+    "hobbyhorsen, minecraft, editen; "
+    # school strength
+    "rekenen, gym, spelling, begrijpend lezen, biologie, geschiedenis, "
+    "aardrijkskunde, drama, tekenen, handvaardigheid; "
+    # aspiration: the hard ones
+    "chirurg, profvoetballer, topsporter, youtuber, tiktokker, advocaat, "
+    "dierenarts, orthodontist, programmeur, ingenieur, piloot, politieagent, "
+    "pizzabakker; "
+    # high-frequency yes/no + correction phrases
+    "ja, nee, dat klopt, dat klopt niet, weet ik niet, weet ik nog niet. "
 )
-
+# ── Known STT mishears, fixed after transcription ─────────────────────────────
+# Deterministic repairs for domain words Whisper confuses (p/b, etc.).
+# Keys are lowercase, punctuation-stripped. Add as you find them in testing.
+_STT_CORRECTIONS = {
+    "basta": "pasta",
+}
 # ── Retry prompts (Dutch, rotated so they don't sound identical) ──────────────
 _RETRY_PROMPTS = (
     "Hmm, ik heb je niet goed gehoord. Kun je het nog een keer proberen?",
@@ -149,8 +180,6 @@ class SpeechIO:
                     self._pronunciation_overrides = json.load(f)
                 logger.info("Loaded %d TTS pronunciation overrides.", len(self._pronunciation_overrides))
 
-
-
         # Tracks the last Leo utterance so Whisper gets question context next listen().
         self._last_leo_text: str = ""
 
@@ -174,7 +203,6 @@ class SpeechIO:
             )
             if stt_mic_index is not None:
                 recorder_kwargs["input_device_index"] = stt_mic_index
-
             logger.info(
                 "Initialising RealtimeSTT recorder "
                 "(model=%s, language=%s, silence=%.1fs) — "
@@ -183,14 +211,12 @@ class SpeechIO:
             )
             self._recorder = AudioToTextRecorder(**recorder_kwargs)
             logger.info("RealtimeSTT recorder ready.")
-
             # Mute the mic until it's actually the child's turn. The recorder
             # keeps running but processes silence, so NAO's own TTS won't be
             # transcribed and won't trigger a recording.
             self._set_mic(False)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
-
     def shutdown(self):
         """Cleanly stop the RealtimeSTT recorder. Call at end of session."""
         if self._recorder is not None:
@@ -218,6 +244,9 @@ class SpeechIO:
             logger.debug("set_microphone(%s) failed: %s", enabled, e)
 
     # ── Output ────────────────────────────────────────────────────────────────
+    def _tts_text(self, text: str) -> str:
+        """Prefix text with the NAO TTS speed control tag (\\rspd=92\\)."""
+        return _TTS_SPEED_PREFIX + text
 
     def say(self, text: str):
         """
@@ -242,13 +271,13 @@ class SpeechIO:
             from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
             # Mute the mic so the recorder ignores NAO's own voice.
             self._set_mic(False)
-            self.nao.tts.request(NaoqiTextToSpeechRequest(text, language="Dutch"))
+            tts_text = self._tts_text(text)
+            self.nao.tts.request(NaoqiTextToSpeechRequest(tts_text, language="Dutch"))
             time.sleep(len(text) * 0.01)
             time.sleep(0.2)               # let the last syllable's echo clear
-            self._set_eyes("green")       # ← child's turn; fires as soon as speech ends
+            self._set_eyes("green")       # child's turn; fires as soon as speech ends
 
     # ── Input ─────────────────────────────────────────────────────────────────
-
     def listen(self) -> str:
         """
         Single listen attempt — returns transcript or "" if nothing heard.
@@ -274,19 +303,15 @@ class SpeechIO:
         try:
             # Update Whisper context with Leo's last question before decoding.
             self._set_context_prompt()
-
             # Unmute the mic — now the recorder will hear the child.
             self._set_mic(True)
-
             # Blocks until VAD silence cut-off, then returns Whisper transcription.
             transcript = self._recorder.text()
             transcript = transcript.strip() if transcript else ""
-
+            transcript = self._fix_known_mishears(transcript)
             self._set_eyes("white")
-
             # Print prominently so the researcher can monitor in the terminal.
             _print_transcript(transcript)
-
             logger.info("Child: %s", transcript or "(nothing)")
             self._log_event(
                 "utterance",
@@ -296,7 +321,6 @@ class SpeechIO:
                 stt_backend="RealtimeSTT",
             )
             return transcript
-
         except Exception as e:
             self._set_eyes("white")
             logger.error("STT error: %s", e)
@@ -322,7 +346,6 @@ class SpeechIO:
         The caller decides whether to skip or escalate.
         """
         n = max_retries if max_retries is not None else self._max_listen_retries
-
         if self.simulation_mode or self._use_keyboard_input():
             return self.listen()
 
@@ -330,7 +353,6 @@ class SpeechIO:
             transcript = self.listen()
             if not self._is_empty_transcript(transcript):
                 return transcript
-
             if attempt < n - 1:
                 saved = self._last_leo_text             # preserve original context
                 prompt = _RETRY_PROMPTS[min(attempt, len(_RETRY_PROMPTS) - 1)]
@@ -346,13 +368,11 @@ class SpeechIO:
         """Let the researcher approve the transcript or re-listen."""
         if not self.review_transcripts:
             return transcript
-
         while True:
             print("\n" + "-" * 72)
             print(f"[HEARD]: {transcript or '(nothing)'}")
             choice = input("Press Enter to continue, or R + Enter to listen again: ").strip().lower()
             print("-" * 72)
-
             if choice == "":
                 self._log_event("transcript_review", action="accepted", transcript=transcript or "(nothing)")
                 return transcript
@@ -361,7 +381,6 @@ class SpeechIO:
                 self._set_eyes("green")
                 transcript = self.listen_with_retry()
                 continue
-
             print("Please press Enter to continue, or type R and press Enter to listen again.")
 
     def listen_with_review(self) -> str:
@@ -371,7 +390,6 @@ class SpeechIO:
         return self.review_transcript(self.listen_with_retry())
 
     # ── Internal helpers ──────────────────────────────────────────────────────
-
     @staticmethod
     def _is_empty_transcript(transcript: str) -> bool:
         """True if transcript is empty or a known Whisper silence hallucination."""
@@ -381,6 +399,22 @@ class SpeechIO:
         if not cleaned or len(cleaned) <= 1:
             return True
         return cleaned.lower() in _WHISPER_SILENCE_ARTEFACTS
+    
+    def _fix_known_mishears(self, transcript: str) -> str:
+        """Repair domain-specific STT confusions (e.g. basta→pasta)."""
+        if not transcript:
+            return transcript
+        fixed = []
+        for word in transcript.split():
+            key = word.lower().strip(".,!?")
+            if key in _STT_CORRECTIONS:
+                replacement = _STT_CORRECTIONS[key]
+                # carry over trailing punctuation from the original token
+                trailer = word[len(word.rstrip(".,!?")):]
+                fixed.append(replacement + trailer)
+            else:
+                fixed.append(word)
+        return " ".join(fixed)
 
     def _say_system(self, text: str):
         """
@@ -388,6 +422,7 @@ class SpeechIO:
 
         Keeping _last_leo_text on the original question means Whisper context
         on the next listen() still points to what Leo actually asked.
+
         Eyes go green after, signalling child's turn again.
         """
         text = self.strip_non_bmp(text)
@@ -398,7 +433,8 @@ class SpeechIO:
             return
         from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
         self._set_mic(False)          # don't transcribe Leo's retry prompt
-        self.nao.tts.request(NaoqiTextToSpeechRequest(text, language="Dutch"))
+        tts_text = self._tts_text(text)
+        self.nao.tts.request(NaoqiTextToSpeechRequest(tts_text, language="Dutch"))
         time.sleep(len(text) * 0.01)
         time.sleep(0.2)
         self._set_eyes("green")
@@ -421,7 +457,6 @@ class SpeechIO:
             pass  # older RealtimeSTT versions; not fatal
 
     # ── LEDs ──────────────────────────────────────────────────────────────────
-
     def _set_eyes(self, color: str):
         """Change NAO eye LED color. Silently ignored in desktop/simulation mode."""
         if not self.nao or not self.use_nao_output or self.simulation_mode:
@@ -441,7 +476,6 @@ class SpeechIO:
             logger.debug("Could not set eye LEDs: %s", e)
 
     # ── Utility ───────────────────────────────────────────────────────────────
-
     @staticmethod
     def strip_non_bmp(text: str) -> str:
         """Remove emoji-style characters that NAO TTS can choke on."""
@@ -463,7 +497,6 @@ class SpeechIO:
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
-
 def _print_transcript(transcript: str):
     """Print the child's transcript prominently for researcher monitoring."""
     line = "─" * 64

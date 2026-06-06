@@ -931,6 +931,7 @@ class CRI_ScriptedDialogue(SICApplication):
             stt_post_speech_silence=0.6,
             stt_realtime_processing_pause=0.2,
             stt_beam_size=5,
+            pronunciation_overrides_path="tts_pronunciation.json",
         )
         self.logger.info("Setup complete.")
 
@@ -3307,6 +3308,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 i += 1
 
             self.logger.info("Dialogue completed.")
+            self.perform_greeting_wave()   # goodbye wave before going to rest
 
         except KeyboardInterrupt:
             self.logger.info("Interrupted.")
