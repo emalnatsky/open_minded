@@ -786,9 +786,9 @@ class ScriptBuilder:
                         "content_plan": self.d.l2_pregen(
                             "leo_ministory_opening",
                             (
-                                f"Weet je wat ik laatst weer probeerde? {story_activity_spoken}. "
-                                f"Dat klinkt heel indrukwekkend, maar eerlijk gezegd was het meer {story_problem}. "
-                                f"Mijn lama-vrienden vonden het wel een succes, want die eten bijna alles op. {story_question}"
+                                f"Weet je wat ik laatst weer probeerde? Bakken. In mijn hoofd werd het een prachtige robot taart."
+                                f"Dat klinkt heel indrukwekkend. In het echt werd het helaas meer een klein deegdrama met kruimels."
+                                f"Mijn lama vrienden vonden het wel een succes, want die eten bijna alles op. Heb jij eigenlijk ooit een lama zien eten?"
                             ),
                             ["hobbies", "hobby_fav", "freetime_fav"],
                         ),
@@ -799,7 +799,9 @@ class ScriptBuilder:
                         "content_plan": self.d.l2_pregen(
                             "leo_ministory_followup",
                             (
-                                "Ik vind het gewoon leuk om nieuwe dingen uit te proberen, ook als het een beetje mislukt. "
+                                "Ze zijn eigenlijk best schattig als ze eten. "
+                                "Wel een beetje alsof iemand een stofzuiger met poten heeft uitgevonden. "
+                                "Dus ja, mijn bak-avontuur was niet helemaal perfect. Maar ik vind het gewoon leuk om nieuwe dingen uit te proberen, ook als het een beetje mislukt. "
                                 "Doe jij dat ook wel eens?"
                             ),
                             ["hobbies", "hobby_fav", "freetime_fav"],
