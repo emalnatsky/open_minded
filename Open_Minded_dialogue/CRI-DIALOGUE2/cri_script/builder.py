@@ -983,7 +983,7 @@ class ScriptBuilder:
                     {
                         "content_plan": self.d.l2_pregen(
                             "m2_corrected_followup",
-                            "Dan houden we het bij {fav_food}. Dat klinkt eerlijk gezegd ook meteen gezellig.",
+                            "Dan houden we het bij {fav_food}. Dat klinkt eerlijk gezegd veel meer als lievelingseten dan broccoli, haha.",
                             [m2_field],
                             require_input_values=True,
                             branch="corrected",
