@@ -965,10 +965,10 @@ class ScriptBuilder:
                     },
                     {
                         "content_plan": self.d.sequence(
-                            self.d.l1("Dat is op zich wel een sterke keuze."),
+                            self.d.l1("Dat is op zich wel een lekkere keuze."),
                             self.d.l2_pregen(
                                 "m2_wrong_followup",
-                                f"Rond, warm, handig. Wat vind jij daar eigenlijk zo lekker aan?",
+                                f"Wat vind jij daar eigenlijk zo lekker aan?",
                                 [m2_field],
                                 branch="not_corrected",
                             ),
