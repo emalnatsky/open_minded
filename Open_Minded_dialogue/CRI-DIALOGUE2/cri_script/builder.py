@@ -1427,7 +1427,7 @@ class ScriptBuilder:
                     },
                     {
                         "content_plan": self.d.l1(
-                            "Dat is ook goed. Dan gaan we gewoon nog even verder."
+                            "Dat is ook goed."
                         ),
                         "expects_response": False,
                         "condition": "run_if_memory_review_requested",
