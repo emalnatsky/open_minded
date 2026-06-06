@@ -786,9 +786,9 @@ class ScriptBuilder:
                         "content_plan": self.d.l2_pregen(
                             "leo_ministory_opening",
                             (
-                                f"Weet je wat ik laatst weer probeerde? {story_activity_spoken}. "
-                                f"Dat klinkt heel indrukwekkend, maar eerlijk gezegd was het meer {story_problem}. "
-                                f"Mijn lama-vrienden vonden het wel een succes, want die eten bijna alles op. {story_question}"
+                                f"Weet je wat ik laatst weer probeerde? Bakken. In mijn hoofd werd het een prachtige robot taart."
+                                f"Dat klinkt heel indrukwekkend. In het echt werd het helaas meer een klein deegdrama met kruimels."
+                                f"Mijn lama vrienden vonden het wel een succes, want die eten bijna alles op. Heb jij eigenlijk ooit een lama zien eten?"
                             ),
                             ["hobbies", "hobby_fav", "freetime_fav"],
                         ),
@@ -799,7 +799,9 @@ class ScriptBuilder:
                         "content_plan": self.d.l2_pregen(
                             "leo_ministory_followup",
                             (
-                                "Ik vind het gewoon leuk om nieuwe dingen uit te proberen, ook als het een beetje mislukt. "
+                                "Ze zijn eigenlijk best schattig als ze eten. "
+                                "Wel een beetje alsof iemand een stofzuiger met poten heeft uitgevonden. "
+                                "Dus ja, mijn bak-avontuur was niet helemaal perfect. Maar ik vind het gewoon leuk om nieuwe dingen uit te proberen, ook als het een beetje mislukt. "
                                 "Doe jij dat ook wel eens?"
                             ),
                             ["hobbies", "hobby_fav", "freetime_fav"],
@@ -832,11 +834,13 @@ class ScriptBuilder:
                     self.d.l1("Dat vind ik echt een gezellige combinatie."),
                     self.d.l2_pregen(
                         "hobbies_bridge",
-                        "Daar zit van alles in: bewegen, bedenken en iets maken.",
+                        "Het klinkt leuk en daar zit van alles in.",
                         ["hobbies"],
                     ),
+                    self.d.l1("Herken je dat een beetje?"),
                 ),
-                "expects_response": False,
+                "expects_response": True,
+                "response_mode": "listen_only",
                 "used_fields": {
                     "hobbies": self.d.known(um, "hobbies"),
                     "hobby_fav": self.d.known(um, "hobby_fav"),
@@ -963,10 +967,10 @@ class ScriptBuilder:
                     },
                     {
                         "content_plan": self.d.sequence(
-                            self.d.l1("Dat is op zich wel een sterke keuze."),
+                            self.d.l1("Dat is op zich wel een lekkere keuze."),
                             self.d.l2_pregen(
                                 "m2_wrong_followup",
-                                f"Rond, warm, handig. Wat vind jij daar eigenlijk zo lekker aan?",
+                                f"Wat vind jij daar eigenlijk zo lekker aan?",
                                 [m2_field],
                                 branch="not_corrected",
                             ),

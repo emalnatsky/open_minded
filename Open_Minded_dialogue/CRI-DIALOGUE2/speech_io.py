@@ -243,6 +243,30 @@ class SpeechIO:
         except Exception as e:
             logger.debug("set_microphone(%s) failed: %s", enabled, e)
 
+    def warm_up_stt(self):
+        """
+        Run one dummy STT decode so the first real child response is not delayed
+        by Whisper / RealtimeSTT warm-up.
+
+        The microphone stays muted, so this should only process silence.
+        Safe no-op in simulation mode, keyboard mode, or when no recorder exists.
+        """
+        if self.simulation_mode or self._use_keyboard_input() or self._recorder is None:
+            return
+
+        logger.info("Warming up RealtimeSTT / Whisper with dummy silent decode...")
+        try:
+            self._set_context_prompt()
+            self._set_mic(False)  # keep muted: do not record actual room speech
+            _ = self._recorder.text()
+            logger.info("RealtimeSTT / Whisper warm-up complete.")
+            self._log_event("stt_warmup", status="ok")
+        except Exception as e:
+            logger.warning("RealtimeSTT / Whisper warm-up failed: %s", e)
+            self._log_event("stt_warmup", status="failed", error=str(e))
+        finally:
+            self._set_mic(False)
+
     # ── Output ────────────────────────────────────────────────────────────────
     def _tts_text(self, text: str) -> str:
         """Prefix text with the NAO TTS speed control tag (\\rspd=92\\)."""
