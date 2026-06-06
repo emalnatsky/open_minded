@@ -834,11 +834,13 @@ class ScriptBuilder:
                     self.d.l1("Dat vind ik echt een gezellige combinatie."),
                     self.d.l2_pregen(
                         "hobbies_bridge",
-                        "Daar zit van alles in: bewegen, bedenken en iets maken.",
+                        "Het klinkt leuk en daar zit van alles in.",
                         ["hobbies"],
                     ),
+                    self.d.l1("Herken je dat een beetje?"),
                 ),
-                "expects_response": False,
+                "expects_response": True,
+                "response_mode": "listen_only",
                 "used_fields": {
                     "hobbies": self.d.known(um, "hobbies"),
                     "hobby_fav": self.d.known(um, "hobby_fav"),
