@@ -933,6 +933,7 @@ class CRI_ScriptedDialogue(SICApplication):
             stt_beam_size=5,
             pronunciation_overrides_path="tts_pronunciation.json",
         )
+        self.speech.warm_up_stt()
         self.logger.info("Setup complete.")
 
     # UM pulling
