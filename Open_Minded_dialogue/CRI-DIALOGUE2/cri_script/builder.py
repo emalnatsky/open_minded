@@ -1056,7 +1056,7 @@ class ScriptBuilder:
                             ),
                             self.d.l1(
                                 "Sommige dingen gingen best goed, en andere waren voor mij nog best lastig. "
-                                "Kun jij raden waar ik op robotschool juist goed in was?"
+                                "Raad eens waar ik goed in was?"
                             ),
                         ),
                         "expects_response": True,
@@ -1403,7 +1403,7 @@ class ScriptBuilder:
                                 "Kijk maar op de tablet. Daar staat mijn geheugenboek over jou."
                             )
                             if tutorial_condition == self.d.CONDITION_EXPERIMENT
-                            else "Goed. Dan vertel ik je wat ik tot nu toe over jou heb gebruikt."
+                            else "Goed. Dan vertel ik je wat ik tot nu toe over jou heb onthouden."
                         ),
                         "expects_response": False,
                         "condition": "run_if_memory_review_requested",
