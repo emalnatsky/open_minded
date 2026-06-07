@@ -71,11 +71,12 @@ _CONTEXT_PREFIX = (
     "hobbyhorsen, minecraft, editen; "
     # school strength
     "rekenen, gym, spelling, begrijpend lezen, biologie, geschiedenis, "
-    "aardrijkskunde, drama, tekenen, handvaardigheid; "
+    "aardrijkskunde, drama, tekenen, handvaardigheid, taal, natuur, techniek; "
+    "verkeer, engels; "
     # aspiration: the hard ones
     "chirurg, profvoetballer, topsporter, youtuber, tiktokker, advocaat, "
     "dierenarts, orthodontist, programmeur, ingenieur, piloot, politieagent, "
-    "pizzabakker; "
+    "pizzabakker, architect; "
     # high-frequency yes/no + correction phrases
     "ja, nee, dat klopt, dat klopt niet, weet ik niet, weet ik nog niet. "
 )
@@ -84,6 +85,8 @@ _CONTEXT_PREFIX = (
 # Keys are lowercase, punctuation-stripped. Add as you find them in testing.
 _STT_CORRECTIONS = {
     "basta": "pasta",
+    "daal": "taal",
+    "doa": "taal"
 }
 # ── Retry prompts (Dutch, rotated so they don't sound identical) ──────────────
 _RETRY_PROMPTS = (
@@ -245,24 +248,28 @@ class SpeechIO:
 
     def warm_up_stt(self):
         """
-        Run one dummy STT decode so the first real child response is not delayed
-        by Whisper / RealtimeSTT warm-up.
+        Warm up Whisper / RealtimeSTT without waiting for microphone speech.
 
-        The microphone stays muted, so this should only process silence.
-        Safe no-op in simulation mode, keyboard mode, or when no recorder exists.
+        Important: do NOT call self._recorder.text() here, because text()
+        waits for real speech and can block forever during startup.
         """
         if self.simulation_mode or self._use_keyboard_input() or self._recorder is None:
             return
-
-        logger.info("Warming up RealtimeSTT / Whisper with dummy silent decode...")
+        logger.info("Warming up Whisper with dummy silent audio...")
         try:
+            import numpy as np
             self._set_context_prompt()
-            self._set_mic(False)  # keep muted: do not record actual room speech
-            _ = self._recorder.text()
-            logger.info("RealtimeSTT / Whisper warm-up complete.")
+            self._set_mic(False)
+            # 1 second of silent float32 audio at 16 kHz.
+            dummy_audio = np.zeros(16000, dtype=np.float32)
+            _ = self._recorder.perform_final_transcription(
+                audio_bytes=dummy_audio,
+                use_prompt=True,
+            )
+            logger.info("Whisper warm-up complete.")
             self._log_event("stt_warmup", status="ok")
         except Exception as e:
-            logger.warning("RealtimeSTT / Whisper warm-up failed: %s", e)
+            logger.warning("Whisper warm-up failed: %s", e)
             self._log_event("stt_warmup", status="failed", error=str(e))
         finally:
             self._set_mic(False)
