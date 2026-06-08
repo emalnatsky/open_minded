@@ -132,7 +132,7 @@ class SpeechIO:
         # ── RealtimeSTT knobs ────────────────────────────────────────────────
         stt_model: str = "small",
         stt_language: str = "nl",
-        stt_post_speech_silence: float = 0.6,
+        stt_post_speech_silence: float = 1.6,
         stt_realtime_processing_pause: float = 0.2,
         stt_mic_index: int = None,
         stt_beam_size: int = 5,
@@ -340,6 +340,7 @@ class SpeechIO:
             transcript = self._recorder.text()
             transcript = transcript.strip() if transcript else ""
             transcript = self._fix_known_mishears(transcript)
+            transcript = self.normalize_transcript(transcript)
             self._set_eyes("white")
             # Print prominently so the researcher can monitor in the terminal.
             _print_transcript(transcript)
@@ -518,6 +519,29 @@ class SpeechIO:
                 continue
             safe_chars.append(char)
         return "".join(safe_chars)
+
+    @staticmethod
+    def normalize_transcript(text: str) -> str:
+        """Flatten the STT transcript to plain Latin text before it reaches the
+        classifier: no accents, no em/en dashes, no other symbols, and no
+        non-Latin scripts. This stops accented or mixed-script Whisper output
+        from being treated as another language.
+        """
+        text = str(text or "")
+        # normalise smart quotes; drop double quotes
+        text = text.replace("\u2019", "'").replace("\u2018", "'")
+        text = text.replace("\u201c", "").replace("\u201d", "")
+        # em dash / en dash / figure dash / horizontal bar / minus / hyphen -> space
+        text = re.sub(r"[\u2012\u2013\u2014\u2015\u2212-]", " ", text)
+        # strip accents/diacritics: cafe, een, ruine, ...
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        # keep only Latin letters, digits, spaces, apostrophe, and . , ! ?
+        # (this also removes emoji and any Cyrillic/CJK/Arabic tokens)
+        text = re.sub(r"[^A-Za-z0-9\s.,!?']", " ", text)
+        text = re.sub(r"\s+([.,!?])", r"\1", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
     def _apply_pronunciation_overrides(self, text: str) -> str:
         if not self._pronunciation_overrides:
