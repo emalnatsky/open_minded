@@ -15,9 +15,9 @@ Dependencies injected at construction time so this module never imports
 from the dialogue class or from config directly.
 
 Eye colour contract:
-  white → NAO is speaking (default, unchanged)
-  green → NAO finished speaking, child's turn (set at end of say())
-  white → transcript received, idle (set at end of listen())
+  white → Leo is speaking or idle
+  green → RealtimeSTT/mic is actively listening
+  white → transcript received, timeout, error, or cleanup
 
 STT backend: RealtimeSTT (pip install RealtimeSTT)
   Uses AudioToTextRecorder with:
@@ -34,16 +34,21 @@ If the child says nothing (empty transcript), listen_with_retry() asks Leo
 to repeat the question up to max_listen_retries times before giving up.
 
 NAO TTS speed:
-  Every utterance is prefixed with the ACAPELA control tag \rspd=92\ which
+  Every utterance is prefixed with the ACAPELA control tag \\rspd=92\\ which
   slows NAO's speech to 92% of normal — slightly slower and clearer for
   children. The prefix is applied to both the main say() path and the
   retry-prompt path (_say_system).
 """
 
 import re
+import queue
+import sys
+import threading
 import time
 import unicodedata
 import logging
+import os
+from difflib import SequenceMatcher
 
 from RealtimeSTT import AudioToTextRecorder
 
@@ -107,6 +112,79 @@ _WHISPER_SILENCE_ARTEFACTS = frozenset({
     "dank u", "dank u wel",
 })
 
+_TTS_MOJIBAKE_REPLACEMENTS = {
+    "â€”": ", ",
+    "â€“": ", ",
+    "â€•": ", ",
+    "âˆ’": "-",
+    "â€¦": "...",
+    "â€˜": "'",
+    "â€™": "'",
+    "â€š": "'",
+    "â€œ": '"',
+    "â€�": '"',
+    "â€ž": '"',
+    "â†’": " ",
+    "â†�": " ",
+    "âœ“": " ",
+    "âœ”": " ",
+    "âœ—": " ",
+    "âœ˜": " ",
+    "âš ": " ",
+    "Ã¢": ", ",
+    "Ã©": "é",
+    "Ã¨": "è",
+    "Ã«": "ë",
+    "Ãª": "ê",
+    "Ã¯": "ï",
+    "Ã¶": "ö",
+    "Ã¼": "ü",
+    "Ã¡": "á",
+    "Ã ": "à",
+    "Ã±": "ñ",
+    "Ã§": "ç",
+    "Â": "",
+}
+
+_TTS_CHAR_REPLACEMENTS = {
+    "\u00a0": " ",
+    "\u1680": " ",
+    "\u2000": " ",
+    "\u2001": " ",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2004": " ",
+    "\u2005": " ",
+    "\u2006": " ",
+    "\u2007": " ",
+    "\u2008": " ",
+    "\u2009": " ",
+    "\u200a": " ",
+    "\u202f": " ",
+    "\u205f": " ",
+    "\u3000": " ",
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": ", ",
+    "\u2014": ", ",
+    "\u2015": ", ",
+    "\u2212": "-",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201a": "'",
+    "\u201b": "'",
+    "\u2032": "'",
+    "\u00b4": "'",
+    "\u0060": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u201e": '"',
+    "\u201f": '"',
+    "\u2033": '"',
+    "\u2026": "...",
+}
+
 
 class SpeechIO:
     """Handles all audio in/out for one session."""
@@ -130,12 +208,18 @@ class SpeechIO:
         stt_timeout: float = None,
         stt_phrase_limit: float = None,
         # ── RealtimeSTT knobs ────────────────────────────────────────────────
-        stt_model: str = "small",
+        stt_model: str = "auto",
         stt_language: str = "nl",
         stt_post_speech_silence: float = 1.6,
         stt_realtime_processing_pause: float = 0.2,
         stt_mic_index: int = None,
         stt_beam_size: int = 5,
+        stt_device: str = "auto",
+        stt_compute_type: str = "auto",
+        stt_gpu_device_index: int = 0,
+        tts_char_seconds: float = None,
+        tts_tail_buffer_seconds: float = None,
+        leo_echo_similarity: float = None,
         # ── Retry knob ───────────────────────────────────────────────────────
         max_listen_retries: int = 3,
         pronunciation_overrides_path: str = None,
@@ -161,6 +245,12 @@ class SpeechIO:
             stt_realtime_processing_pause:  VAD chunk interval in seconds
             stt_mic_index:                  Mic device index (None = OS default)
             stt_beam_size:                  Whisper beam search width
+            stt_device:                     RealtimeSTT/Faster-Whisper device
+            stt_compute_type:               Faster-Whisper compute type
+            stt_gpu_device_index:           CUDA GPU index for transcription
+            tts_char_seconds:                Minimum physical speech seconds per character
+            tts_tail_buffer_seconds:         Extra silence after NAO speech before listening
+            leo_echo_similarity:             Threshold for rejecting transcripts that repeat Leo
             max_listen_retries:             Total listen attempts before giving up
         """
         self.nao = nao
@@ -175,6 +265,28 @@ class SpeechIO:
         self._generate_simulated_response = generate_simulated_response_fn or (lambda: "")
         self._set_last_utterance = set_last_utterance_fn or (lambda t: None)
         self._max_listen_retries = max_listen_retries
+        self._stt_timeout = self._positive_float(stt_timeout)
+        self._stt_phrase_limit = self._positive_float(stt_phrase_limit)
+        self._stt_listen_timeout = self._effective_listen_timeout(
+            self._stt_timeout,
+            self._stt_phrase_limit,
+        )
+        self._tts_char_seconds = (
+            self._positive_float(tts_char_seconds)
+            or self._env_positive_float("CRI_TTS_CHAR_SECONDS", 0.055)
+        )
+        self._tts_tail_buffer_seconds = (
+            self._positive_float(tts_tail_buffer_seconds)
+            or self._env_positive_float("CRI_TTS_TAIL_BUFFER_SECONDS", 0.8)
+        )
+        self._leo_echo_similarity = self._bounded_similarity(
+            self._positive_float(leo_echo_similarity)
+            or self._env_positive_float("CRI_LEO_ECHO_SIMILARITY", 0.82)
+        )
+        self._stale_audio_tolerance_seconds = self._env_positive_float(
+            "CRI_STT_STALE_AUDIO_TOLERANCE_SECONDS",
+            0.4,
+        )
         self._pronunciation_overrides = {}
         if pronunciation_overrides_path:
             import json, os
@@ -185,24 +297,45 @@ class SpeechIO:
 
         # Tracks the last Leo utterance so Whisper gets question context next listen().
         self._last_leo_text: str = ""
+        self._stt_spinner_lock = threading.Lock()
+        self._stt_spinner_stop_event = None
+        self._stt_spinner_thread = None
+        self._stt_spinner_text = "recording"
+        self._stt_spinner_visible = False
 
         # ── Initialise RealtimeSTT recorder ──────────────────────────────────
         self._recorder = None
         if not simulation_mode and not (use_keyboard_input_fn and use_keyboard_input_fn()):
+            resolved_stt_model = (stt_model or "auto").strip() or "auto"
+            resolved_stt_device = (stt_device or "auto").strip().lower() or "auto"
+            resolved_stt_compute_type = (stt_compute_type or "auto").strip().lower() or "auto"
+            if resolved_stt_model.lower() == "auto":
+                resolved_stt_model = "small"
+            if resolved_stt_device == "auto":
+                resolved_stt_device = "cpu"
+            if resolved_stt_compute_type == "auto":
+                resolved_stt_compute_type = "int8"
             recorder_kwargs = dict(
-                model=stt_model,
+                model=resolved_stt_model,
                 language=stt_language,
                 post_speech_silence_duration=stt_post_speech_silence,
                 realtime_processing_pause=stt_realtime_processing_pause,
                 use_microphone=True,
                 enable_realtime_transcription=False,  # final result only
+                spinner=False,                         # CRI owns terminal status
                 beam_size=stt_beam_size,
+                device=resolved_stt_device,
+                compute_type=resolved_stt_compute_type,
+                gpu_device_index=stt_gpu_device_index,
                 initial_prompt=_CONTEXT_PREFIX,       # updated per turn in listen()
                 # VAD tuning — stricter detection so NAO's own TTS / room noise
                 # is less likely to be mistaken for the child speaking.
                 silero_sensitivity=0.6,               # higher = stricter "is this speech"
                 webrtc_sensitivity=3,                 # 0-3, higher = least sensitive
                 min_length_of_recording=0.5,          # ignore <0.5s blips
+                min_gap_between_recordings=0.4,       # avoid queued carryover between turns
+                pre_recording_buffer_duration=0.25,   # keep only a tiny onset buffer
+                allowed_latency_limit=40,             # drop very old chunks earlier
             )
             if stt_mic_index is not None:
                 recorder_kwargs["input_device_index"] = stt_mic_index
@@ -210,7 +343,13 @@ class SpeechIO:
                 "Initialising RealtimeSTT recorder "
                 "(model=%s, language=%s, silence=%.1fs) — "
                 "first run downloads the model...",
-                stt_model, stt_language, stt_post_speech_silence,
+                resolved_stt_model, stt_language, stt_post_speech_silence,
+            )
+            logger.info(
+                "RealtimeSTT target: device=%s, compute=%s, gpu=%s.",
+                resolved_stt_device,
+                resolved_stt_compute_type,
+                stt_gpu_device_index,
             )
             self._recorder = AudioToTextRecorder(**recorder_kwargs)
             logger.info("RealtimeSTT recorder ready.")
@@ -222,7 +361,11 @@ class SpeechIO:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     def shutdown(self):
         """Cleanly stop the RealtimeSTT recorder. Call at end of session."""
+        self._stop_stt_spinner()
+        self._set_mic(False)
+        self._set_eyes("white")
         if self._recorder is not None:
+            self._abort_recorder_safely()
             try:
                 self._recorder.shutdown()
                 logger.info("RealtimeSTT recorder shut down.")
@@ -279,42 +422,164 @@ class SpeechIO:
         """Prefix text with the NAO TTS speed control tag (\\rspd=92\\)."""
         return _TTS_SPEED_PREFIX + text
 
+    def _prepare_leo_output_text(self, text: str) -> str:
+        text = self.strip_non_bmp(text)
+        text = self._apply_pronunciation_overrides(text)
+        return self._sanitize_tts_text(text)
+
+    @classmethod
+    def _sanitize_tts_text(cls, text: str) -> str:
+        """Normalize Leo text into punctuation/symbols NAO's Dutch TTS can handle."""
+        text = str(text or "")
+        for bad, replacement in _TTS_MOJIBAKE_REPLACEMENTS.items():
+            text = text.replace(bad, replacement)
+        text = unicodedata.normalize("NFKC", text)
+
+        safe_chars = []
+        for char in text:
+            replacement = _TTS_CHAR_REPLACEMENTS.get(char)
+            if replacement is not None:
+                safe_chars.append(replacement)
+                continue
+            if ord(char) > 0xFFFF:
+                continue
+            category = unicodedata.category(char)
+            if category[0] == "C":
+                continue
+            if category[0] == "Z":
+                safe_chars.append(" ")
+                continue
+            if category[0] == "S":
+                safe_chars.append(" ")
+                continue
+            if category[0] == "P" and ord(char) > 0x7F:
+                safe_chars.append(" ")
+                continue
+            safe_chars.append(char)
+        return cls._clean_tts_spacing("".join(safe_chars))
+
+    @staticmethod
+    def _clean_tts_spacing(text: str) -> str:
+        text = re.sub(r"\s+", " ", str(text or "")).strip()
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"([,;:!?]){2,}", r"\1", text)
+        text = re.sub(r"\.{4,}", "...", text)
+        text = re.sub(r"([,.;:!?])(?=[^\s\"'])", r"\1 ", text)
+        text = re.sub(r"\.\s+\.\s+\.", "...", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _ascii_tts_fallback(cls, text: str) -> str:
+        fallback = (
+            unicodedata.normalize("NFKD", str(text or ""))
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+        fallback = cls._clean_tts_spacing(fallback)
+        return fallback or "Sorry, ik kan dat nu niet goed zeggen."
+
+    def _request_nao_tts(self, text: str) -> tuple[str, bool]:
+        from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
+
+        fallback_text = self._ascii_tts_fallback(text)
+        attempts = (("primary", text), ("ascii_fallback", fallback_text))
+        first_error = None
+        for attempt, candidate in attempts:
+            try:
+                self.nao.tts.request(
+                    NaoqiTextToSpeechRequest(self._tts_text(candidate), language="Dutch")
+                )
+                if attempt == "ascii_fallback":
+                    self._log_event(
+                        "tts_retry",
+                        status="ascii_fallback_succeeded",
+                        text=candidate,
+                        primary_error=str(first_error) if first_error else "",
+                    )
+                return candidate, True
+            except Exception as e:
+                if attempt == "primary":
+                    first_error = e
+                    logger.warning("NAO TTS rejected sanitized text, retrying ASCII fallback: %s", e)
+                    self._log_event(
+                        "tts_error",
+                        status="primary_failed",
+                        error=str(e),
+                        text=text,
+                        fallback_text=fallback_text,
+                    )
+                    continue
+                logger.error("NAO TTS failed after ASCII fallback: %s", e)
+                self._log_event(
+                    "tts_error",
+                    status="failed",
+                    error=str(e),
+                    primary_error=str(first_error) if first_error else "",
+                    text=text,
+                    fallback_text=fallback_text,
+                )
+                print(f"\n[TTS ERROR]: Leo kon deze zin niet uitspreken. {e}\n")
+                return text, False
+
+    def _wait_for_tts_handoff(self, text: str, started_at: float, finished_at: float = None):
+        """Keep the mic muted until NAO's physical speech and echo tail should be gone."""
+        finished_at = time.monotonic() if finished_at is None else finished_at
+        elapsed = max(0.0, finished_at - started_at)
+        estimated_speech = len(str(text or "")) * self._tts_char_seconds
+        remaining_speech = max(0.0, estimated_speech - elapsed)
+        wait_seconds = remaining_speech + self._tts_tail_buffer_seconds
+        self._log_event(
+            "tts_handoff_wait",
+            elapsed=round(elapsed, 3),
+            estimated_speech=round(estimated_speech, 3),
+            wait_seconds=round(wait_seconds, 3),
+        )
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+    def _print_leo_terminal(self, text: str):
+        """Show Leo's spoken text after clearing any active STT status line."""
+        self._stop_stt_spinner()
+        print(f"\n[LEO]: {text}\n")
+
     def say(self, text: str):
         """
         Speak text via NAO TTS (or print in desktop/simulation mode).
 
-        Eyes go GREEN immediately after speech finishes — the child's visual
-        cue that it is their turn to speak.
+        Eyes stay WHITE while Leo is speaking. listen() turns them GREEN only
+        once the microphone/STT path is actively listening.
         """
         if not text or not text.strip():
             return
-        text = self.strip_non_bmp(text)
-        text = self._apply_pronunciation_overrides(text)
+        text = self._prepare_leo_output_text(text)
+        if not text:
+            return
         self._last_leo_text = text   # kept for Whisper context on next listen()
         logger.info("LEO: %s", text)
         self._set_last_utterance(text)
         if self.simulation_mode:
             self._simulated_history.append({"speaker": "LEO", "text": text})
         self._log_event("utterance", speaker="LEO", text=text)
+        self._reset_stt_audio_state("before_leo_speech")
+        self._print_leo_terminal(text)
         if self.simulation_mode or not self.use_nao_output or not self.nao:
-            print(f"\n[LEO]: {text}\n")
+            return
         else:
-            from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
             # Mute the mic so the recorder ignores NAO's own voice.
             self._set_mic(False)
-            tts_text = self._tts_text(text)
-            self.nao.tts.request(NaoqiTextToSpeechRequest(tts_text, language="Dutch"))
-            time.sleep(len(text) * 0.01)
-            time.sleep(0.2)               # let the last syllable's echo clear
-            self._set_eyes("green")       # child's turn; fires as soon as speech ends
+            self._set_eyes("white")
+            started_at = time.monotonic()
+            spoken_text, spoken = self._request_nao_tts(text)
+            if spoken:
+                self._wait_for_tts_handoff(spoken_text, started_at)
 
     # ── Input ─────────────────────────────────────────────────────────────────
     def listen(self) -> str:
         """
         Single listen attempt — returns transcript or "" if nothing heard.
 
-        Eyes are already green from say(). They reset to white once a
-        transcript is received.
+        Eyes turn GREEN only while microphone/STT listening is active, then
+        return to WHITE before transcript output, retry review, or cleanup.
         """
         if self.simulation_mode:
             logger.info("Simulating child response...")
@@ -325,6 +590,7 @@ class SpeechIO:
             return transcript
 
         if self._use_keyboard_input():
+            self._stop_stt_spinner()
             transcript = input("[CHILD]: ").strip()
             logger.info("Child typed: %s", transcript or "(nothing)")
             self._log_event("utterance", speaker="CHILD", text=transcript or "(nothing)", input_mode="keyboard")
@@ -334,14 +600,33 @@ class SpeechIO:
         try:
             # Update Whisper context with Leo's last question before decoding.
             self._set_context_prompt()
+            self._reset_stt_audio_state("before_listen")
+            listen_started_at = time.time()
             # Unmute the mic — now the recorder will hear the child.
             self._set_mic(True)
+            self._set_eyes("green")
+            self._start_stt_spinner("recording")
             # Blocks until VAD silence cut-off, then returns Whisper transcription.
-            transcript = self._recorder.text()
+            transcript, timed_out = self._recorder_text_with_timeout()
+            stale_audio = self._recording_started_before(listen_started_at)
+            self._set_mic(False)
+            if timed_out:
+                self._set_eyes("white")
+                self._stop_stt_spinner()
+                self._reset_stt_audio_state("after_timeout")
+                return ""
             transcript = transcript.strip() if transcript else ""
-            transcript = self._fix_known_mishears(transcript)
-            transcript = self.normalize_transcript(transcript)
+            if transcript and stale_audio:
+                logger.warning("Rejected stale STT audio from before current listen: %s", transcript)
+                self._log_event("stt_rejected", reason="stale_audio", text=transcript)
+                self._set_eyes("white")
+                self._stop_stt_spinner()
+                self._reset_stt_audio_state("after_stale_audio")
+                return ""
+            transcript = self._clean_stt_transcript(transcript)
             self._set_eyes("white")
+            self._stop_stt_spinner()
+            self._reset_stt_audio_state("after_success")
             # Print prominently so the researcher can monitor in the terminal.
             _print_transcript(transcript)
             logger.info("Child: %s", transcript or "(nothing)")
@@ -355,6 +640,8 @@ class SpeechIO:
             return transcript
         except Exception as e:
             self._set_eyes("white")
+            self._stop_stt_spinner()
+            self._reset_stt_audio_state("after_error")
             logger.error("STT error: %s", e)
             self._log_event("stt_error", error=str(e))
             return ""
@@ -362,6 +649,8 @@ class SpeechIO:
             # Always mute again — Leo speaks next and we don't want the
             # recorder transcribing his voice.
             self._set_mic(False)
+            self._set_eyes("white")
+            self._stop_stt_spinner()
 
     def listen_with_retry(self, max_retries: int = None) -> str:
         """
@@ -401,18 +690,21 @@ class SpeechIO:
         if not self.review_transcripts:
             return transcript
         while True:
+            self._stop_stt_spinner()
             print("\n" + "-" * 72)
             print(f"[HEARD]: {transcript or '(nothing)'}")
+            self._stop_stt_spinner()
             choice = input("Press Enter to continue, or R + Enter to listen again: ").strip().lower()
+            self._stop_stt_spinner()
             print("-" * 72)
             if choice == "":
                 self._log_event("transcript_review", action="accepted", transcript=transcript or "(nothing)")
                 return transcript
             if choice == "r":
                 self._log_event("transcript_review", action="retry_requested", transcript=transcript or "(nothing)")
-                self._set_eyes("green")
                 transcript = self.listen_with_retry()
                 continue
+            self._stop_stt_spinner()
             print("Please press Enter to continue, or type R and press Enter to listen again.")
 
     def listen_with_review(self) -> str:
@@ -423,6 +715,326 @@ class SpeechIO:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
     @staticmethod
+    def _positive_float(value):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    @classmethod
+    def _env_positive_float(cls, name: str, default: float) -> float:
+        return cls._positive_float(os.environ.get(name)) or default
+
+    @staticmethod
+    def _bounded_similarity(value: float) -> float:
+        if value is None:
+            return 0.82
+        return max(0.0, min(float(value), 1.0))
+
+    @staticmethod
+    def _effective_listen_timeout(*values):
+        positive = [value for value in values if value and value > 0]
+        return max(positive) if positive else None
+
+    def _clear_terminal_status_line(self):
+        """Clear one STT spinner/status line without adding dialogue text."""
+        try:
+            sys.stdout.write("\r" + (" " * 96) + "\r")
+            sys.stdout.flush()
+            self._stt_spinner_visible = False
+        except Exception as e:
+            logger.debug("Could not clear terminal status line: %s", e)
+
+    def _start_stt_spinner(self, text: str = "recording"):
+        """Start CRI-owned STT status while the microphone is open."""
+        self._disable_realtimestt_halo()
+        with self._stt_spinner_lock:
+            thread = self._stt_spinner_thread
+            if thread is not None and thread.is_alive():
+                self._stt_spinner_text = text
+                return
+            stop_event = threading.Event()
+            self._stt_spinner_stop_event = stop_event
+            self._stt_spinner_text = text
+            thread = threading.Thread(
+                target=self._run_stt_spinner,
+                args=(stop_event,),
+                name="cri-stt-spinner",
+                daemon=True,
+            )
+            self._stt_spinner_thread = thread
+        thread.start()
+
+    def _run_stt_spinner(self, stop_event):
+        frames = ("|", "/", "-", "\\")
+        frame_index = 0
+        while not stop_event.is_set():
+            try:
+                with self._stt_spinner_lock:
+                    text = self._stt_spinner_text
+                sys.stdout.write(f"\r{frames[frame_index % len(frames)]} {text}")
+                sys.stdout.flush()
+                self._stt_spinner_visible = True
+            except Exception as e:
+                logger.debug("Could not write STT spinner: %s", e)
+                break
+            frame_index += 1
+            stop_event.wait(0.12)
+
+    def _disable_realtimestt_halo(self):
+        """Keep RealtimeSTT's own Halo spinner from recreating itself."""
+        recorder = self._recorder
+        if recorder is None:
+            return False
+        disabled = False
+        try:
+            recorder.spinner = False
+        except Exception:
+            pass
+        halo = getattr(recorder, "halo", None)
+        if halo is not None:
+            disabled = True
+            try:
+                halo.stop()
+            except Exception as e:
+                logger.debug("Could not stop RealtimeSTT spinner: %s", e)
+            try:
+                recorder.halo = None
+            except Exception:
+                pass
+        return disabled
+
+    def _stop_stt_spinner(self):
+        """
+        Stop CRI's STT spinner and clear any leftover RealtimeSTT Halo output.
+
+        The dialogue owns the terminal before printing Leo, child, or
+        researcher-review text.
+        """
+        thread = None
+        with self._stt_spinner_lock:
+            stop_event = self._stt_spinner_stop_event
+            if stop_event is not None:
+                stop_event.set()
+            thread = self._stt_spinner_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=0.5)
+        with self._stt_spinner_lock:
+            if self._stt_spinner_thread is thread:
+                self._stt_spinner_thread = None
+                self._stt_spinner_stop_event = None
+        had_halo = self._disable_realtimestt_halo()
+        if thread is not None or had_halo or self._stt_spinner_visible:
+            self._clear_terminal_status_line()
+            time.sleep(0.02)
+            self._clear_terminal_status_line()
+
+    @staticmethod
+    def _drain_queue(q) -> int:
+        if q is None:
+            return 0
+        drained = 0
+        while True:
+            try:
+                q.get_nowait()
+                drained += 1
+            except queue.Empty:
+                break
+            except Exception:
+                break
+        return drained
+
+    @staticmethod
+    def _clear_collection(obj) -> bool:
+        if obj is None:
+            return False
+        try:
+            obj.clear()
+            return True
+        except AttributeError:
+            return False
+        except Exception:
+            return False
+
+    def _reset_stt_audio_state(self, reason: str):
+        """Drop all queued/remembered STT audio so the next listen starts fresh."""
+        recorder = self._recorder
+        if recorder is None:
+            return
+        self._set_mic(False)
+
+        try:
+            recorder.clear_audio_queue()
+        except AttributeError:
+            pass
+        except Exception as e:
+            logger.debug("Could not clear recorder audio queue during %s: %s", reason, e)
+
+        raw_drained = self._drain_queue(getattr(recorder, "audio_queue", None))
+        recorded_drained = self._drain_queue(getattr(recorder, "recorded_audio_queue", None))
+
+        for attr in (
+            "frames",
+            "last_frames",
+            "audio_buffer",
+            "audio_buffer_metadata",
+            "last_words_buffer",
+            "text_storage",
+        ):
+            self._clear_collection(getattr(recorder, attr, None))
+
+        for attr, value in (
+            ("audio", None),
+            ("last_transcription_bytes", None),
+            ("last_transcription_bytes_b64", None),
+            ("last_transcription_metadata", None),
+            ("last_preroll_selection", None),
+            ("_pending_preroll_selection", None),
+            ("realtime_stabilized_text", ""),
+            ("realtime_stabilized_safetext", ""),
+            ("continuous_listening", False),
+            ("start_recording_on_voice_activity", False),
+            ("stop_recording_on_voice_deactivity", False),
+            ("is_recording", False),
+            ("is_webrtc_speech_active", False),
+            ("is_silero_speech_active", False),
+            ("wakeword_detected", False),
+            ("wake_word_detect_time", 0),
+            ("listen_start", 0),
+            ("recording_start_time", 0),
+            ("recording_start_monotonic", 0),
+            ("recording_stop_time", 0),
+            ("last_recording_start_time", 0),
+            ("last_recording_stop_time", 0),
+            ("backdate_stop_seconds", 0.0),
+            ("backdate_resume_seconds", 0.0),
+            ("speech_end_silence_start", 0),
+            ("speech_end_silence_candidate_start", 0),
+            ("silero_check_time", 0),
+        ):
+            try:
+                setattr(recorder, attr, value)
+            except Exception:
+                pass
+
+        for attr in ("start_recording_event", "stop_recording_event"):
+            event = getattr(recorder, attr, None)
+            if event is not None:
+                try:
+                    event.clear()
+                except Exception:
+                    pass
+
+        if raw_drained or recorded_drained:
+            self._log_event(
+                "stt_audio_reset",
+                reason=reason,
+                raw_audio_chunks=raw_drained,
+                recorded_chunks=recorded_drained,
+            )
+        logger.debug(
+            "STT audio reset (%s): raw=%d recorded=%d",
+            reason,
+            raw_drained,
+            recorded_drained,
+        )
+
+    def _recording_started_before(self, listen_started_at: float) -> bool:
+        """True when RealtimeSTT appears to have returned audio from an older turn."""
+        recorder = self._recorder
+        if recorder is None or not listen_started_at:
+            return False
+        starts = []
+        for attr in ("last_recording_start_time", "recording_start_time"):
+            try:
+                value = float(getattr(recorder, attr, 0) or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                starts.append(value)
+        if not starts:
+            return False
+        return min(starts) < (listen_started_at - self._stale_audio_tolerance_seconds)
+
+    def _clear_recorder_audio_queue(self):
+        """Backward-compatible alias for the full RealtimeSTT state reset."""
+        self._reset_stt_audio_state("clear_recorder_audio_queue")
+
+    def _abort_recorder_safely(self):
+        """Interrupt a stuck RealtimeSTT listen without blocking the dialogue."""
+        recorder = self._recorder
+        if recorder is None:
+            return
+        try:
+            interrupt = getattr(recorder, "interrupt_stop_event", None)
+            if interrupt is not None:
+                interrupt.set()
+        except Exception as e:
+            logger.debug("Could not set RealtimeSTT interrupt event: %s", e)
+
+        def abort():
+            try:
+                recorder.abort()
+            except AttributeError:
+                pass
+            except Exception as e:
+                logger.debug("RealtimeSTT abort failed: %s", e)
+
+        thread = threading.Thread(target=abort, name="cri-stt-abort", daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+        if thread.is_alive():
+            logger.warning("RealtimeSTT abort did not finish within 1 second.")
+
+    def _recorder_text_with_timeout(self):
+        """Return (transcript, timed_out) from RealtimeSTT."""
+        if self._recorder is None:
+            return "", False
+        timeout = self._stt_listen_timeout
+        if not timeout:
+            return self._recorder.text(), False
+
+        result_queue = queue.Queue(maxsize=1)
+
+        def transcribe():
+            try:
+                result_queue.put(("ok", self._recorder.text()))
+            except BaseException as e:
+                result_queue.put(("error", e))
+
+        thread = threading.Thread(
+            target=transcribe,
+            name="cri-stt-text",
+            daemon=True,
+        )
+        thread.start()
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            self._abort_recorder_safely()
+            thread.join(timeout=1.0)
+            if thread.is_alive():
+                logger.warning("RealtimeSTT text worker did not stop within 1 second.")
+            self._set_mic(False)
+            self._stop_stt_spinner()
+            self._log_event(
+                "stt_timeout",
+                timeout=timeout,
+                stt_timeout=self._stt_timeout,
+                stt_phrase_limit=self._stt_phrase_limit,
+            )
+            logger.warning("RealtimeSTT listen timed out after %.2f seconds.", timeout)
+            return "", True
+
+        try:
+            status, payload = result_queue.get_nowait()
+        except queue.Empty:
+            return "", False
+        if status == "error":
+            raise payload
+        return payload, False
+
+    @staticmethod
     def _is_empty_transcript(transcript: str) -> bool:
         """True if transcript is empty or a known Whisper silence hallucination."""
         if not transcript:
@@ -431,6 +1043,108 @@ class SpeechIO:
         if not cleaned or len(cleaned) <= 1:
             return True
         return cleaned.lower() in _WHISPER_SILENCE_ARTEFACTS
+
+    def _clean_stt_transcript(self, transcript: str) -> str:
+        """Apply deterministic repairs and reject obvious STT hallucination loops."""
+        if not transcript:
+            return ""
+        fixed = self._fix_known_mishears(transcript.strip())
+        collapsed = self._collapse_repetition_loop(fixed)
+        if collapsed != fixed:
+            self._log_event(
+                "stt_repetition_collapsed",
+                original=fixed,
+                collapsed=collapsed,
+            )
+            fixed = collapsed
+        if self._looks_like_suspicious_loop(fixed):
+            logger.warning("Rejected suspicious STT transcript: %s", fixed)
+            self._log_event("stt_rejected", reason="suspicious_loop", text=fixed)
+            return ""
+        echo, similarity = self._looks_like_leo_echo(fixed)
+        if echo:
+            logger.warning("Rejected likely Leo echo transcript: %s", fixed)
+            self._log_event(
+                "stt_rejected",
+                reason="leo_echo",
+                text=fixed,
+                leo_text=self._last_leo_text,
+                similarity=round(similarity, 3),
+            )
+            return ""
+        return self.normalize_transcript(fixed)
+
+    @staticmethod
+    def _normalise_stt_words(text: str):
+        return re.findall(r"[a-z0-9À-ÖØ-öø-ÿ]+(?:['-][a-z0-9À-ÖØ-öø-ÿ]+)?", text.lower())
+
+    @classmethod
+    def _collapse_repetition_loop(cls, transcript: str) -> str:
+        words = cls._normalise_stt_words(transcript)
+        if len(words) < 6:
+            return transcript
+
+        comma_parts = [
+            " ".join(cls._normalise_stt_words(part))
+            for part in re.split(r"[,;]+", transcript)
+        ]
+        comma_parts = [part for part in comma_parts if part]
+        if len(comma_parts) >= 3 and len(set(comma_parts)) == 1:
+            return comma_parts[0]
+
+        for phrase_len in range(1, min(5, len(words) // 3 + 1)):
+            phrase = words[:phrase_len]
+            chunks = [
+                words[i:i + phrase_len]
+                for i in range(0, len(words), phrase_len)
+                if len(words[i:i + phrase_len]) == phrase_len
+            ]
+            if len(chunks) < 3:
+                continue
+            matches = sum(1 for chunk in chunks if chunk == phrase)
+            if matches / len(chunks) >= 0.8:
+                return " ".join(phrase)
+
+        return transcript
+
+    @classmethod
+    def _looks_like_suspicious_loop(cls, transcript: str) -> bool:
+        words = cls._normalise_stt_words(transcript)
+        if len(words) < 30:
+            return False
+        unique_ratio = len(set(words)) / max(1, len(words))
+        return unique_ratio < 0.25
+
+    def _looks_like_leo_echo(self, transcript: str) -> tuple[bool, float]:
+        transcript_words = self._normalise_stt_words(transcript)
+        leo_words = self._normalise_stt_words(self._last_leo_text)
+        if len(transcript_words) < 4 or len(leo_words) < 4:
+            return False, 0.0
+
+        transcript_text = " ".join(transcript_words)
+        leo_text = " ".join(leo_words)
+        if len(transcript_text) < 18:
+            return False, 0.0
+
+        if transcript_text == leo_text or transcript_text in leo_text:
+            return True, 1.0
+
+        similarity = SequenceMatcher(None, transcript_text, leo_text).ratio()
+        return similarity >= self._leo_echo_similarity, similarity
+
+    @staticmethod
+    def normalize_transcript(text: str) -> str:
+        """Flatten STT output before classification while keeping readable words."""
+        text = str(text or "")
+        text = text.replace("\u2019", "'").replace("\u2018", "'")
+        text = text.replace("\u201c", "").replace("\u201d", "")
+        text = re.sub(r"[\u2012\u2013\u2014\u2015\u2212-]", " ", text)
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        text = re.sub(r"[^A-Za-z0-9\s.,!?']", " ", text)
+        text = re.sub(r"\s+([.,!?])", r"\1", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
     
     def _fix_known_mishears(self, transcript: str) -> str:
         """Repair domain-specific STT confusions (e.g. basta→pasta)."""
@@ -455,21 +1169,24 @@ class SpeechIO:
         Keeping _last_leo_text on the original question means Whisper context
         on the next listen() still points to what Leo actually asked.
 
-        Eyes go green after, signalling child's turn again.
+        Eyes stay WHITE while Leo speaks. The next listen() call owns the
+        GREEN active-listening cue.
         """
-        text = self.strip_non_bmp(text)
+        text = self._prepare_leo_output_text(text)
+        if not text:
+            return
         logger.info("LEO (retry): %s", text)
         self._log_event("utterance", speaker="LEO", text=text, system_message=True)
+        self._reset_stt_audio_state("before_retry_prompt")
+        self._print_leo_terminal(text)
         if self.simulation_mode or not self.use_nao_output or not self.nao:
-            print(f"\n[LEO]: {text}\n")
             return
-        from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
         self._set_mic(False)          # don't transcribe Leo's retry prompt
-        tts_text = self._tts_text(text)
-        self.nao.tts.request(NaoqiTextToSpeechRequest(tts_text, language="Dutch"))
-        time.sleep(len(text) * 0.01)
-        time.sleep(0.2)
-        self._set_eyes("green")
+        self._set_eyes("white")
+        started_at = time.monotonic()
+        spoken_text, spoken = self._request_nao_tts(text)
+        if spoken:
+            self._wait_for_tts_handoff(spoken_text, started_at)
 
     def _set_context_prompt(self):
         """Update Whisper initial_prompt with Leo's last utterance before decoding."""
@@ -519,29 +1236,6 @@ class SpeechIO:
                 continue
             safe_chars.append(char)
         return "".join(safe_chars)
-
-    @staticmethod
-    def normalize_transcript(text: str) -> str:
-        """Flatten the STT transcript to plain Latin text before it reaches the
-        classifier: no accents, no em/en dashes, no other symbols, and no
-        non-Latin scripts. This stops accented or mixed-script Whisper output
-        from being treated as another language.
-        """
-        text = str(text or "")
-        # normalise smart quotes; drop double quotes
-        text = text.replace("\u2019", "'").replace("\u2018", "'")
-        text = text.replace("\u201c", "").replace("\u201d", "")
-        # em dash / en dash / figure dash / horizontal bar / minus / hyphen -> space
-        text = re.sub(r"[\u2012\u2013\u2014\u2015\u2212-]", " ", text)
-        # strip accents/diacritics: cafe, een, ruine, ...
-        text = unicodedata.normalize("NFKD", text)
-        text = "".join(ch for ch in text if not unicodedata.combining(ch))
-        # keep only Latin letters, digits, spaces, apostrophe, and . , ! ?
-        # (this also removes emoji and any Cyrillic/CJK/Arabic tokens)
-        text = re.sub(r"[^A-Za-z0-9\s.,!?']", " ", text)
-        text = re.sub(r"\s+([.,!?])", r"\1", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
 
     def _apply_pronunciation_overrides(self, text: str) -> str:
         if not self._pronunciation_overrides:

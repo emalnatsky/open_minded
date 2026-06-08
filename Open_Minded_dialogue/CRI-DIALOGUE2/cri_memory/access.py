@@ -28,6 +28,7 @@ register_mentioned_memory_fields (called when Leo finishes a turn).
 """
 
 import logging
+import re
 
 from tablet_state import FIELD_TO_CATEGORY
 
@@ -140,6 +141,10 @@ class MemoryAccess:
             memory_value = self.d.visible_memory_value(field)
             return str(memory_value) if self.d.is_known(memory_value) else ""
 
+        def looks_like_multiple_values(memory_value: str) -> bool:
+            clean = re.sub(r"\s+", " ", str(memory_value or "").strip().lower())
+            return "," in clean or " en " in clean
+
         lines = []
 
         name = value("name")
@@ -211,7 +216,10 @@ class MemoryAccess:
         school_strength = value("school_strength")
         school_difficulty = value("school_difficulty")
         if fav_subject:
-            school_bits.append(f"{fav_subject} jouw lievelingsvak is")
+            if looks_like_multiple_values(fav_subject):
+                school_bits.append(f"{fav_subject} jouw lievelingsvakken zijn")
+            else:
+                school_bits.append(f"{fav_subject} jouw lievelingsvak is")
         if school_strength:
             school_bits.append(f"{school_strength} iets is waar je goed in bent")
         if school_difficulty:

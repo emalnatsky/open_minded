@@ -178,27 +178,18 @@ class L3Runtime:
         return text
 
     def strip_symbols_and_accents(self, raw: str) -> str:
-        """Flatten Leo's output to plain Dutch letters + simple sentence
-        punctuation: no accents, no em/en dashes, no other symbols. This keeps
-        the TTS clean and stops downstream tools from guessing another language.
-        """
+        """Flatten L3 output to plain Latin text and simple punctuation."""
         text = str(raw or "")
-        # normalise smart quotes; drop double quotes entirely
         text = text.replace("\u2019", "'").replace("\u2018", "'")
         text = text.replace("\u201c", "").replace("\u201d", "")
-        # em dash / en dash / figure dash / horizontal bar / minus -> comma pause
         text = re.sub(r"[\u2012\u2013\u2014\u2015\u2212]", ", ", text)
-        # ordinary hyphen between words -> space
         text = text.replace("-", " ")
-        # strip accents/diacritics: cafe, een, ruine, ...
         text = unicodedata.normalize("NFKD", text)
         text = "".join(ch for ch in text if not unicodedata.combining(ch))
-        # keep only Latin letters, digits, spaces, apostrophe, and . , ! ?
         text = re.sub(r"[^A-Za-z0-9\s.,!?']", " ", text)
-        # tidy spacing and punctuation
-        text = re.sub(r"\s+([.,!?])", r"\1", text)   # no space before punctuation
-        text = re.sub(r"([.,!?])\1+", r"\1", text)    # collapse repeated punctuation
-        text = re.sub(r"^[\s.,!?]+", "", text)         # no leading punctuation
+        text = re.sub(r"\s+([.,!?])", r"\1", text)
+        text = re.sub(r"([.,!?])\1+", r"\1", text)
+        text = re.sub(r"^[\s.,!?]+", "", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
 

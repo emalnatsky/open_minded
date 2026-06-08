@@ -1,9 +1,12 @@
 import importlib.util
 import json
 import os
+import queue
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +59,9 @@ IntentResult = cri_module.IntentResult
 
 
 class DummyLogger:
+    def debug(self, *args, **kwargs):
+        pass
+
     def info(self, *args, **kwargs):
         pass
 
@@ -101,6 +107,149 @@ class FakeSpeech:
     @staticmethod
     def strip_non_bmp(text):
         return cri_module.SpeechIO.strip_non_bmp(text)
+
+
+class FakeHalo:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+class FakeSTTRecorder:
+    def __init__(self, text="nee", sleep_seconds=0):
+        self.text_value = text
+        self.sleep_seconds = sleep_seconds
+        self.halo = FakeHalo()
+        self.spinner = True
+        self.microphone_states = []
+        self.queue_cleared = False
+        self.aborted = False
+        self.shutdown_called = False
+        self.audio_queue = queue.Queue()
+        self.recorded_audio_queue = queue.Queue()
+        self.frames = []
+        self.last_frames = []
+        self.audio_buffer = []
+        self.audio_buffer_metadata = []
+        self.last_words_buffer = []
+        self.text_storage = []
+        self.audio = None
+        self.last_transcription_bytes = None
+        self.last_transcription_bytes_b64 = None
+        self.last_transcription_metadata = None
+        self.last_preroll_selection = None
+        self._pending_preroll_selection = None
+        self.realtime_stabilized_text = ""
+        self.realtime_stabilized_safetext = ""
+        self.continuous_listening = False
+        self.start_recording_on_voice_activity = False
+        self.stop_recording_on_voice_deactivity = False
+        self.is_recording = False
+        self.is_webrtc_speech_active = False
+        self.is_silero_speech_active = False
+        self.wakeword_detected = False
+        self.listen_start = 0
+        self.recording_start_time = 0
+        self.recording_start_monotonic = 0
+        self.recording_stop_time = 0
+        self.last_recording_start_time = 0
+        self.last_recording_stop_time = 0
+        self.backdate_stop_seconds = 0.0
+        self.backdate_resume_seconds = 0.0
+        self.speech_end_silence_start = 0
+        self.speech_end_silence_candidate_start = 0
+        self.wake_word_detect_time = 0
+        self.silero_check_time = 0
+        self.start_recording_event = threading.Event()
+        self.stop_recording_event = threading.Event()
+        self.interrupt_stop_event = threading.Event()
+
+    def set_microphone(self, enabled):
+        self.microphone_states.append(enabled)
+
+    def clear_audio_queue(self):
+        self.queue_cleared = True
+
+    def text(self):
+        if self.sleep_seconds:
+            time.sleep(self.sleep_seconds)
+        return self.text_value
+
+    def abort(self):
+        self.aborted = True
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+
+class FakeCudaBackend:
+    def __init__(self, available=False, name="Fake CUDA GPU", fail_if_checked=False):
+        self.available = available
+        self.name = name
+        self.fail_if_checked = fail_if_checked
+        self.available_checks = 0
+
+    def is_available(self):
+        self.available_checks += 1
+        if self.fail_if_checked:
+            raise AssertionError("CUDA should not be checked for this case")
+        return self.available
+
+    def get_device_name(self, _index):
+        return self.name
+
+
+class FakeMpsBackend:
+    def __init__(self, available=False):
+        self.available = available
+
+    def is_available(self):
+        return self.available
+
+
+class FakeTorchModule:
+    def __init__(self, cuda_available=False, cuda_name="Fake CUDA GPU", mps_available=False, fail_cuda_check=False):
+        self.cuda = FakeCudaBackend(cuda_available, cuda_name, fail_cuda_check)
+        self.backends = SimpleNamespace(mps=FakeMpsBackend(mps_available))
+        self.__version__ = "test"
+        self.version = SimpleNamespace(cuda="test")
+
+
+class FakeCTranslate2Module:
+    def __init__(self, cuda_count=0, cpu_types=None, fail_cuda_count=False):
+        self.cuda_count = cuda_count
+        self.cpu_types = set(cpu_types or {"int8", "float32"})
+        self.fail_cuda_count = fail_cuda_count
+        self.cuda_count_checks = 0
+
+    def get_cuda_device_count(self):
+        self.cuda_count_checks += 1
+        if self.fail_cuda_count:
+            raise AssertionError("CUDA device count should not be checked for this case")
+        return self.cuda_count
+
+    def get_supported_compute_types(self, device):
+        if device != "cpu":
+            return set()
+        return set(self.cpu_types)
+
+
+class FakeNaoChannel:
+    def __init__(self):
+        self.requests = []
+
+    def request(self, request):
+        self.requests.append(request)
+
+
+class FakeNao:
+    def __init__(self):
+        self.tts = FakeNaoChannel()
+        self.leds = FakeNaoChannel()
+        self.autonomous = FakeNaoChannel()
+        self.motion = FakeNaoChannel()
 
 
 def make_app(openai_payloads=None):
@@ -659,6 +808,18 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(script[5]["part"], 1)
         self.assertEqual(script[5]["phase_id"], "1.6")
         self.assertEqual(script[5]["script_phase"], "part1_mistake1")
+        phase16 = script[5]
+        self.assertEqual(phase16["segments"][0]["response_mode"], "mistake_interpretation")
+        self.assertTrue(phase16["segments"][0]["memory_correction_available"])
+        self.assertEqual(phase16["segments"][0]["memory_correction_field"], "hobby_fav")
+        self.assertNotIn("memory_correction_available", phase16["segments"][1])
+        phase18 = script[7]
+        self.assertEqual(phase18["phase_id"], "1.8")
+        self.assertEqual(phase18["mistake_field"], "fav_food")
+        self.assertEqual(phase18["segments"][0]["response_mode"], "mistake_interpretation")
+        self.assertTrue(phase18["segments"][0]["memory_correction_available"])
+        self.assertEqual(phase18["segments"][0]["memory_correction_field"], "fav_food")
+        self.assertNotIn("memory_correction_available", phase18["segments"][1])
         self.assertEqual(script[9]["part"], 2)
         self.assertEqual(script[9]["phase_id"], "2.1")
         self.assertEqual(script[9]["script_phase"], "part2_school_joke_transition")
@@ -704,6 +865,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase24["mistake_field"], "school_strength")
         self.assertEqual(len(phase24["segments"]), 4)
         self.assertEqual(phase24["segments"][0]["response_mode"], "mistake_interpretation")
+        self.assertTrue(phase24["segments"][0]["memory_correction_available"])
+        self.assertEqual(phase24["segments"][0]["memory_correction_field"], "school_strength")
         self.assertTrue(phase24["segments"][1]["run_if_phase_confirmed_change"])
         self.assertTrue(phase24["segments"][2]["skip_if_phase_confirmed_change"])
         self.assertEqual(phase24["segments"][2]["l3"]["response_function"], "acknowledge")
@@ -757,6 +920,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase34["segments"][0]["response_mode"], "listen_only")
         self.assertFalse(phase34["segments"][1]["expects_response"])
         self.assertEqual(phase34["segments"][2]["response_mode"], "mistake_interpretation")
+        self.assertTrue(phase34["segments"][2]["memory_correction_available"])
+        self.assertEqual(phase34["segments"][2]["memory_correction_field"], "aspiration")
         self.assertTrue(phase34["segments"][3]["run_if_phase_confirmed_change"])
         self.assertEqual(phase34["segments"][3]["condition_phase"], 17)
         self.assertTrue(phase34["segments"][4]["skip_if_phase_confirmed_change"])
@@ -782,19 +947,23 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(phase36["segments"][1]["memory_review_from_access_scope"])
         self.assertTrue(phase36["segments"][1]["speak_memory_review_from_access_scope"])
         self.assertFalse(phase36["segments"][1]["activate_tablet_memory_access"])
-        self.assertEqual(phase36["segments"][2]["response_mode"], "memory_review_add_final")
-        self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase36["segments"][2]))
-        self.assertIn("gewoon nog even verder", app.turn_text(phase36["segments"][-1]))
+        self.assertEqual(phase36["segments"][2]["response_mode"], "memory_access_change")
+        self.assertIn("Wil je iets aan mijn geheugen veranderen?", app.turn_text(phase36["segments"][2]))
+        self.assertEqual(phase36["segments"][3]["response_mode"], "memory_review_add_final")
+        self.assertIn("wat ik nog niet heb onthouden", app.turn_text(phase36["segments"][3]))
+        self.assertIn("Dat is ook goed.", app.turn_text(phase36["segments"][-1]))
         phase38 = script[18]
         self.assertEqual(phase38["part"], 3)
         self.assertEqual(phase38["phase_id"], "3.8")
         self.assertEqual(phase38["script_phase"], "part3_closing")
         self.assertEqual(phase38["layer"], "L1 + L2-slot: first_name")
-        self.assertEqual(len(phase38["segments"]), 2)
+        self.assertEqual(len(phase38["segments"]), 3)
         self.assertFalse(phase38["segments"][0]["expects_response"])
         self.assertFalse(phase38["segments"][1]["expects_response"])
+        self.assertFalse(phase38["segments"][2]["expects_response"])
         self.assertIn("Dank je wel dat je met mij hebt gepraat.", app.turn_text(phase38["segments"][0]))
-        self.assertEqual(app.turn_text(phase38["segments"][1]), "Tot de volgende keer, Sam.")
+        self.assertIn("maakte ik soms een foutje", app.turn_text(phase38["segments"][1]))
+        self.assertEqual(app.turn_text(phase38["segments"][2]), "Tot de volgende keer, Sam.")
         self.assertEqual(phase38["used_fields"], {"name": "Sam"})
         self.assertEqual(script[0]["phase"], 1)
         self.assertEqual(script[0]["name"], "Greeting")
@@ -806,8 +975,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase4_text = app.turn_text(script[3])
         self.assertIn("Dat vind ik echt een gezellige combinatie.", phase4_text)
         self.assertIn("Daar zit van alles in: creatief bezig zijn.", phase4_text)
-        self.assertFalse(script[3]["expects_response"])
-        self.assertNotIn("response_mode", script[3])
+        self.assertTrue(script[3]["expects_response"])
+        self.assertEqual(script[3]["response_mode"], "listen_only")
         self.assertEqual(script[5]["mistake_id"], "M1")
         self.assertEqual(script[5]["mistake_field"], "hobby_fav")
         self.assertEqual(script[7]["mistake_id"], "M2")
@@ -1214,6 +1383,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_actual": "dierenarts worden",
             "mistake_wrong": "juf worden",
             "used_fields": {"aspiration": "juf worden"},
+            "memory_correction_available": True,
+            "memory_correction_field": "aspiration",
         }
         app.current_turn_context = turn
 
@@ -1242,6 +1413,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_actual": "dierenarts worden",
             "mistake_wrong": "kapper worden",
             "used_fields": {"aspiration": "kapper worden"},
+            "memory_correction_available": True,
+            "memory_correction_field": "aspiration",
         }
         app.current_turn_context = turn
 
@@ -1277,6 +1450,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_actual": "dierenarts worden",
             "mistake_wrong": "kapper worden",
             "used_fields": {"aspiration": "kapper worden"},
+            "memory_correction_available": True,
+            "memory_correction_field": "aspiration",
         }
         app.current_turn_context = turn
 
@@ -1942,11 +2117,11 @@ class CRIDialogue2Tests(unittest.TestCase):
             with self.subTest(phase_id=turn["phase_id"], transcript=transcript):
                 self.assertEqual(app.actions.change_from_intent_result(result, turn, transcript), {})
 
-    def test_explicit_memory_correction_cue_after_um_mention_still_updates(self):
+    def test_explicit_memory_correction_cue_after_unflagged_um_mention_does_not_update(self):
         app = make_app()
         app.last_um_preview = sample_um()
         app.speech.heard = ["ja"]
-        app.write_um_change = lambda change: True
+        app.write_um_change = lambda change: (_ for _ in ()).throw(AssertionError("unexpected write"))
         turn = {
             "phase": 16,
             "phase_id": "3.3",
@@ -1961,11 +2136,9 @@ class CRIDialogue2Tests(unittest.TestCase):
             turn,
         )
 
-        self.assertEqual(action["action"], "confirm_update")
-        self.assertTrue(action["continue_phase_after_change"])
-        self.assertEqual(action["change"]["field"], "role_model")
-        self.assertEqual(action["change"]["new_value"], "mijn vader")
-        self.assertIn("naar wie je opkijkt verander naar mijn vader", app.speech.spoken[0])
+        self.assertEqual(action["action"], "acknowledge")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.last_um_preview["role_model"], sample_um()["role_model"])
 
     def test_part2_mistake3_uses_default_scenario_lines_for_branch_paths(self):
         app = make_app()
@@ -2143,7 +2316,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(phase8["mistake_wrong"], "pizza")
         self.assertEqual(len(segments), 3)
         self.assertIn("Ik weet nog dat jouw lievelingseten pizza is.", app.turn_text(segments[0]))
-        self.assertIn("Dat is op zich wel een sterke keuze.", app.turn_text(segments[1]))
+        self.assertIn("Dat is op zich wel een lekkere keuze.", app.turn_text(segments[1]))
         self.assertIn("Pizza is rond en warm.", app.turn_text(segments[1]))
         self.assertIn("Pannenkoeken klinken eerlijk gezegd", app.turn_text(segments[2]))
 
@@ -2684,9 +2857,24 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(response, "Voorin, lekker! Daar moet je snel zijn.")
         request = app.openai_client.requests[-1]
         self.assertIn("NEVER reveal or reference UM fields", request["messages"][0]["content"])
+        self.assertIn("Use only plain letters and simple punctuation", request["messages"][0]["content"])
         self.assertIn("Script phase: part1_topic1", request["messages"][1]["content"])
         self.assertIn("Next scripted Leo line", request["messages"][1]["content"])
         self.assertIn('"sports_fav_play": "hockey"', request["messages"][1]["content"])
+
+    def test_l3_runtime_sanitizes_symbols_accents_and_labels(self):
+        app = make_app()
+
+        clean = app.actions.l3.sanitize_output('Leo: "Oké — één café ✓"')
+
+        self.assertEqual(clean, "Oke, een cafe")
+
+    def test_l3_runtime_sanitizer_keeps_normal_short_output_readable(self):
+        app = make_app()
+
+        clean = app.actions.l3.sanitize_output("Dat snap ik wel!")
+
+        self.assertEqual(clean, "Dat snap ik wel!")
 
     def test_l3_runtime_uses_fallback_when_output_breaks_safety_rules(self):
         app = make_app(openai_payloads=["Knap! Speel je vaak met Momo?"])
@@ -3067,6 +3255,20 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("rekenen soms wat lastiger voelt", app.turn_text(segments[2]))
         self.assertIn("haar moeder iemand is naar wie je opkijkt", app.turn_text(segments[3]))
         self.assertIn("je later dierenarts wilt worden", app.turn_text(segments[3]))
+        for segment in segments:
+            self.assertTrue(segment["memory_correction_available"])
+            self.assertEqual(segment["memory_review_fields"], list(segment["used_fields"].keys()))
+
+    def test_memory_review_uses_plural_for_multiple_favourite_subjects(self):
+        app = make_app()
+        um = sample_um()
+        um["fav_subject"] = "gym en rekenen"
+        app.last_um_preview = um
+
+        lines = app.mem.memory_review_lines(["fav_subject"])
+
+        self.assertIn("gym en rekenen jouw lievelingsvakken zijn", " ".join(lines))
+        self.assertNotIn("gym en rekenen jouw lievelingsvak is", " ".join(lines))
 
     def test_memory_review_group_response_modes_confirm_repeat_and_ask_detail(self):
         app = make_app()
@@ -3308,6 +3510,69 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(context["memory_review_fields"], ["sports_enjoys", "sports_fav_play"])
         self.assertEqual(set(app.allowed_change_fields(context)), {"sports_enjoys", "sports_fav_play"})
 
+    def test_memory_access_change_handles_ambiguous_yes_no_without_write(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.write_um_change = lambda *_args, **_kwargs: self.fail("Ambiguous answer must not write UM")
+        turn = {
+            "phase": 18,
+            "phase_id": "3.6/7",
+            "name": "Explicit memory inspection",
+            "response_mode": "memory_access_change",
+            "allow_memory_change": True,
+            "memory_correction_requested": True,
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Ja, nee, of niet.",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "memory_access_change_clarify_yes_no")
+        self.assertNotEqual(action["action"], "ask_correction_detail")
+        self.assertTrue(action["follow_up_needed"])
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.speech.spoken, ["Wil je iets veranderen? Zeg maar ja of nee."])
+
+    def test_memory_access_change_no_yes_and_wrong_are_separate_routes(self):
+        turn = {
+            "phase": 18,
+            "phase_id": "3.6/7",
+            "name": "Explicit memory inspection",
+            "response_mode": "memory_access_change",
+            "allow_memory_change": True,
+            "memory_correction_requested": True,
+        }
+
+        app = make_app()
+        no_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "nee hoor",
+            dict(turn),
+        )
+        self.assertEqual(no_action["action"], "memory_access_change_none")
+        self.assertEqual(app.speech.spoken, ["Oké, dan laat ik alles zo."])
+
+        app = make_app()
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            yes_action = app.action_handler(
+                IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                "ja",
+                dict(turn),
+            )
+        self.assertEqual(yes_action["action"], "memory_access_change_no_value")
+        self.assertEqual(app.speech.spoken[0], "Wat wil je veranderen?")
+
+        app = make_app()
+        wrong_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "dat klopt niet",
+            dict(turn),
+        )
+        self.assertEqual(wrong_action["action"], "ask_correction_detail")
+        self.assertEqual(wrong_action["leo_response"], "Oeps, wat klopt er dan niet?")
+
     def test_memory_access_change_to_already_stored_value_is_acknowledged(self):
         app = make_app()
         app.last_um_preview = sample_um()
@@ -3376,8 +3641,10 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.simulated_persona = dict(app.last_um_preview)
         app.speech = FakeSpeech([
             "Kan ik je geheugen zien?",
+            "ja",
             "favoriete hobby naar spelletjes spelen",
             "ja",
+            "nee",
         ])
         app.log_action_handler_result = lambda action: None
 
@@ -3689,9 +3956,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn("if (prevValue !== newValue && unresolvedMistake)", script)
         self.assertIn("renderPills(currentCategory, true);", script)
 
-    def test_action_handler_logs_already_correct_mistake_without_um_write(self):
+    def test_action_handler_confirms_already_correct_visible_mistake_without_um_write(self):
         app = make_app()
         app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         app.mistake_states = {"M1": {"id": "M1", "wrong_value_rejected": True}}
         turn = {
             "phase": 6,
@@ -3699,17 +3968,20 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_field": "hobby_fav",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
         }
         app.current_turn_context = turn
         result = IntentResult(intent="um_add", field="hobby_fav", value="tekenen", confidence=0.96)
 
         action = app.action_handler(result, "Mijn favoriete hobby is tekenen", turn)
 
-        self.assertEqual(action["action"], "mistake_corrected_no_um_change")
-        self.assertEqual(action["leo_response"], "O ja, dankjewel.")
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change"]["skip_um_write"])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         self.assertEqual(app.corrections_seen, 1)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
-        self.assertIn("O ja, dankjewel.", app.speech.spoken)
 
     def test_listen_only_ignores_hallucinated_um_add_from_topic_answer(self):
         app = make_app()
@@ -4492,15 +4764,19 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(action["change"], {})
         self.assertEqual(app.corrections_seen, 0)
 
-    def test_deferred_mistake_correction_marks_phase_without_generic_reply(self):
+    def test_deferred_mistake_correction_asks_confirmation_for_stored_value(self):
         app = make_app()
         app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         turn = {
             "phase": 6,
             "mistake_id": "M1",
             "mistake_field": "hobby_fav",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "defer_corrected_response": True,
         }
         app.current_turn_context = turn
@@ -4508,9 +4784,10 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         action = app.action_handler(result, "Nee, tekenen", turn)
 
-        self.assertEqual(action["action"], "mistake_corrected_no_um_change")
-        self.assertIsNone(action["leo_response"])
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change"]["skip_um_write"])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
 
@@ -4524,6 +4801,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_field": "hobby_fav",
             "mistake_actual": "tekenen",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "mistake_topic": app.topic_candidate(
                 domain="hobby",
                 label="tekenen",
@@ -4539,21 +4818,26 @@ class CRIDialogue2Tests(unittest.TestCase):
         }
         app.current_turn_context = turn
         app.mistake_states = {"M1": {"id": "M1", "wrong_value_rejected": True}}
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         result = IntentResult(intent="um_add", field="hobby_fav", value="tekenen", confidence=0.96)
 
         action = app.action_handler(result, "Mijn favoriete hobby is tekenen", turn)
 
-        self.assertEqual(action["action"], "mistake_corrected_no_um_change")
-        self.assertIsNone(action["leo_response"])
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change"]["skip_um_write"])
         self.assertEqual(action["change"]["old_value"], "tekenen")
         self.assertEqual(action["change"]["new_value"], "tekenen")
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
 
-    def test_mistake_one_rejection_then_bare_value_does_not_ask_confirmation(self):
+    def test_mistake_one_rejection_then_bare_value_asks_confirmation(self):
         app = make_app()
         app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         turn = {
             "phase": 6,
             "mistake_id": "M1",
@@ -4562,6 +4846,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_wrong": "zingen",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "defer_corrected_response": True,
         }
         app.current_turn_context = turn
@@ -4582,9 +4868,10 @@ class CRIDialogue2Tests(unittest.TestCase):
             turn,
         )
 
-        self.assertEqual(second_action["action"], "mistake_corrected_no_um_change")
-        self.assertIsNone(second_action["leo_response"])
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(second_action["action"], "confirm_update")
+        self.assertTrue(second_action["change"]["skip_um_write"])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je favoriete hobby verander naar tekenen?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
 
@@ -4598,6 +4885,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_actual": "Rekenen en Gym",
             "mistake_wrong": "begrijpend lezen",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "school_strength",
         }
 
         action = app.action_handler(
@@ -4619,6 +4908,524 @@ class CRIDialogue2Tests(unittest.TestCase):
             context["correction_question"],
             "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
         )
+
+    def test_fav_subject_soft_no_answers_offer_correction_detail(self):
+        soft_answers = ("Beetje", "niet echt", "volgens mij niet")
+
+        for answer in soft_answers:
+            with self.subTest(answer=answer):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                app.write_um_change = lambda change: (_ for _ in ()).throw(AssertionError("unexpected write"))
+                turn = {
+                    "phase": 12,
+                    "phase_id": "2.3",
+                    "response_mode": "topic_interpretation",
+                    "memory_correction_available": True,
+                    "memory_correction_field": "fav_subject",
+                    "used_fields": {"fav_subject": "natuur"},
+                    "topic": {
+                        "domain": "school_subject",
+                        "label": "natuur",
+                        "fields": ["fav_subject"],
+                        "field_labels": {"fav_subject": "je lievelingsvak"},
+                        "current_values": {"fav_subject": "natuur"},
+                        "expected_value_count": {"fav_subject": 1},
+                    },
+                }
+
+                action = app.action_handler(
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                    answer,
+                    turn,
+                )
+
+                self.assertEqual(action["action"], "ask_correction_detail")
+                self.assertTrue(action["follow_up_needed"])
+                self.assertTrue(turn["memory_correction_requested"])
+                self.assertEqual(turn["memory_correction_field"], "fav_subject")
+                self.assertEqual(action["leo_response"], "Oeps, wat is dan je lievelingsvak?")
+
+    def test_school_strength_soft_no_answers_offer_correction_detail(self):
+        soft_answers = ("mwah", "niet helemaal", "ik weet niet of dat klopt")
+
+        for answer in soft_answers:
+            with self.subTest(answer=answer):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                app.write_um_change = lambda change: (_ for _ in ()).throw(AssertionError("unexpected write"))
+                turn = {
+                    "phase": 13,
+                    "phase_id": "2.4",
+                    "mistake_id": "M3",
+                    "mistake_field": "school_strength",
+                    "mistake_actual": "taal",
+                    "mistake_wrong": "rekenen",
+                    "response_mode": "mistake_interpretation",
+                    "memory_correction_available": True,
+                    "memory_correction_field": "school_strength",
+                }
+
+                action = app.action_handler(
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                    answer,
+                    turn,
+                )
+
+                self.assertEqual(action["action"], "ask_correction_detail")
+                self.assertTrue(action["follow_up_needed"])
+                self.assertTrue(turn["memory_correction_requested"])
+                self.assertEqual(turn["memory_correction_field"], "school_strength")
+                self.assertEqual(
+                    action["leo_response"],
+                    "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+                )
+                self.assertTrue(app.mistake_states["M3"]["wrong_value_rejected"])
+
+    def test_soft_no_school_correction_does_not_store_beetje_as_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.write_um_change = lambda change: (_ for _ in ()).throw(AssertionError("unexpected write"))
+        turn = {
+            "phase": 12,
+            "phase_id": "2.3",
+            "response_mode": "topic_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_subject",
+            "used_fields": {"fav_subject": "natuur"},
+            "topic": {
+                "domain": "school_subject",
+                "label": "natuur",
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je lievelingsvak"},
+                "current_values": {"fav_subject": "natuur"},
+                "expected_value_count": {"fav_subject": 1},
+            },
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_subject", value="beetje", confidence=0.94),
+            "beetje",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "ask_correction_detail")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.last_um_preview["fav_subject"], sample_um()["fav_subject"])
+
+    def test_unflagged_mistake_followup_soft_no_does_not_trigger_memory_correction(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 6,
+            "phase_id": "1.6",
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "tuinieren",
+            "response_mode": "mistake_interpretation",
+            "used_fields": {"hobby_fav": "tuinieren"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "beetje",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "continue_wrong_value_followup")
+        self.assertEqual(action["change"], {})
+        self.assertNotIn("memory_correction_requested", turn)
+
+    def test_unflagged_mistake_followup_um_value_does_not_trigger_memory_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        turn = {
+            "phase": 6,
+            "phase_id": "1.6",
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "tuinieren",
+            "response_mode": "mistake_interpretation",
+            "used_fields": {"hobby_fav": "tuinieren"},
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="hobby_fav", value="tekenen", confidence=0.95),
+            "tekenen",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "continue_wrong_value_followup")
+        self.assertEqual(action["change"], {})
+        self.assertEqual(app.last_um_preview["hobby_fav"], sample_um()["hobby_fav"])
+
+    def test_negative_wrong_value_responses_ask_correction_detail_for_mistakes(self):
+        cases = (
+            (
+                "M1",
+                "hobby_fav",
+                "tekenen",
+                "surfen",
+                "Ik wil niet surfen",
+                IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+                "Oeps, wat is dan je favoriete hobby?",
+            ),
+            (
+                "M2",
+                "fav_food",
+                "pannenkoeken",
+                "pizza",
+                "Ik wil geen pizza",
+                IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+                "Oeps, wat is dan je lievelingseten?",
+            ),
+            (
+                "M3",
+                "school_strength",
+                "taal",
+                "begrijpend lezen",
+                "Ik ben niet goed in begrijpend lezen",
+                IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+                "Oeps, waar ben jij dan vooral goed in op school? Noem een ding.",
+            ),
+            (
+                "M4",
+                "aspiration",
+                "dierenarts worden",
+                "architect worden",
+                "Ik hoef geen architect te worden",
+                IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+                "Oeps, wat wil jij dan later worden?",
+            ),
+            (
+                "M4",
+                "aspiration",
+                "dierenarts worden",
+                "kok worden",
+                "Ik wil geen kok worden",
+                IntentResult(intent="um_update", field="aspiration", value="kok", confidence=0.92),
+                "Oeps, wat wil jij dan later worden?",
+            ),
+            (
+                "M4",
+                "aspiration",
+                "dierenarts worden",
+                "architect worden",
+                "Ik koffer een architect te worden",
+                IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+                "Oeps, wat wil jij dan later worden?",
+            ),
+        )
+
+        for mistake_id, field, actual, wrong, transcript, result, expected_response in cases:
+            with self.subTest(transcript=transcript):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                app.write_um_change = lambda change: (_ for _ in ()).throw(AssertionError("unexpected write"))
+                turn = {
+                    "phase": 17 if mistake_id == "M4" else 6,
+                    "mistake_id": mistake_id,
+                    "mistake_field": field,
+                    "mistake_actual": actual,
+                    "mistake_wrong": wrong,
+                    "response_mode": "mistake_interpretation",
+                    "memory_correction_available": True,
+                    "memory_correction_field": field,
+                    "used_fields": {field: wrong},
+                }
+
+                action = app.action_handler(result, transcript, turn)
+
+                self.assertEqual(action["action"], "ask_correction_detail")
+                self.assertEqual(action["leo_response"], expected_response)
+                self.assertEqual(action["change"], {})
+                self.assertTrue(turn["memory_correction_requested"])
+                self.assertEqual(turn["memory_correction_field"], field)
+
+    def test_negative_wrong_value_guard_keeps_positive_unflagged_and_concrete_replacement_paths(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        flagged_turn = {
+            "phase": 17,
+            "phase_id": "3.4/5",
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "architect worden",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "aspiration",
+            "used_fields": {"aspiration": "architect worden"},
+        }
+        positive = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+            "Ja, architect lijkt me leuk",
+            dict(flagged_turn),
+        )
+        self.assertEqual(positive["action"], "continue_wrong_value_followup")
+
+        unflagged_turn = dict(flagged_turn)
+        unflagged_turn.pop("memory_correction_available")
+        unflagged_turn.pop("memory_correction_field")
+        unflagged = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.85),
+            "Ik hoef geen architect te worden",
+            unflagged_turn,
+        )
+        self.assertEqual(unflagged["action"], "continue_wrong_value_followup")
+        self.assertNotIn("memory_correction_requested", unflagged_turn)
+
+        replacement_turn = dict(flagged_turn)
+        replacement_turn["mistake_wrong"] = "kok worden"
+        replacement_turn["used_fields"] = {"aspiration": "kok worden"}
+        replacement_result = IntentResult(intent="um_update", field="aspiration", value="bakker", confidence=0.94)
+        self.assertFalse(
+            app.actions.is_negative_wrong_value_response(
+                replacement_result,
+                "Ik wil geen kok worden, ik wil bakker worden",
+                replacement_turn,
+            )
+        )
+        replacement_change = app.actions.change_from_intent_result(
+            replacement_result,
+            replacement_turn,
+            "Ik wil geen kok worden, ik wil bakker worden",
+        )
+        self.assertEqual(replacement_change["action"], "update")
+        self.assertEqual(replacement_change["new_value"], "bakker")
+
+    def test_soft_no_answers_work_for_other_memory_correction_opportunities(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        food_turn = {
+            "phase": 8,
+            "phase_id": "1.8",
+            "mistake_id": "M2",
+            "mistake_field": "fav_food",
+            "mistake_actual": "broccoli",
+            "mistake_wrong": "pizza",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_food",
+        }
+
+        food_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "niet helemaal",
+            food_turn,
+        )
+
+        self.assertEqual(food_action["action"], "ask_correction_detail")
+        self.assertEqual(food_action["leo_response"], "Oeps, wat is dan je lievelingseten?")
+        self.assertTrue(food_turn["memory_correction_requested"])
+        self.assertEqual(food_turn["memory_correction_field"], "fav_food")
+
+        app = make_app()
+        app.last_um_preview = sample_um()
+        sport_turn = {
+            "phase": 5,
+            "response_mode": "listen_only",
+            "used_fields": {"sports_fav_play": "voetbal"},
+            "topic": {
+                "domain": "sport",
+                "label": "voetbal",
+                "fields": ["sports_enjoys", "sports_fav_play"],
+                "field_labels": {
+                    "sports_enjoys": "of je sport leuk vindt",
+                    "sports_fav_play": "de sport die je graag doet",
+                },
+                "current_values": {
+                    "sports_enjoys": "ja",
+                    "sports_fav_play": "voetbal",
+                },
+            },
+        }
+
+        sport_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "mwah",
+            sport_turn,
+        )
+
+        self.assertEqual(sport_action["action"], "listen_only")
+        self.assertEqual(sport_action["change"], {})
+        self.assertNotIn("memory_correction_requested", sport_turn)
+
+        app = make_app()
+        available_turn = {
+            "phase": 99,
+            "response_mode": "acknowledge",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_food",
+            "used_fields": {"fav_food": "broccoli"},
+        }
+
+        available_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "dat weet ik niet zeker",
+            available_turn,
+        )
+
+        self.assertEqual(available_action["action"], "ask_correction_detail")
+        self.assertEqual(available_action["leo_response"], "Oeps, wat is dan je lievelingseten?")
+        self.assertTrue(available_turn["memory_correction_requested"])
+
+    def test_soft_no_answers_work_for_review_rolemodel_inspection_and_nudge(self):
+        app = make_app()
+        review_turn = {
+            "phase": 18,
+            "phase_id": "3.6/7",
+            "response_mode": "memory_review_group",
+            "content_plan": app.l1("Over school weet ik iets. Klopt dat?"),
+            "topic": {
+                "fields": ["fav_subject"],
+                "field_labels": {"fav_subject": "je lievelingsvak"},
+                "current_values": {"fav_subject": "natuur"},
+            },
+        }
+        review_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "een beetje",
+            review_turn,
+        )
+        self.assertEqual(review_action["action"], "memory_review_group_ask_correction_detail")
+
+        app = make_app()
+        role_turn = {
+            "phase": 16,
+            "phase_id": "3.3",
+            "response_mode": "role_model_absence_check",
+            "memory_correction_available": True,
+            "memory_correction_field": "role_model",
+            "used_fields": {"role_model": "niemand"},
+        }
+        role_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "volgens mij niet",
+            role_turn,
+        )
+        self.assertEqual(role_action["action"], "role_model_absence_ask_detail")
+        self.assertTrue(role_turn["memory_correction_requested"])
+
+        app = make_app()
+        inspection_turn = {
+            "phase": 18,
+            "phase_id": "3.6/7",
+            "response_mode": "explicit_memory_inspection_offer",
+            "explicit_memory_inspection_active": True,
+            "memory_review_lines": ["Ik weet nog dat natuur je lievelingsvak is."],
+        }
+        inspection_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "ik weet niet of dat klopt",
+            inspection_turn,
+        )
+        self.assertEqual(inspection_action["action"], "explicit_memory_inspection_ask_correction_detail")
+
+        app = make_app()
+        nudge_turn = {
+            "phase": 9,
+            "response_mode": "nudge_interpretation",
+        }
+        nudge_action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "niet echt",
+            nudge_turn,
+        )
+        self.assertEqual(nudge_action["action"], "nudge_ask_correction_detail")
+        self.assertTrue(nudge_turn["nudge_correction_requested"])
+
+        app = make_app()
+        nudge_detail_turn = {
+            "phase": 9,
+            "response_mode": "nudge_interpretation",
+            "nudge_correction_requested": True,
+        }
+        nudge_detail = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "beetje",
+            nudge_detail_turn,
+        )
+        self.assertEqual(nudge_detail["action"], "nudge_correction_detail_missing")
+        self.assertNotIn("corrected_value", nudge_detail)
+
+    def test_uncertain_or_unrelated_beetje_does_not_trigger_memory_correction(self):
+        for answer in ("weet ik niet", "geen idee", "misschien"):
+            with self.subTest(answer=answer):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                turn = {
+                    "phase": 12,
+                    "phase_id": "2.3",
+                    "response_mode": "topic_interpretation",
+                    "memory_correction_available": True,
+                    "memory_correction_field": "fav_subject",
+                    "used_fields": {"fav_subject": "natuur"},
+                    "topic": {
+                        "domain": "school_subject",
+                        "label": "natuur",
+                        "fields": ["fav_subject"],
+                        "field_labels": {"fav_subject": "je lievelingsvak"},
+                        "current_values": {"fav_subject": "natuur"},
+                        "expected_value_count": {"fav_subject": 1},
+                    },
+                }
+
+                action = app.action_handler(
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                    answer,
+                    turn,
+                )
+
+                self.assertNotEqual(action["action"], "ask_correction_detail")
+                self.assertNotIn("memory_correction_requested", turn)
+
+        app = make_app()
+        unrelated_turn = {
+            "phase": 1,
+            "response_mode": "acknowledge",
+            "used_fields": {"name": "Sam"},
+        }
+        unrelated = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "een beetje",
+            unrelated_turn,
+        )
+
+        self.assertNotEqual(unrelated["action"], "ask_correction_detail")
+        self.assertNotIn("memory_correction_requested", unrelated_turn)
+
+        for turn in (
+            {"phase": 10, "response_mode": "school_joke_transition"},
+            {"phase": 11, "response_mode": "robot_school_guess"},
+            {"phase": 17, "response_mode": "middle_school_feeling"},
+        ):
+            with self.subTest(mode=turn["response_mode"]):
+                app = make_app()
+                action = app.action_handler(
+                    IntentResult(intent="dialogue_answer", field=None, value="unclear", confidence=0.9),
+                    "een beetje",
+                    turn,
+                )
+                self.assertNotEqual(action["action"], "ask_correction_detail")
+                self.assertNotIn("memory_correction_requested", turn)
+
+        app = make_app()
+        memory_change_turn = {
+            "phase": 18,
+            "phase_id": "3.6/7",
+            "response_mode": "memory_access_change",
+            "allow_memory_change": True,
+            "memory_correction_requested": True,
+        }
+        memory_change = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "beetje",
+            memory_change_turn,
+        )
+        self.assertNotEqual(memory_change["action"], "ask_correction_detail")
 
     def test_mistake_correction_followup_uses_raw_answer_when_classifier_says_unclear(self):
         app = make_app()
@@ -4945,6 +5752,7 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_type": "completely-wrong",
             "m3_requires_school_difficulty_resolution": True,
             "m3_school_difficulty_resolution": True,
+            "memory_correction_available": True,
             "response_mode": "acknowledge",
             "used_fields": {
                 "fav_subject": "taal",
@@ -5005,6 +5813,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_wrong": "zingen",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
         }
 
         change = app.change_from_intent_result(
@@ -5029,6 +5839,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_wrong": "padel",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "defer_corrected_response": True,
         }
         app.current_turn_context = turn
@@ -5058,6 +5870,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_wrong": "padel",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "defer_corrected_response": True,
         }
         turn["mistake_topic"]["expected_value_count"] = {"hobby_fav": 1}
@@ -5127,6 +5941,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_wrong": "zingen",
             "response_mode": "mistake_interpretation",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "defer_corrected_response": True,
         }
         app.current_turn_context = turn
@@ -5154,6 +5970,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_field": "hobby_fav",
             "mistake_wrong": "zingen",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "mistake_topic": app.topic_candidate(
                 domain="hobby",
                 label="je hobby's",
@@ -5494,11 +6312,15 @@ class CRIDialogue2Tests(unittest.TestCase):
     def test_mistake_rejection_without_value_asks_for_detail_then_accepts_short_answer(self):
         app = make_app()
         app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         turn = {
             "phase": 8,
             "mistake_id": "M2",
             "mistake_field": "fav_food",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_food",
             "mistake_topic": app.topic_candidate(
                 domain="eten",
                 label="je lievelingseten",
@@ -5527,22 +6349,93 @@ class CRIDialogue2Tests(unittest.TestCase):
         short_answer = IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9)
         second_action = app.action_handler(short_answer, "pannenkoeken", turn)
 
-        self.assertEqual(second_action["action"], "mistake_corrected_no_um_change")
-        self.assertIsNone(second_action["leo_response"])
+        self.assertEqual(second_action["action"], "confirm_update")
+        self.assertTrue(second_action["change"]["skip_um_write"])
         self.assertEqual(second_action["change"]["new_value"], "pannenkoeken")
         self.assertEqual(app.corrections_seen, 1)
         self.assertTrue(app.mistake_states["M2"].get("corrected"))
         self.assertIn(8, app.phases_with_confirmed_change)
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je lievelingseten verander naar pannenkoeken?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
+
+    def test_food_mistake_correction_to_stored_value_confirms_and_reveals_visible_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "E"
+        app.last_um_preview["fav_food"] = "pizza"
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
+        prepared = []
+        revealed = []
+        app.tablet_state = SimpleNamespace(
+            reset=lambda: None,
+            update=lambda turn: None,
+            refresh=lambda phase=None: None,
+            prepare_reveal_change=lambda **kwargs: prepared.append(kwargs),
+            reveal_change=lambda **kwargs: revealed.append(kwargs),
+        )
+        turn = {
+            "phase": 8,
+            "mistake_id": "M2",
+            "mistake_field": "fav_food",
+            "mistake_actual": "pizza",
+            "mistake_wrong": "broccoli",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "fav_food",
+            "mistake_topic": app.topic_candidate(
+                domain="eten",
+                label="je lievelingseten",
+                fields=["fav_food"],
+                field_labels={"fav_food": "je lievelingseten"},
+                current_values={"fav_food": "pizza"},
+                correct_values=["je lievelingseten pizza is"],
+                memory_link="je lievelingseten pizza is",
+                options=["pizza"],
+                reground="Ik weet zeker dat pizza met jouw lievelingseten te maken heeft.",
+            ),
+            "defer_corrected_response": True,
+        }
+        app.current_turn_context = turn
+        app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pizza",
+                "wrong": "broccoli",
+                "corrected": False,
+            }
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="um_update", field="fav_food", value="pizza", confidence=0.95),
+            "Pizza",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change"]["skip_um_write"])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je lievelingseten verander naar pizza?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
+        self.assertTrue(app.mistake_states["M2"].get("corrected"))
+        self.assertEqual(prepared[0]["old_value"], "broccoli")
+        self.assertEqual(prepared[0]["new_value"], "pizza")
+        self.assertEqual(revealed[0]["old_value"], "broccoli")
+        self.assertEqual(revealed[0]["new_value"], "pizza")
 
     def test_aspiration_inline_correction_matches_stored_worden_value(self):
         app = make_app()
         app.last_um_preview = sample_um()
+        app.speech.heard = ["ja"]
+        app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         turn = {
             "phase": 17,
             "mistake_id": "M4",
             "mistake_field": "aspiration",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "aspiration",
             "mistake_topic": app.topic_candidate(
                 domain="droom",
                 label="dierenarts worden",
@@ -5562,10 +6455,11 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         action = app.action_handler(result, "Nee, dierenarts", turn)
 
-        self.assertEqual(action["action"], "mistake_corrected_no_um_change")
-        self.assertIsNone(action["leo_response"])
+        self.assertEqual(action["action"], "confirm_update")
+        self.assertTrue(action["change"]["skip_um_write"])
         self.assertEqual(action["change"]["new_value"], "dierenarts")
-        self.assertEqual(app.speech.spoken, [])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik wat je later wilt worden verander naar dierenarts?")
+        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         self.assertEqual(app.corrections_seen, 1)
         self.assertTrue(app.mistake_states["M4"].get("corrected"))
         self.assertIn(17, app.phases_with_confirmed_change)
@@ -5578,6 +6472,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_id": "M4",
             "mistake_field": "aspiration",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "aspiration",
             "mistake_topic": app.topic_candidate(
                 domain="droom",
                 label="dierenarts worden",
@@ -6190,9 +7086,914 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(launcher.DIALOGUE_FILE, PACKAGE_DIR / "CRI-BRANCH-BASIC4_0.py")
         self.assertEqual(launcher.DEFAULT_ENV, LOCAL_DIR / ".env")
 
+    def test_realtimestt_backend_mac_auto_uses_cpu_int8_small_without_cuda_probe(self):
+        torch = FakeTorchModule(mps_available=True, fail_cuda_check=True)
+        ctranslate2 = FakeCTranslate2Module(fail_cuda_count=True)
+
+        backend = cri_module.resolve_realtimestt_backend(
+            requested_device="auto",
+            requested_compute_type="auto",
+            requested_model="auto",
+            system_name="Darwin",
+            torch_module=torch,
+            ctranslate2_module=ctranslate2,
+        )
+
+        self.assertEqual(backend.device, "cpu")
+        self.assertEqual(backend.compute_type, "int8")
+        self.assertEqual(backend.model, "small")
+        self.assertTrue(backend.mac_gpu_available)
+        self.assertIn("Apple GPU/MPS", backend.note)
+        self.assertEqual(torch.cuda.available_checks, 0)
+        self.assertEqual(ctranslate2.cuda_count_checks, 0)
+
+    def test_realtimestt_backend_windows_auto_with_cuda_uses_cuda_float16_small(self):
+        torch = FakeTorchModule(cuda_available=True, cuda_name="RTX 3050")
+        ctranslate2 = FakeCTranslate2Module(cuda_count=1)
+
+        backend = cri_module.resolve_realtimestt_backend(
+            requested_device="auto",
+            requested_compute_type="auto",
+            requested_model="auto",
+            system_name="Windows",
+            torch_module=torch,
+            ctranslate2_module=ctranslate2,
+        )
+
+        self.assertEqual(backend.device, "cuda")
+        self.assertEqual(backend.compute_type, "float16")
+        self.assertEqual(backend.model, "small")
+        self.assertEqual(backend.cuda_device_name, "RTX 3050")
+
+    def test_realtimestt_backend_auto_without_cuda_uses_cpu_int8_small(self):
+        torch = FakeTorchModule(cuda_available=False)
+        ctranslate2 = FakeCTranslate2Module(cuda_count=0)
+
+        backend = cri_module.resolve_realtimestt_backend(
+            requested_device="auto",
+            requested_compute_type="auto",
+            requested_model="auto",
+            system_name="Windows",
+            torch_module=torch,
+            ctranslate2_module=ctranslate2,
+        )
+
+        self.assertEqual(backend.device, "cpu")
+        self.assertEqual(backend.compute_type, "int8")
+        self.assertEqual(backend.model, "small")
+
+    def test_realtimestt_backend_explicit_cuda_without_cuda_fails_clearly(self):
+        torch = FakeTorchModule(cuda_available=False)
+        ctranslate2 = FakeCTranslate2Module(cuda_count=0)
+
+        with self.assertRaisesRegex(RuntimeError, "CUDA is not available"):
+            cri_module.resolve_realtimestt_backend(
+                requested_device="cuda",
+                requested_compute_type="auto",
+                requested_model="auto",
+                system_name="Darwin",
+                torch_module=torch,
+                ctranslate2_module=ctranslate2,
+            )
+
+    def test_realtimestt_halo_spinner_is_disabled_in_recorder_kwargs(self):
+        recorder_kwargs = {}
+
+        class DummyRecorder(FakeSTTRecorder):
+            def __init__(self, **kwargs):
+                super().__init__("")
+                recorder_kwargs.update(kwargs)
+
+        with patch.dict(
+            cri_module.SpeechIO.__init__.__globals__,
+            {"AudioToTextRecorder": DummyRecorder},
+        ):
+            speech = cri_module.SpeechIO()
+
+        self.assertIs(recorder_kwargs["spinner"], False)
+        self.assertEqual(recorder_kwargs["model"], "small")
+        self.assertEqual(recorder_kwargs["device"], "cpu")
+        self.assertEqual(recorder_kwargs["compute_type"], "int8")
+        self.assertEqual(recorder_kwargs["post_speech_silence_duration"], 1.6)
+        self.assertEqual(speech._recorder.microphone_states, [False])
+        self.assertIsNotNone(speech._stt_spinner_lock)
+
+    def test_stt_normalize_transcript_removes_symbols_accents_and_non_latin_text(self):
+        transcript = "Oké — één café ✓ Привет, dat klopt!"
+
+        clean = cri_module.SpeechIO.normalize_transcript(transcript)
+
+        self.assertEqual(clean, "Oke een cafe, dat klopt!")
+
+    def test_clean_stt_transcript_normalizes_after_repair_and_keeps_normal_answers(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        self.assertEqual(speech._clean_stt_transcript("basta — oké"), "pasta oke")
+        self.assertEqual(speech._clean_stt_transcript("gym en rekenen"), "gym en rekenen")
+
+    def test_say_clears_stale_realtimestt_spinner_before_output(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        recorder = FakeSTTRecorder()
+        halo = recorder.halo
+        speech._recorder = recorder
+
+        with patch("builtins.print"):
+            speech.say("Hallo!")
+
+        self.assertTrue(halo.stopped)
+        self.assertIsNone(recorder.halo)
+        self.assertIs(recorder.spinner, False)
+
+    def test_nao_say_prints_leo_terminal_once_and_sends_tts(self):
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+
+        with patch("builtins.print") as print_mock, patch("time.sleep", lambda *_args, **_kwargs: None):
+            speech.say("Hoi daar.")
+
+        print_mock.assert_called_once_with("\n[LEO]: Hoi daar.\n")
+        self.assertEqual(len(speech.nao.tts.requests), 1)
+
+    def test_nao_system_prompt_prints_leo_terminal_once_and_sends_tts(self):
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+
+        with patch("builtins.print") as print_mock, patch("time.sleep", lambda *_args, **_kwargs: None):
+            speech._say_system("Kun je het nog een keer zeggen?")
+
+        print_mock.assert_called_once_with("\n[LEO]: Kun je het nog een keer zeggen?\n")
+        self.assertEqual(len(speech.nao.tts.requests), 1)
+
+    def test_non_nao_say_prints_leo_terminal_once(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        with patch("builtins.print") as print_mock:
+            speech.say("Hoi zonder robot.")
+
+        print_mock.assert_called_once_with("\n[LEO]: Hoi zonder robot.\n")
+
+    def test_leo_terminal_print_clears_spinner_before_output_and_tts(self):
+        events = []
+
+        class EventTTS:
+            def request(self, request):
+                events.append("tts")
+
+        speech = cri_module.SpeechIO(
+            nao=SimpleNamespace(tts=EventTTS(), leds=FakeNaoChannel()),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        speech._stop_stt_spinner = lambda: events.append("spinner")
+
+        with (
+            patch("builtins.print", side_effect=lambda *_args, **_kwargs: events.append("print")),
+            patch("time.sleep", lambda *_args, **_kwargs: None),
+        ):
+            speech.say("Eerst lezen, dan spreken.")
+
+        self.assertEqual(events[:3], ["spinner", "print", "tts"])
+
+    def test_tts_sanitizer_handles_phase12_sample_and_preserves_dutch_accents(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        cleaned = speech._sanitize_tts_text(
+            "Dat snap ik. Rekenen is best als een puzzel \u2014 "
+            "je zoekt steeds de oplossing. Ok\u00e9, \u00e9\u00e9n."
+        )
+
+        self.assertEqual(
+            cleaned,
+            "Dat snap ik. Rekenen is best als een puzzel, "
+            "je zoekt steeds de oplossing. Ok\u00e9, \u00e9\u00e9n.",
+        )
+        self.assertNotIn("\u2014", cleaned)
+        self.assertIn("Ok\u00e9", cleaned)
+        self.assertIn("\u00e9\u00e9n", cleaned)
+
+    def test_tts_sanitizer_removes_risky_symbols_and_repairs_mojibake(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        raw = (
+            "Hij zei \u201cHoi\u201d\u2026 A\u00a0B \u2192 punt \u2022 "
+            "\u2713 \u2717 \u26a0 \U0001f512 \u2500 "
+            "moji \u00e2\u20ac\u201d dash \u00e2\u20ac\u201c en \u00c3\u00a9."
+        )
+
+        cleaned = speech._sanitize_tts_text(raw)
+
+        for bad in (
+            "\u201c", "\u201d", "\u2026", "\u2192", "\u2022",
+            "\u2713", "\u2717", "\u26a0", "\U0001f512", "\u2500",
+            "\u00a0", "\u00e2\u20ac\u201d", "\u00e2\u20ac\u201c",
+        ):
+            self.assertNotIn(bad, cleaned)
+        self.assertIn('"Hoi"...', cleaned)
+        self.assertIn("A B", cleaned)
+        self.assertIn("moji, dash, en \u00e9.", cleaned)
+
+    def test_nao_tts_receives_sanitized_text_and_terminal_matches(self):
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        raw = (
+            "Dat snap ik. Rekenen is best als een puzzel \u2014 "
+            "je zoekt steeds de oplossing. \u201cHoi\u201d."
+        )
+
+        with patch("builtins.print") as print_mock, patch("time.sleep", lambda *_args, **_kwargs: None):
+            speech.say(raw)
+
+        terminal_line = print_mock.call_args.args[0]
+        terminal_text = terminal_line.strip()[len("[LEO]: "):]
+        request_text = speech.nao.tts.requests[0].text
+        spoken_text = request_text.replace("\\rspd=92\\", "", 1)
+        self.assertEqual(spoken_text, terminal_text)
+        self.assertNotIn("\u2014", request_text)
+        self.assertNotIn("\u201c", request_text)
+        self.assertIn('"Hoi"', request_text)
+
+    def test_nao_tts_retries_ascii_fallback_after_encoding_error(self):
+        class FailingOnceTTS:
+            def __init__(self):
+                self.requests = []
+
+            def request(self, request):
+                self.requests.append(request)
+                if len(self.requests) == 1:
+                    raise RuntimeError("encoding problem")
+
+        tts = FailingOnceTTS()
+        speech = cri_module.SpeechIO(
+            nao=SimpleNamespace(tts=tts, leds=FakeNaoChannel()),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+
+        with patch("builtins.print"), patch("time.sleep", lambda *_args, **_kwargs: None):
+            speech.say("Ok\u00e9 \u00e9\u00e9n \u2014 test.")
+
+        self.assertEqual(len(tts.requests), 2)
+        self.assertIn("Ok\u00e9 \u00e9\u00e9n, test.", tts.requests[0].text)
+        self.assertIn("Oke een, test.", tts.requests[1].text)
+        tts.requests[1].text.encode("ascii")
+
+    def test_nao_tts_repeated_failure_does_not_raise_and_prints_error(self):
+        class AlwaysFailTTS:
+            def __init__(self):
+                self.requests = []
+
+            def request(self, request):
+                self.requests.append(request)
+                raise RuntimeError("still broken")
+
+        tts = AlwaysFailTTS()
+        speech = cri_module.SpeechIO(
+            nao=SimpleNamespace(tts=tts, leds=FakeNaoChannel()),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+
+        with patch("builtins.print") as print_mock:
+            speech.say("Ok\u00e9 \u2014 test.")
+
+        self.assertEqual(len(tts.requests), 2)
+        self.assertTrue(
+            any("[TTS ERROR]" in str(call.args[0]) for call in print_mock.call_args_list)
+        )
+
+    def test_nao_startup_keeps_solitary_life_and_disables_blinking(self):
+        app = make_app()
+        app.CONNECT_NAO = True
+        app.simulation_mode = False
+        app.nao = FakeNao()
+        eye_colors = []
+        app.speech = SimpleNamespace(_set_eyes=eye_colors.append)
+        app.log_conversation_event = lambda *_args, **_kwargs: None
+
+        app.prepare_nao_for_dialogue()
+
+        autonomous_requests = app.nao.autonomous.requests
+        self.assertIsInstance(autonomous_requests[0], cri_module.NaoWakeUpRequest)
+        self.assertIsInstance(autonomous_requests[1], cri_module.NaoSetAutonomousLifeRequest)
+        self.assertEqual(autonomous_requests[1].state, "solitary")
+        blink_values = [
+            request.value
+            for request in autonomous_requests
+            if isinstance(request, cri_module.NaoBlinkingRequest)
+        ]
+        self.assertEqual(blink_values, [False, False])
+        self.assertNotIn(
+            "disabled",
+            [
+                request.state
+                for request in autonomous_requests
+                if isinstance(request, cri_module.NaoSetAutonomousLifeRequest)
+            ],
+        )
+        self.assertEqual(app.nao.motion.requests[0].animation_path, "animations/Stand/Gestures/Hey_1")
+        self.assertEqual(eye_colors, ["white", "white"])
+
+    def test_greeting_wave_disables_blinking_and_resets_white_after_animation(self):
+        app = make_app()
+        app.CONNECT_NAO = True
+        app.simulation_mode = False
+        app.nao = FakeNao()
+        eye_colors = []
+        app.speech = SimpleNamespace(_set_eyes=eye_colors.append)
+        app.log_conversation_event = lambda *_args, **_kwargs: None
+
+        app.perform_greeting_wave()
+
+        self.assertEqual(app.nao.motion.requests[0].animation_path, "animations/Stand/Gestures/Hey_1")
+        self.assertIsInstance(app.nao.autonomous.requests[-1], cri_module.NaoBlinkingRequest)
+        self.assertIs(app.nao.autonomous.requests[-1].value, False)
+        self.assertEqual(eye_colors, ["white"])
+
+    def test_nao_cleanup_restores_blinking_before_disabling_life_and_resting(self):
+        app = make_app()
+        app.CONNECT_NAO = True
+        app.simulation_mode = False
+        app.nao = FakeNao()
+        app.log_conversation_event = lambda *_args, **_kwargs: None
+
+        app.cleanup_nao_after_dialogue()
+
+        autonomous_requests = app.nao.autonomous.requests
+        self.assertIsInstance(autonomous_requests[0], cri_module.NaoBlinkingRequest)
+        self.assertIs(autonomous_requests[0].value, True)
+        self.assertIsInstance(autonomous_requests[1], cri_module.NaoSetAutonomousLifeRequest)
+        self.assertEqual(autonomous_requests[1].state, "disabled")
+        self.assertIsInstance(autonomous_requests[2], cri_module.NaoRestRequest)
+
+    def test_eye_say_sets_white_and_never_green_for_nao_speech(self):
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        eye_colors = []
+        speech._set_eyes = eye_colors.append
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None), patch("builtins.print"):
+            speech.say("Hallo!")
+            speech.say("Nog een zin.")
+
+        self.assertEqual(eye_colors, ["white", "white"])
+        self.assertNotIn("green", eye_colors)
+        self.assertEqual(len(speech.nao.tts.requests), 2)
+
+    def test_eye_system_retry_prompt_sets_white_and_never_green(self):
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        eye_colors = []
+        speech._set_eyes = eye_colors.append
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None), patch("builtins.print"):
+            speech._say_system("Kun je het nog een keer zeggen?")
+
+        self.assertEqual(eye_colors, ["white"])
+        self.assertNotIn("green", eye_colors)
+        self.assertEqual(len(speech.nao.tts.requests), 1)
+
+    def test_eye_listen_turns_green_only_after_mic_opens_then_white_on_success(self):
+        events = []
+
+        class ObservedRecorder(FakeSTTRecorder):
+            def set_microphone(self, enabled):
+                super().set_microphone(enabled)
+                events.append(("mic", enabled))
+
+            def text(self):
+                events.append(("text", self.text_value))
+                return super().text()
+
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = ObservedRecorder("ja")
+        speech._set_eyes = lambda color: events.append(("eyes", color))
+
+        with patch("builtins.print"):
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "ja")
+        self.assertLess(events.index(("mic", True)), events.index(("eyes", "green")))
+        self.assertLess(events.index(("eyes", "green")), events.index(("text", "ja")))
+        self.assertEqual(events[-1], ("eyes", "white"))
+
+    def test_cri_spinner_starts_after_mic_and_green_then_stops_before_transcript(self):
+        events = []
+
+        class ObservedRecorder(FakeSTTRecorder):
+            def set_microphone(self, enabled):
+                super().set_microphone(enabled)
+                events.append(("mic", enabled))
+
+            def text(self):
+                events.append(("text", self.text_value))
+                return super().text()
+
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = ObservedRecorder("ja")
+        speech._set_eyes = lambda color: events.append(("eyes", color))
+        speech._start_stt_spinner = lambda text="recording": events.append(("spinner", "start", text))
+        speech._stop_stt_spinner = lambda: events.append(("spinner", "stop"))
+
+        with patch("builtins.print", side_effect=lambda *_args, **_kwargs: events.append(("print", None))):
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "ja")
+        self.assertLess(events.index(("mic", True)), events.index(("eyes", "green")))
+        self.assertLess(events.index(("eyes", "green")), events.index(("spinner", "start", "recording")))
+        self.assertLess(events.index(("spinner", "start", "recording")), events.index(("text", "ja")))
+        first_stop = events.index(("spinner", "stop"))
+        first_print = next(i for i, event in enumerate(events) if event[0] == "print")
+        self.assertLess(first_stop, first_print)
+
+    def test_listen_timeout_and_error_paths_end_with_white_eyes(self):
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+            stt_timeout=0.01,
+        )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FakeSTTRecorder("late text", sleep_seconds=0.2)
+        timeout_eye_colors = []
+        speech._set_eyes = timeout_eye_colors.append
+
+        with patch("builtins.print"):
+            timeout_transcript = speech.listen()
+
+        self.assertEqual(timeout_transcript, "")
+        self.assertIn("green", timeout_eye_colors)
+        self.assertEqual(timeout_eye_colors[-1], "white")
+
+        class FailingRecorder(FakeSTTRecorder):
+            def text(self):
+                raise RuntimeError("boom")
+
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FailingRecorder()
+        error_eye_colors = []
+        speech._set_eyes = error_eye_colors.append
+
+        with patch("builtins.print"):
+            error_transcript = speech.listen()
+
+        self.assertEqual(error_transcript, "")
+        self.assertIn("green", error_eye_colors)
+        self.assertEqual(error_eye_colors[-1], "white")
+
+    def test_eye_transcript_review_retry_does_not_set_green_before_listen(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        eye_colors = []
+        speech._set_eyes = eye_colors.append
+        speech.listen_with_retry = lambda: "opnieuw gehoord"
+
+        with patch("builtins.input", side_effect=["r", ""]), patch("builtins.print"):
+            reviewed = speech.review_transcript("eerste poging")
+
+        self.assertEqual(reviewed, "opnieuw gehoord")
+        self.assertNotIn("green", eye_colors)
+
+    def test_review_prompt_stops_spinner_before_researcher_input(self):
+        events = []
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        speech._stop_stt_spinner = lambda: events.append("stop")
+
+        def fake_input(_prompt):
+            events.append("input")
+            return ""
+
+        with patch("builtins.input", side_effect=fake_input), patch(
+            "builtins.print",
+            side_effect=lambda *_args, **_kwargs: events.append("print"),
+        ):
+            reviewed = speech.review_transcript("dat klopt")
+
+        self.assertEqual(reviewed, "dat klopt")
+        input_index = events.index("input")
+        self.assertGreater(input_index, 0)
+        self.assertEqual(events[input_index - 1], "stop")
+
+    def test_shutdown_stops_spinner_mutes_eyes_and_closes_recorder(self):
+        events = []
+        speech = cri_module.SpeechIO(
+            nao=FakeNao(),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+        )
+        recorder = FakeSTTRecorder("ja")
+        speech._recorder = recorder
+        speech._stop_stt_spinner = lambda: events.append("stop")
+        speech._set_mic = lambda enabled: events.append(("mic", enabled))
+        speech._set_eyes = lambda color: events.append(("eyes", color))
+
+        speech.shutdown()
+
+        self.assertEqual(events[:3], ["stop", ("mic", False), ("eyes", "white")])
+        self.assertTrue(recorder.aborted)
+        self.assertTrue(recorder.shutdown_called)
+        self.assertIsNone(speech._recorder)
+
+    def test_tts_handoff_waits_before_queue_clear_and_mic_open(self):
+        events = []
+
+        class EventTTS:
+            def request(self, request):
+                events.append(("tts", request.text))
+
+        class EventRecorder(FakeSTTRecorder):
+            def set_microphone(self, enabled):
+                super().set_microphone(enabled)
+                events.append(("mic", enabled))
+
+            def clear_audio_queue(self):
+                super().clear_audio_queue()
+                events.append(("clear_queue", None))
+
+            def text(self):
+                events.append(("text", self.text_value))
+                return super().text()
+
+        speech = cri_module.SpeechIO(
+            nao=SimpleNamespace(tts=EventTTS(), leds=FakeNaoChannel()),
+            use_nao_output=True,
+            use_keyboard_input_fn=lambda: True,
+            tts_char_seconds=0.1,
+            tts_tail_buffer_seconds=0.5,
+        )
+        speech._recorder = EventRecorder("ja")
+        speech._use_keyboard_input = lambda: False
+        speech._set_eyes = lambda color: events.append(("eyes", color))
+
+        with (
+            patch("time.monotonic", side_effect=[10.0, 10.0]),
+            patch("time.sleep", lambda seconds: events.append(("sleep", round(seconds, 3)))),
+            patch("builtins.print"),
+        ):
+            speech.say("abcd")
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "ja")
+        self.assertIn(("sleep", 0.9), events)
+        sleep_index = events.index(("sleep", 0.9))
+        mic_open_index = events.index(("mic", True))
+        clear_indices = [
+            i for i, event in enumerate(events)
+            if event == ("clear_queue", None)
+        ]
+        self.assertTrue(any(sleep_index < i < mic_open_index for i in clear_indices))
+        self.assertLess(mic_open_index, events.index(("eyes", "green")))
+        self.assertEqual(events[-1], ("eyes", "white"))
+
+    def test_tts_handoff_knobs_can_come_from_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "CRI_TTS_CHAR_SECONDS": "0.07",
+                "CRI_TTS_TAIL_BUFFER_SECONDS": "1.1",
+                "CRI_LEO_ECHO_SIMILARITY": "0.9",
+            },
+        ):
+            speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        self.assertEqual(speech._tts_char_seconds, 0.07)
+        self.assertEqual(speech._tts_tail_buffer_seconds, 1.1)
+        self.assertEqual(speech._leo_echo_similarity, 0.9)
+
+    def test_stt_rejects_likely_leo_echo_transcript(self):
+        events = []
+        speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
+            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+        )
+        speech._last_leo_text = "Wil je iets veranderen? Zeg maar ja of nee."
+
+        cleaned = speech._clean_stt_transcript("Wil je iets veranderen zeg maar ja of nee")
+
+        self.assertEqual(cleaned, "")
+        self.assertEqual(events[-1][0], "stt_rejected")
+        self.assertEqual(events[-1][1]["reason"], "leo_echo")
+
+        repeated = speech._clean_stt_transcript(
+            "Wil je iets veranderen zeg maar ja of nee, "
+            "Wil je iets veranderen zeg maar ja of nee, "
+            "Wil je iets veranderen zeg maar ja of nee"
+        )
+        self.assertEqual(repeated, "")
+        self.assertEqual(events[-1][1]["reason"], "leo_echo")
+
+    def test_stt_echo_filter_keeps_short_and_normal_child_answers(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        speech._last_leo_text = "Wil je iets veranderen? Zeg maar ja of nee."
+
+        for transcript in ("ja", "nee", "pizza", "dat klopt niet", "gym en rekenen"):
+            self.assertEqual(speech._clean_stt_transcript(transcript), transcript)
+
+        speech._last_leo_text = "Wat is jouw lievelingseten?"
+        self.assertEqual(
+            speech._clean_stt_transcript("mijn lievelingseten is pizza"),
+            "mijn lievelingseten is pizza",
+        )
+
+    def test_listen_clears_spinner_and_collapses_repeated_no_loop(self):
+        events = []
+        speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
+            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+        )
+        speech._use_keyboard_input = lambda: False
+        recorder = FakeSTTRecorder("Nee, nee, nee, nee, nee, nee, nee, nee, nee, nee.")
+        halo = recorder.halo
+        speech._recorder = recorder
+
+        with patch("builtins.print"):
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "nee")
+        self.assertTrue(recorder.queue_cleared)
+        self.assertEqual(recorder.microphone_states[-1], False)
+        self.assertTrue(halo.stopped)
+        self.assertIsNone(recorder.halo)
+        self.assertIs(recorder.spinner, False)
+        self.assertIn("stt_repetition_collapsed", [event_type for event_type, _ in events])
+
+    def test_reset_stt_audio_state_drains_realtimestt_carryover(self):
+        events = []
+        speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
+            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+        )
+        recorder = FakeSTTRecorder()
+        recorder.audio_queue.put(b"old raw")
+        recorder.recorded_audio_queue.put({"frames": [b"old complete"]})
+        recorder.frames = [b"frame"]
+        recorder.last_frames = [b"last"]
+        recorder.audio_buffer = [b"buffer"]
+        recorder.audio_buffer_metadata = [{"old": True}]
+        recorder.last_words_buffer = ["oude", "woorden"]
+        recorder.text_storage = ["old text"]
+        recorder.audio = b"cached"
+        recorder.last_transcription_bytes = b"cached"
+        recorder.last_transcription_bytes_b64 = "cached"
+        recorder.last_transcription_metadata = {"old": True}
+        recorder.last_preroll_selection = object()
+        recorder._pending_preroll_selection = object()
+        recorder.realtime_stabilized_text = "old"
+        recorder.realtime_stabilized_safetext = "old"
+        recorder.continuous_listening = True
+        recorder.start_recording_on_voice_activity = True
+        recorder.stop_recording_on_voice_deactivity = True
+        recorder.is_recording = True
+        recorder.is_webrtc_speech_active = True
+        recorder.is_silero_speech_active = True
+        recorder.wakeword_detected = True
+        recorder.listen_start = 123
+        recorder.recording_start_time = 123
+        recorder.recording_start_monotonic = 123
+        recorder.recording_stop_time = 124
+        recorder.last_recording_start_time = 123
+        recorder.last_recording_stop_time = 124
+        recorder.backdate_stop_seconds = 1.0
+        recorder.backdate_resume_seconds = 1.0
+        recorder.speech_end_silence_start = 123
+        recorder.speech_end_silence_candidate_start = 123
+        recorder.wake_word_detect_time = 123
+        recorder.silero_check_time = 123
+        recorder.start_recording_event.set()
+        recorder.stop_recording_event.set()
+        speech._recorder = recorder
+
+        speech._reset_stt_audio_state("unit_test")
+
+        self.assertTrue(recorder.audio_queue.empty())
+        self.assertTrue(recorder.recorded_audio_queue.empty())
+        for attr in (
+            "frames",
+            "last_frames",
+            "audio_buffer",
+            "audio_buffer_metadata",
+            "last_words_buffer",
+            "text_storage",
+        ):
+            self.assertEqual(getattr(recorder, attr), [])
+        for attr in (
+            "audio",
+            "last_transcription_bytes",
+            "last_transcription_bytes_b64",
+            "last_transcription_metadata",
+            "last_preroll_selection",
+            "_pending_preroll_selection",
+        ):
+            self.assertIsNone(getattr(recorder, attr))
+        self.assertEqual(recorder.realtime_stabilized_text, "")
+        self.assertEqual(recorder.realtime_stabilized_safetext, "")
+        for attr in (
+            "continuous_listening",
+            "start_recording_on_voice_activity",
+            "stop_recording_on_voice_deactivity",
+            "is_recording",
+            "is_webrtc_speech_active",
+            "is_silero_speech_active",
+            "wakeword_detected",
+        ):
+            self.assertIs(getattr(recorder, attr), False)
+        for attr in (
+            "listen_start",
+            "recording_start_time",
+            "recording_start_monotonic",
+            "recording_stop_time",
+            "last_recording_start_time",
+            "last_recording_stop_time",
+            "speech_end_silence_start",
+            "speech_end_silence_candidate_start",
+            "wake_word_detect_time",
+            "silero_check_time",
+        ):
+            self.assertEqual(getattr(recorder, attr), 0)
+        self.assertEqual(recorder.backdate_stop_seconds, 0.0)
+        self.assertEqual(recorder.backdate_resume_seconds, 0.0)
+        self.assertFalse(recorder.start_recording_event.is_set())
+        self.assertFalse(recorder.stop_recording_event.is_set())
+        self.assertEqual(recorder.microphone_states[-1], False)
+        self.assertIn("stt_audio_reset", [event_type for event_type, _ in events])
+
+    def test_listen_resets_before_mic_opens_and_mutes_before_printing_child(self):
+        events = []
+
+        class EventRecorder(FakeSTTRecorder):
+            def set_microphone(self, enabled):
+                super().set_microphone(enabled)
+                events.append(("mic", enabled))
+
+            def clear_audio_queue(self):
+                super().clear_audio_queue()
+                events.append(("clear_queue", None))
+
+            def text(self):
+                events.append(("text", self.text_value))
+                return super().text()
+
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = EventRecorder("ja")
+
+        with patch("builtins.print", side_effect=lambda *_args, **_kwargs: events.append(("print", None))):
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "ja")
+        self.assertLess(events.index(("clear_queue", None)), events.index(("mic", True)))
+        self.assertLess(events.index(("mic", True)), events.index(("text", "ja")))
+        text_index = events.index(("text", "ja"))
+        first_print = next(i for i, event in enumerate(events) if event[0] == "print")
+        self.assertTrue(
+            any(event == ("mic", False) for event in events[text_index:first_print])
+        )
+
+    def test_listen_rejects_stale_audio_from_before_current_turn(self):
+        events = []
+
+        class StaleRecorder(FakeSTTRecorder):
+            def text(self):
+                self.last_recording_start_time = time.time() - 10
+                self.recording_start_time = self.last_recording_start_time
+                return super().text()
+
+        speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
+            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+        )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = StaleRecorder("oude zin")
+
+        with patch("builtins.print") as print_mock:
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "")
+        self.assertIn("stt_rejected", [event_type for event_type, _ in events])
+        self.assertEqual(events[-1][1]["reason"], "stale_audio")
+        self.assertFalse(
+            any("CHILD:" in str(call) for call in print_mock.call_args_list)
+        )
+
+    def test_listen_keeps_current_turn_audio(self):
+        class CurrentRecorder(FakeSTTRecorder):
+            def text(self):
+                self.last_recording_start_time = time.time()
+                self.recording_start_time = self.last_recording_start_time
+                return super().text()
+
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = CurrentRecorder("nieuw antwoord")
+
+        with patch("builtins.print"):
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "nieuw antwoord")
+
+    def test_listen_timeout_aborts_mutes_and_returns_empty(self):
+        events = []
+        speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
+            stt_timeout=0.01,
+            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+        )
+        speech._use_keyboard_input = lambda: False
+        recorder = FakeSTTRecorder("late text", sleep_seconds=0.2)
+        speech._recorder = recorder
+
+        with patch("builtins.print"):
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "")
+        self.assertTrue(recorder.aborted)
+        self.assertEqual(recorder.microphone_states[-1], False)
+        self.assertIn("stt_timeout", [event_type for event_type, _ in events])
+
+    def test_stt_transcript_cleanup_keeps_normal_short_answers(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        self.assertEqual(
+            speech._clean_stt_transcript("Nee, nee, nee, nee, nee, nee, nee."),
+            "nee",
+        )
+        self.assertEqual(
+            speech._clean_stt_transcript("dat klopt niet, dat klopt niet, dat klopt niet"),
+            "dat klopt niet",
+        )
+        self.assertEqual(speech._clean_stt_transcript("nee hoor"), "nee hoor")
+        self.assertEqual(speech._clean_stt_transcript("gym en rekenen"), "gym en rekenen")
+        self.assertEqual(speech._clean_stt_transcript("ik weet het niet"), "ik weet het niet")
+
+    def test_pl_config_applies_stt_and_review_settings(self):
+        app = make_app()
+        temp_dir = tempfile.mkdtemp(prefix="cri_pl_stt_config_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        config_path = Path(temp_dir) / "test_config.pl"
+        config_path.write_text(
+            "\n".join([
+                "userId('710').",
+                "localVariable(first_name_cri, \"Stef\").",
+                "localVariable(first_name_tablet, \"Stef\").",
+                "localVariable(operator_name, \"Julianna\").",
+                "localVariable(nao_ip, \"169.254.248.247\").",
+                "condition(experimental).",
+                "continueSession(false).",
+                "sttTimeout(20).",
+                "sttPhraseLimit(18).",
+                "reviewTranscripts(true).",
+            ]),
+            encoding="utf-8",
+        )
+
+        parsed = app.session_setup._parse_pl_config(str(config_path))
+        app.apply_session_config({
+            "child_id": parsed["child_id"],
+            "condition": parsed["condition"],
+            "stt_timeout": parsed["stt_timeout"],
+            "stt_phrase_limit": parsed["stt_phrase_limit"],
+            "review_transcripts": parsed["review_transcripts"],
+            "start_phase_index": 0,
+        })
+
+        self.assertEqual(parsed["stt_timeout"], 20)
+        self.assertEqual(parsed["stt_phrase_limit"], 18)
+        self.assertIs(parsed["review_transcripts"], True)
+        self.assertEqual(app.STT_TIMEOUT, 20)
+        self.assertEqual(app.STT_PHRASE_LIMIT, 18)
+        self.assertIs(app.REVIEW_TRANSCRIPTS, True)
+
     def test_speech_output_strips_emoji_before_nao_or_terminal(self):
         spoken = []
         speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
             use_desktop_mic=True,
             log_event_fn=lambda event_type, **data: spoken.append(data.get("text", "")),
             set_last_utterance_fn=spoken.append,
@@ -6201,8 +8002,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         with patch("builtins.print"):
             speech.say("Hallo \U0001F999!")
 
-        self.assertEqual(spoken[0], "Hallo !")
-        self.assertEqual(spoken[1], "Hallo !")
+        self.assertEqual(spoken[0], "Hallo!")
+        self.assertEqual(spoken[1], "Hallo!")
 
 
 if __name__ == "__main__":

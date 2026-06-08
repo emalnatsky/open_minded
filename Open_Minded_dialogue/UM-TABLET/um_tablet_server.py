@@ -63,7 +63,7 @@ class UMTabletServer(SICApplication):
         self._child_id = CHILD_ID
         self._last_missing_child_warning_id = None
         self.set_log_level(sic_logging.WARNING)
-        self.load_env("../conf/.env")
+        self.load_local_env()
         self.setup()
 
     # ------------------------------------------------------------------setup---------------------------------------------------------------
@@ -91,6 +91,17 @@ class UMTabletServer(SICApplication):
         self.logger.debug("Setup complete.")
 
     # ------------------------------------------------------------------helpers----------------------------------------------------------------
+
+    def load_local_env(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates = (
+            os.path.join(here, "..", "_local", "config", ".env"),
+            os.path.join(here, "..", "conf", ".env"),
+        )
+        for path in candidates:
+            if os.path.exists(path):
+                self.load_env(path)
+                return
 
     def _read_session_state(self) -> dict:
         """

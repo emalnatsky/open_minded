@@ -99,7 +99,8 @@ class SessionSetup:
 
         Returns dict with keys:
             child_id, first_name_cri, first_name_tablet,
-            operator_name, condition, continue_session
+            operator_name, condition, continue_session,
+            stt_timeout, stt_phrase_limit, review_transcripts
         """
         here = os.path.dirname(os.path.abspath(__file__))
         candidates = [
@@ -130,6 +131,21 @@ class SessionSetup:
             m = re.search(rf'{re.escape(name)}\(\s*[\'"]?([^\'"(),]+)[\'"]?\s*\)', text)
             return m.group(1).strip() if m else ""
 
+        def get_int_fact(name):
+            raw = get_fact(name)
+            if raw == "":
+                return None
+            try:
+                return int(raw)
+            except ValueError:
+                return None
+
+        def get_bool_fact(name, default=False):
+            raw = get_fact(name)
+            if raw == "":
+                return default
+            return raw.strip().lower() in ("true", "yes", "1")
+
         def get_local_var(var_name):
             m = re.search(
                 rf'localVariable\(\s*{re.escape(var_name)}\s*,\s*["\']?([^"\'\\)]+)["\']?\s*\)',
@@ -144,6 +160,9 @@ class SessionSetup:
         nao_ip          = get_local_var("nao_ip")
         condition_raw   = get_fact("condition") or "experimental"
         continue_raw    = get_fact("continueSession") or "false"
+        stt_timeout = get_int_fact("sttTimeout")
+        stt_phrase_limit = get_int_fact("sttPhraseLimit")
+        review_transcripts = get_bool_fact("reviewTranscripts", default=self.d.REVIEW_TRANSCRIPTS)
 
         condition = self.normalize_condition_value(condition_raw, default=self.d.CONDITION_EXPERIMENT)
         continue_session = continue_raw.strip().lower() in ("true", "yes", "1")
@@ -156,6 +175,9 @@ class SessionSetup:
             "nao_ip":             nao_ip,
             "condition":          condition,
             "continue_session":   continue_session,
+            "stt_timeout":        stt_timeout,
+            "stt_phrase_limit":   stt_phrase_limit,
+            "review_transcripts": review_transcripts,
         }
         print(f"  Loaded {path}")
         print(f"  Child ID:       {child_id}")
@@ -291,6 +313,18 @@ class SessionSetup:
             self.d.session_config.get("condition"),
             default="",
         )
+        if "review_transcripts" in self.d.session_config:
+            review_value = self.d.session_config.get("review_transcripts")
+            if isinstance(review_value, str):
+                self.d.REVIEW_TRANSCRIPTS = review_value.strip().lower() in ("true", "yes", "1")
+            else:
+                self.d.REVIEW_TRANSCRIPTS = bool(review_value)
+        stt_timeout = self.d.session_config.get("stt_timeout")
+        if stt_timeout is not None:
+            self.d.STT_TIMEOUT = int(stt_timeout)
+        stt_phrase_limit = self.d.session_config.get("stt_phrase_limit")
+        if stt_phrase_limit is not None:
+            self.d.STT_PHRASE_LIMIT = int(stt_phrase_limit)
         self.d.start_phase_index = int(self.d.session_config.get("start_phase_index", 0) or 0)
         self.d.start_phase_index = max(0, min(self.d.start_phase_index, self.d.TOTAL_SCRIPT_PHASES - 1))
 
@@ -303,6 +337,12 @@ class SessionSetup:
 
         print(f"\nChecking child '{child_id}' in UM API ({self.d.UM_API_BASE})...")
         try:
+            health = requests.get(f"{self.d.UM_API_BASE}/health/graphdb", timeout=3)
+            if health.status_code != 200:
+                print("  UM API/GraphDB is not healthy. Start Full Stack first.")
+                print("  Expected GraphDB repository: open-memory-robots.")
+                print(f"  Health check returned {health.status_code}: {health.text[:160]}")
+                return
             response = requests.get(f"{self.d.UM_API_BASE}/api/um/{child_id}", timeout=3)
             if response.status_code == 200:
                 print("  Child found.")
@@ -310,8 +350,10 @@ class SessionSetup:
                 print("  Child not found.")
             else:
                 print(f"  UM API returned {response.status_code}.")
-        except Exception:
-            print("  UM API is not reachable right now.")
+        except Exception as e:
+            print("  UM API/GraphDB is not reachable. Start Full Stack first.")
+            print(f"  Health endpoint: {self.d.UM_API_BASE}/health/graphdb")
+            print(f"  Details: {e}")
 
     def get_um_field_for_child(self, child_id: str, field: str) -> str:
         """Read one UM field during pre-session setup, before CHILD_ID is applied."""
@@ -364,6 +406,9 @@ class SessionSetup:
         first_name_cri    = pl.get("first_name_cri", "")
         first_name_tablet = pl.get("first_name_tablet", "")
         nao_ip            = pl.get("nao_ip", "")
+        stt_timeout       = pl.get("stt_timeout")
+        stt_phrase_limit  = pl.get("stt_phrase_limit")
+        review_transcripts = pl.get("review_transcripts")
         condition     = self.normalize_condition_value(
             pl.get("condition", self.d.CONDITION_CONTROL),
             default=self.d.CONDITION_CONTROL,
@@ -416,6 +461,9 @@ class SessionSetup:
             "researcher_name":     researcher,
             "condition":           condition,
             "nao_ip":              nao_ip,
+            "stt_timeout":         stt_timeout,
+            "stt_phrase_limit":    stt_phrase_limit,
+            "review_transcripts":  review_transcripts,
             "fake_persona_path":   fake_persona_path,
             "start_phase_index":   start_phase_index,
             "created_at":          datetime.now().astimezone().isoformat(timespec="seconds"),

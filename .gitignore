@@ -43,5 +43,6 @@ conf/google/*.json
 demos/desktop/local_test_sync_folder
 
 __pycache__/
+.venv/
 venv_sic/
 venv_sic/

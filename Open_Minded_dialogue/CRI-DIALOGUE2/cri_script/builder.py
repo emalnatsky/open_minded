@@ -24,27 +24,29 @@ class ScriptBuilder:
         self.d = dialogue
 
     def subject_memory_phrase(self, um: dict) -> dict:
+        # There is always exactly one favourite subject. Treat it as a single
+        # value everywhere, like any other field (use the first if the stored
+        # value unexpectedly contains more than one).
         raw = self.d.known(um, "fav_subject")
         values = self.d.split_memory_values(raw)
-        subject_text = self.d.format_dutch_list(values, raw or "school")
-        multiple = len(values) > 1
+        subject_text = values[0] if values else (raw or "school")
         return {
             "fav_subject": subject_text,
-            "subject_noun": "lievelingsvakken" if multiple else "lievelingsvak",
-            "subject_verb": "zijn" if multiple else "is",
-            "count": len(values),
+            "subject_noun": "lievelingsvak",
+            "subject_verb": "is",
+            "count": 1,
         }
 
     def subject_phase_topic(self, um: dict, subject_phrase: dict = None) -> dict:
         subject_phrase = subject_phrase or self.subject_memory_phrase(um)
-        field_label = "je twee lievelingsvakken" if subject_phrase["count"] >= 2 else "je lievelingsvak"
+        field_label = "je lievelingsvak"
         return {
             "domain": "school_subject",
             "label": subject_phrase["fav_subject"],
             "fields": ["fav_subject"],
             "field_labels": {"fav_subject": field_label},
             "current_values": {"fav_subject": subject_phrase["fav_subject"]},
-            "expected_value_count": {"fav_subject": min(subject_phrase["count"], 2) or 1},
+            "expected_value_count": {"fav_subject": 1},
             "correct_values": [
                 f"{subject_phrase['fav_subject']} jouw {subject_phrase['subject_noun']} {subject_phrase['subject_verb']}"
             ],
@@ -259,6 +261,8 @@ class ScriptBuilder:
                     "expects_response": True,
                     "response_mode": "memory_review_group",
                     "memory_review_group": group_id,
+                    "memory_correction_available": True,
+                    "memory_review_fields": list(known_fields),
                     "topic": self.memory_review_topic(known_fields, um),
                     "used_fields": {
                         field: um.get(field)
@@ -881,6 +885,8 @@ class ScriptBuilder:
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
+                        "memory_correction_available": True,
+                        "memory_correction_field": m1_field,
                         "defer_corrected_response": True,
                     },
                     {
@@ -963,6 +969,8 @@ class ScriptBuilder:
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
+                        "memory_correction_available": True,
+                        "memory_correction_field": m2_field,
                         "defer_corrected_response": True,
                     },
                     {
@@ -1127,6 +1135,8 @@ class ScriptBuilder:
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
+                        "memory_correction_available": True,
+                        "memory_correction_field": m3_field,
                         "defer_corrected_response": True,
                     },
                     {
@@ -1341,6 +1351,8 @@ class ScriptBuilder:
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
+                        "memory_correction_available": True,
+                        "memory_correction_field": m4_field,
                         "defer_corrected_response": True,
                         "starts_mistake_timer": True,
                         "used_fields": {m4_field: m4_wrong},
@@ -1410,6 +1422,22 @@ class ScriptBuilder:
                         "memory_review_from_access_scope": True,
                         "speak_memory_review_from_access_scope": tutorial_condition == self.d.CONDITION_CONTROL,
                         "activate_tablet_memory_access": tutorial_condition == self.d.CONDITION_EXPERIMENT,
+                    },
+                    {
+                        "content_plan": self.d.l1(
+                            "Wil je iets aan mijn geheugen veranderen?"
+                        ),
+                        "expects_response": True,
+                        "condition": "run_if_memory_review_requested",
+                        "response_mode": "memory_access_change",
+                        "allow_memory_change": True,
+                        "memory_correction_requested": True,
+                        "memory_review_fields": self.d.child_facing_memory_fields(self.d.UM_FIELDS),
+                        "topic": self.memory_review_topic(
+                            self.d.child_facing_memory_fields(self.d.UM_FIELDS),
+                            um,
+                        ),
+                        "used_fields": {},
                     },
                     {
                         "content_plan": self.d.l1(

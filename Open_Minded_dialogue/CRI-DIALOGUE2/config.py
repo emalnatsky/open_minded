@@ -302,7 +302,7 @@ ASK_SESSION_INTERFACE_AT_START = True
 
 SESSION_CONFIG_PATH = os.path.abspath(os.path.join(LOCAL_ROOT, "session_config.local.json"))
 SESSION_STATE_PATH  = os.path.abspath(os.path.join(LOCAL_ROOT, "session_state.json"))
-LOCAL_ENV_PATH      = os.path.abspath(os.path.join(OUTER_ROOT, "conf", ".env"))
+LOCAL_ENV_PATH      = os.path.abspath(os.path.join(LOCAL_ROOT, "config", ".env"))
 
 # Config file for session — Prolog-style, lives in util/ (gitignored).
 # Contains child ID, CRI name (for NAO TTS), tablet name (for book cover),

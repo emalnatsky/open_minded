@@ -5,6 +5,7 @@ import random
 import copy
 import unicodedata
 import logging
+import platform
 import re
 import socket
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from cri_script import ContentPlan, Segments, ScriptBuilder
 
 from sic_framework.devices import Nao
 from sic_framework.devices.common_naoqi.naoqi_autonomous import (
+    NaoBlinkingRequest,
     NaoWakeUpRequest,
     NaoRestRequest,
     NaoSetAutonomousLifeRequest,
@@ -56,6 +58,141 @@ from cri_classifier import (
     StubIntentClassifier,
     GPTIntentClassifier,
 )
+
+
+@dataclass(frozen=True)
+class STTBackendConfig:
+    device: str
+    compute_type: str
+    gpu_device_index: int
+    model: str
+    cuda_device_name: str = ""
+    mac_gpu_available: bool = False
+    mac_gpu_backend: str = ""
+    note: str = ""
+
+
+def _normalise_stt_choice(value: str, default: str) -> str:
+    return (value or default).strip().lower() or default
+
+
+def _torch_mps_available(torch_module) -> bool:
+    try:
+        mps = getattr(getattr(torch_module, "backends", None), "mps", None)
+        return bool(mps and mps.is_available())
+    except Exception:
+        return False
+
+
+def _cpu_compute_type_supported(ctranslate2_module, compute_type: str) -> bool:
+    try:
+        supported = ctranslate2_module.get_supported_compute_types("cpu")
+    except Exception:
+        return True
+    return compute_type in supported
+
+
+def resolve_realtimestt_backend(
+    requested_device: str = "auto",
+    requested_compute_type: str = "auto",
+    requested_model: str = "auto",
+    requested_gpu_index: int = 0,
+    system_name: str = None,
+    torch_module=None,
+    ctranslate2_module=None,
+) -> STTBackendConfig:
+    """
+    Choose a concrete RealtimeSTT/Faster-Whisper backend.
+
+    CUDA remains the fast path when it is available. macOS may expose an Apple
+    GPU through torch MPS, but CTranslate2/Faster-Whisper does not use that as
+    a drop-in CUDA replacement in this stack, so Mac defaults to CPU int8.
+    """
+    device = _normalise_stt_choice(requested_device, "auto")
+    compute_type = _normalise_stt_choice(requested_compute_type, "auto")
+    model = _normalise_stt_choice(requested_model, "auto")
+    system_name = (system_name or platform.system()).lower()
+
+    if device in ("mps", "metal"):
+        raise RuntimeError(
+            "Apple GPU/MPS speech mode is not supported by this Faster-Whisper/"
+            "CTranslate2 stack. Use CRI_STT_DEVICE=auto or cpu on macOS."
+        )
+    if device not in ("auto", "cuda", "cpu"):
+        raise RuntimeError(f"Invalid CRI_STT_DEVICE value: {requested_device!r}")
+
+    try:
+        if torch_module is None:
+            import torch as torch_module
+        if ctranslate2_module is None:
+            import ctranslate2 as ctranslate2_module
+    except Exception as e:
+        raise RuntimeError(
+            "Speech STT requires torch and ctranslate2 in the venv."
+        ) from e
+
+    mac_gpu_available = system_name == "darwin" and _torch_mps_available(torch_module)
+    if system_name == "darwin" and device == "auto":
+        cuda_available = False
+    else:
+        try:
+            cuda_device_count = int(ctranslate2_module.get_cuda_device_count())
+        except Exception:
+            cuda_device_count = 0
+        try:
+            torch_cuda_available = bool(torch_module.cuda.is_available())
+        except Exception:
+            torch_cuda_available = False
+        cuda_available = torch_cuda_available and cuda_device_count > requested_gpu_index
+
+    if device == "cuda" and not cuda_available:
+        raise RuntimeError(
+            "GPU speech mode requested, but CUDA is not available to both torch "
+            f"and CTranslate2 at GPU index {requested_gpu_index}."
+        )
+
+    if device == "cuda" or (device == "auto" and cuda_available):
+        selected_compute = "float16" if compute_type == "auto" else compute_type
+        selected_model = "small" if model == "auto" else model
+        cuda_name = ""
+        try:
+            cuda_name = torch_module.cuda.get_device_name(requested_gpu_index)
+        except Exception:
+            cuda_name = f"CUDA device {requested_gpu_index}"
+        return STTBackendConfig(
+            device="cuda",
+            compute_type=selected_compute,
+            gpu_device_index=requested_gpu_index,
+            model=selected_model,
+            cuda_device_name=cuda_name,
+            mac_gpu_available=mac_gpu_available,
+            mac_gpu_backend="mps" if mac_gpu_available else "",
+        )
+
+    selected_compute = "int8" if compute_type == "auto" else compute_type
+    selected_model = "small" if model == "auto" else model
+    if not _cpu_compute_type_supported(ctranslate2_module, selected_compute):
+        raise RuntimeError(
+            f"CTranslate2 CPU backend does not support compute_type={selected_compute!r}."
+        )
+
+    note = ""
+    if mac_gpu_available:
+        note = (
+            "Apple GPU/MPS is available through torch, but this "
+            "Faster-Whisper/CTranslate2 STT path uses CPU."
+        )
+    return STTBackendConfig(
+        device="cpu",
+        compute_type=selected_compute,
+        gpu_device_index=requested_gpu_index,
+        model=selected_model,
+        mac_gpu_available=mac_gpu_available,
+        mac_gpu_backend="mps" if mac_gpu_available else "",
+        note=note,
+    )
+
+
 class CRI_ScriptedDialogue(SICApplication):
     """
     CRI 4.0 walkthrough interaction flow.
@@ -509,6 +646,52 @@ class CRI_ScriptedDialogue(SICApplication):
     def follow_up_action_handler(self, turn, max_rounds=3):
         return self.actions.follow_up_action_handler(turn, max_rounds)
 
+    def set_nao_autonomous_blinking(self, enabled: bool):
+        """Enable/disable NAO's autonomous eye blinking without changing body movement."""
+        if self.simulation_mode or not self.CONNECT_NAO or not self.nao:
+            return
+        try:
+            self.nao.autonomous.request(NaoBlinkingRequest(bool(enabled)))
+            self.log_conversation_event(
+                "nao_autonomous_blinking",
+                enabled=bool(enabled),
+            )
+        except Exception as e:
+            self.logger.warning("Could not set NAO autonomous blinking to %s: %s", enabled, e)
+            self.log_conversation_event(
+                "nao_autonomous_blinking_error",
+                enabled=bool(enabled),
+                error=str(e),
+            )
+
+    def reset_nao_eyes_white(self):
+        """Return FaceLeds to CRI's idle colour after NAO autonomous/animation activity."""
+        speech = getattr(self, "speech", None)
+        if speech is None or not hasattr(speech, "_set_eyes"):
+            return
+        try:
+            speech._set_eyes("white")
+        except Exception as e:
+            self.logger.debug("Could not reset NAO eyes to white: %s", e)
+
+    def prepare_nao_for_dialogue(self):
+        """Wake NAO, keep body autonomy, and stop autonomous blinking from overriding LEDs."""
+        if self.simulation_mode or not self.CONNECT_NAO or not self.nao:
+            return
+        self.nao.autonomous.request(NaoWakeUpRequest())
+        self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
+        self.set_nao_autonomous_blinking(False)
+        self.reset_nao_eyes_white()
+        self.perform_greeting_wave()
+
+    def cleanup_nao_after_dialogue(self):
+        """Best-effort restore before resting NAO at the end of the session."""
+        if self.simulation_mode or not self.CONNECT_NAO or not self.nao:
+            return
+        self.set_nao_autonomous_blinking(True)
+        self.nao.autonomous.request(NaoSetAutonomousLifeRequest("disabled"))
+        self.nao.autonomous.request(NaoRestRequest())
+
     def perform_greeting_wave(self):
         """Play NAO's hello-wave animation. Safe no-op in sim/desktop mode."""
         if self.simulation_mode or not self.CONNECT_NAO or not self.nao:
@@ -520,6 +703,9 @@ class CRI_ScriptedDialogue(SICApplication):
         except Exception as e:
             self.logger.warning("Could not play NAO greeting wave: %s", e)
             self.log_conversation_event("nao_motion_error", action="greeting_wave", error=str(e))
+        finally:
+            self.set_nao_autonomous_blinking(False)
+            self.reset_nao_eyes_white()
 
     def confirm_topic_change(self, change):
         return self.actions.confirm_topic_change(change)
@@ -883,6 +1069,26 @@ class CRI_ScriptedDialogue(SICApplication):
             self.logger.warning("GPTIntentClassifier failed (%s) - using stub.", e)
             self.clf = StubIntentClassifier(valid_fields=list(self.UM_FIELDS))
 
+        connect_nao_env = os.environ.get("CRI_CONNECT_NAO", "").strip().lower()
+        if connect_nao_env in ("1", "true", "yes", "y", "nao"):
+            self.CONNECT_NAO = True
+        elif connect_nao_env in ("0", "false", "no", "n", "print"):
+            self.CONNECT_NAO = False
+
+        desktop_mic_env = os.environ.get("CRI_USE_DESKTOP_MIC", "").strip().lower()
+        if desktop_mic_env in ("1", "true", "yes", "y"):
+            self.USE_DESKTOP_MIC = True
+        elif desktop_mic_env in ("0", "false", "no", "n"):
+            self.USE_DESKTOP_MIC = False
+
+        output_mode_env = os.environ.get("CRI_OUTPUT_MODE", "").strip().lower()
+        if output_mode_env == "print":
+            self.CONNECT_NAO = False
+        elif output_mode_env == "nao":
+            self.CONNECT_NAO = True
+        elif output_mode_env == "windows":
+            raise RuntimeError("Windows voice output is not supported in this branch.")
+
         self.logger.info("UM: LIVE - %s, child=%s", self.UM_API_BASE, self.CHILD_ID)
         self.logger.info("Child input mode: %s", self.child_input_mode)
         self.logger.info("NAO connected for output: %s", bool(self.CONNECT_NAO))
@@ -902,10 +1108,50 @@ class CRI_ScriptedDialogue(SICApplication):
             self.logger.info("NAO connected.")
 
         # RealtimeSTT (replaces SIC Whisper) - recorder lives inside SpeechIO.
+        stt_device = os.environ.get("CRI_STT_DEVICE", "auto").strip() or "auto"
+        stt_compute_type = os.environ.get("CRI_STT_COMPUTE_TYPE", "auto").strip() or "auto"
+        stt_model = os.environ.get("CRI_STT_MODEL", "auto").strip() or "auto"
+        raw_gpu_index = os.environ.get("CRI_STT_GPU_INDEX", "0").strip() or "0"
+        try:
+            stt_gpu_index = int(raw_gpu_index)
+        except ValueError:
+            raise RuntimeError(f"Invalid CRI_STT_GPU_INDEX value: {raw_gpu_index!r}")
+
         if self.use_keyboard_input():
             self.logger.info("Skipping STT setup because keyboard child input is enabled.")
+            stt_backend = STTBackendConfig(
+                device="cpu",
+                compute_type="int8",
+                gpu_device_index=stt_gpu_index,
+                model="small",
+                note="STT disabled for keyboard input.",
+            )
         else:
             self.logger.info("RealtimeSTT will use the system/default microphone.")
+            stt_backend = resolve_realtimestt_backend(
+                requested_device=stt_device,
+                requested_compute_type=stt_compute_type,
+                requested_model=stt_model,
+                requested_gpu_index=stt_gpu_index,
+            )
+            if stt_backend.device == "cuda":
+                self.logger.info(
+                    "RealtimeSTT target: device=%s, compute=%s, model=%s, gpu=%s (%s).",
+                    stt_backend.device,
+                    stt_backend.compute_type,
+                    stt_backend.model,
+                    stt_backend.gpu_device_index,
+                    stt_backend.cuda_device_name,
+                )
+            else:
+                self.logger.info(
+                    "RealtimeSTT target: device=%s, compute=%s, model=%s.",
+                    stt_backend.device,
+                    stt_backend.compute_type,
+                    stt_backend.model,
+                )
+                if stt_backend.note:
+                    self.logger.info(stt_backend.note)
 
         # GPT for L3 responses
         self.gpt = GPT(conf=GPTConf(
@@ -926,11 +1172,16 @@ class CRI_ScriptedDialogue(SICApplication):
             simulated_history=self.simulated_history,
             generate_simulated_response_fn=self.generate_simulated_child_response,
             set_last_utterance_fn=lambda t: setattr(self, "last_leo_utterance", t),
-            stt_model="small",
+            stt_model=stt_backend.model,
             stt_language="nl",
+            stt_timeout=self.STT_TIMEOUT,
+            stt_phrase_limit=self.STT_PHRASE_LIMIT,
             stt_post_speech_silence=0.6,
             stt_realtime_processing_pause=0.2,
             stt_beam_size=5,
+            stt_device=stt_backend.device,
+            stt_compute_type=stt_backend.compute_type,
+            stt_gpu_device_index=stt_backend.gpu_device_index,
             pronunciation_overrides_path="tts_pronunciation.json",
         )
         self.speech.warm_up_stt()
@@ -3166,7 +3417,7 @@ class CRI_ScriptedDialogue(SICApplication):
             tablet_update(context)
 
         if not context.get("expects_response", True):
-            self.logger.info("No child response expected for this phase segment.")
+            self.logger.debug("No child response expected for this phase segment.")
             return None
 
         shutdown_event = getattr(self, "shutdown_event", None)
@@ -3207,7 +3458,7 @@ class CRI_ScriptedDialogue(SICApplication):
         self.print_phase_start_banner(turn)
         self.start_turn_log(turn)
         try:
-            self.logger.info(
+            self.logger.debug(
                 "=== Phase %s/%d [%s: %s] ===",
                 self.turn_phase(turn) or phase_index + 1,
                 total_phases,
@@ -3262,9 +3513,7 @@ class CRI_ScriptedDialogue(SICApplication):
 
         try:
             if not self.simulation_mode and self.CONNECT_NAO:
-                self.nao.autonomous.request(NaoWakeUpRequest())
-                self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
-                self.perform_greeting_wave()
+                self.prepare_nao_for_dialogue()
 
             i = max(0, min(self.start_phase_index, len(script) - 1))
             while i < len(script):
@@ -3318,8 +3567,7 @@ class CRI_ScriptedDialogue(SICApplication):
         finally:
             try:
                 if not self.simulation_mode and self.CONNECT_NAO:
-                    self.nao.autonomous.request(NaoSetAutonomousLifeRequest("disabled"))
-                    self.nao.autonomous.request(NaoRestRequest())
+                    self.cleanup_nao_after_dialogue()
             except Exception:
                 pass
             self.finish_conversation_log()

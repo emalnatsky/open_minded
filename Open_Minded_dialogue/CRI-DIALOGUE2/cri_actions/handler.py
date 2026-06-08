@@ -373,14 +373,31 @@ class ActionHandler:
             "dat is goed",
         }
 
+    def is_memory_correction_window(self, turn: dict) -> bool:
+        """True only when Leo is intentionally checking/reviewing memory."""
+        turn = turn or {}
+        mode = turn.get("response_mode")
+        if (
+            turn.get("memory_correction_available")
+            or turn.get("memory_correction_requested")
+            or turn.get("allow_memory_change")
+        ):
+            return True
+        if mode in (
+            "memory_access_change",
+            "memory_review_group",
+            "memory_review_add_final",
+            "change_confirmation",
+            "value_completion",
+            "value_limit_clarification",
+        ):
+            return True
+        if mode == "explicit_memory_inspection_offer":
+            return bool(turn.get("explicit_memory_inspection_active"))
+        return False
+
     def turn_has_memory_correction_available(self, turn: dict) -> bool:
-        if turn.get("memory_correction_available"):
-            return True
-        if turn.get("response_mode") in ("mistake_interpretation", "topic_interpretation"):
-            return True
-        if self.mentioned_um_fields(turn):
-            return True
-        return bool(turn.get("allow_memory_change"))
+        return self.is_memory_correction_window(turn)
 
     def has_inline_memory_correction_cue(self, result, transcript: str, turn: dict) -> bool:
         if turn.get("memory_correction_requested"):
@@ -436,6 +453,8 @@ class ActionHandler:
     def listen_only_allows_topic_memory_correction(self, result, transcript: str, turn: dict) -> bool:
         if turn.get("response_mode") != "listen_only":
             return False
+        if not self.is_memory_correction_window(turn):
+            return False
         if not self.is_topic_turn(turn):
             return False
         if not self.mentioned_um_fields(turn):
@@ -451,16 +470,10 @@ class ActionHandler:
         return self.has_explicit_memory_change_cue(transcript)
 
     def turn_allows_memory_change(self, turn: dict) -> bool:
-        if turn.get("allow_memory_change"):
-            return True
-        if turn.get("memory_correction_requested"):
-            return True
-        if self.mentioned_um_fields(turn):
+        if self.is_memory_correction_window(turn):
             return True
         mode = turn.get("response_mode")
         if mode in (
-            "mistake_interpretation",
-            "topic_interpretation",
             "memory_access_change",
             "memory_review_group",
             "memory_review_add_final",
@@ -761,10 +774,9 @@ class ActionHandler:
         if explicit_count:
             return explicit_count
         if field == "fav_subject":
-            topic = (turn or {}).get("topic") or (turn or {}).get("mistake_topic") or {}
-            current_values = topic.get("current_values") if isinstance(topic, dict) else {}
-            current = (current_values or {}).get(field) or getattr(self.d, "last_um_preview", {}).get(field)
-            return max(1, min(len(self.d.split_memory_values(current)), 2))
+            # Single-value change flow: state what's stored, but corrections/changes
+            # are treated as one value (no "maximaal twee" capping).
+            return 1
         return 1
 
     def explicit_expected_memory_value_count(self, turn: dict, field: str) -> int:
@@ -905,6 +917,14 @@ class ActionHandler:
         empty_rejections = {
             "nee",
             "nee hoor",
+            "niet echt",
+            "niet echt waar",
+            "wil ik niet",
+            "dat wil ik niet",
+            "will ik niet",
+            "dat will ik niet",
+            "wil ik niet zeggen",
+            "wil ik liever niet zeggen",
             "nee dat is niet zo",
             "nee dat is niet",
             "nee zo is het niet",
@@ -927,6 +947,9 @@ class ActionHandler:
         value_less_rejection_phrases = (
             "klopt niet",
             "niet waar",
+            "niet echt",
+            "wil ik niet",
+            "will ik niet",
             "niet zo",
             "is niet",
             "verkeerd",
@@ -1000,6 +1023,14 @@ class ActionHandler:
         empty_answers = {
             "nee",
             "nee hoor",
+            "niet echt",
+            "niet echt waar",
+            "wil ik niet",
+            "dat wil ik niet",
+            "will ik niet",
+            "dat will ik niet",
+            "wil ik niet zeggen",
+            "wil ik liever niet zeggen",
             "nee dat is niet zo",
             "klopt niet",
             "dat klopt niet",
@@ -1031,8 +1062,6 @@ class ActionHandler:
         if field == "fav_food":
             return "Oeps, wat is dan je lievelingseten?"
         if field == "fav_subject":
-            if self.expected_memory_value_count(turn or {}, field) >= 2:
-                return "Oeps, vertel mij maximaal twee lievelingsvakken die ik moet onthouden."
             return "Oeps, wat is dan je lievelingsvak?"
         if field == "school_strength":
             return "Oeps, waar ben jij dan vooral goed in op school? Noem een ding."
@@ -1224,13 +1253,9 @@ class ActionHandler:
         if field == "hobby_fav":
             prefix = "Dat zijn er nog te veel. " if retry else ""
             return f"{prefix}Ik kan hier één favoriete hobby onthouden. Wat is jouw allerliefste hobby? Noem één ding."
-        if field == "fav_subject" and existing_values:
-            existing = self.d.format_dutch_list(existing_values)
-            prefix = "Dat zijn er nog te veel. " if retry else ""
-            return f"{prefix}Ik heb al {existing}. Vertel mij maximaal één ander lievelingsvak."
         if field == "fav_subject":
             prefix = "Dat zijn er nog te veel. " if retry else ""
-            return f"{prefix}Ik kan er maximaal twee onthouden. Vertel mij maximaal twee lievelingsvakken die ik moet bewaren."
+            return f"{prefix}Wat is je lievelingsvak? Noem er één."
         if field == "school_strength":
             prefix = "Dat zijn er nog te veel. " if retry else ""
             return f"{prefix}Ik kan hier een ding onthouden. Waar ben jij vooral goed in op school? Noem een ding."
@@ -1445,11 +1470,7 @@ class ActionHandler:
         if len(values) >= expected_count:
             return change
 
-        if field == "fav_subject" and expected_count == 2:
-            first_value = self.d.format_dutch_list(values)
-            question = f"Oké, {first_value}. Vertel mij maximaal één ander lievelingsvak."
-        else:
-            question = f"En wat moet ik daar nog bij onthouden?"
+        question = f"En wat moet ik daar nog bij onthouden?"
 
         self.d.speech.say(question)
         completion_turn = dict(turn or {})
@@ -1617,9 +1638,19 @@ class ActionHandler:
         mistake_state = self.d.mistake_states.get(turn.get("mistake_id"), {})
         if self.is_plain_memory_acknowledgement(transcript) and not turn.get("memory_correction_requested"):
             return {}
+        # End-inspection change/add steps set memory_correction_requested=True,
+        # which bypasses the guard above. But in those steps a plain affirmation
+        # ("ja", "dat klopt", "klopt") means "nothing to change/add" — it must
+        # never be captured as a value.
+        if (
+            turn.get("response_mode") in ("memory_access_change", "memory_review_add_final")
+            and self.is_plain_memory_acknowledgement(transcript)
+        ):
+            return {}
         repaired_answer_value = self.repair_value_from_short_answer(result, transcript, turn, mistake_state)
         inline_memory_correction = self.has_inline_memory_correction_cue(result, transcript, turn) or (
-            bool(self.mentioned_um_fields(turn))
+            self.is_memory_correction_window(turn)
+            and bool(self.mentioned_um_fields(turn))
             and any(
                 phrase in str(transcript or "").lower()
                 for phrase in ("nee", "klopt niet", "niet waar", "verkeerd", "fout")
@@ -1627,6 +1658,7 @@ class ActionHandler:
         )
         clear_mistake_update = (
             turn.get("response_mode") == "mistake_interpretation"
+            and self.is_memory_correction_window(turn)
             and bool(turn.get("mistake_field"))
             and intent in ("um_add", "um_update", "dialogue_update")
             and (not result.field or result.field == turn.get("mistake_field"))
@@ -1643,15 +1675,17 @@ class ActionHandler:
             and (
                 turn.get("memory_correction_field") == "aspiration"
                 or (
-                    turn.get("response_mode") == "mistake_interpretation"
+                    self.is_memory_correction_window(turn)
+                    and turn.get("response_mode") == "mistake_interpretation"
                     and turn.get("mistake_field") == "aspiration"
                 )
             )
         )
-        # RELAXED GATE: on a deliberate-mistake turn, let any clear child value
-        # through so the child's words are the trigger (restores pre-gate behaviour).
+        # On an explicit memory-check turn, let any clear child value through so
+        # the child's words are the trigger.
         mistake_turn_correction = (
-            bool(
+            self.is_memory_correction_window(turn)
+            and bool(
                 turn.get("mistake_id")
                 or turn.get("mistake_field")
                 or turn.get("response_mode") == "mistake_interpretation"
@@ -1671,6 +1705,7 @@ class ActionHandler:
         dialogue_answer_corrects_mistake = (
             intent == "dialogue_answer"
             and turn.get("response_mode") == "mistake_interpretation"
+            and self.is_memory_correction_window(turn)
             and turn.get("mistake_field")
             and self.d.is_known(repaired_answer_value)
             and (
@@ -1783,18 +1818,20 @@ class ActionHandler:
             and self.d.is_known(mistake_actual)
             and self.field_values_match(field, mistake_actual, value)
         ):
-            if replaces_mistake_field and self.uses_tablet_condition():
+            if replaces_mistake_field:
                 return {
                     "action": "update",
                     "field": field,
                     "field_label": field_label,
-                    "old_value": str(old_value),
+                    "old_value": str(mistake_actual),
                     "new_value": str(value),
                     "confidence": result.confidence,
-                    "reason": "Child corrected Leo with the already-stored value; tablet reveal still needs confirmation.",
+                    "reason": "Child corrected Leo with the already-stored value; visible mistake still needs confirmation.",
                     "source_text": transcript,
                     "confirmation_question": f"Wil je dat ik {field_label} verander naar {value}?",
                     "replace_field": True,
+                    "skip_um_write": True,
+                    "visible_mistake_correction_already_stored": True,
                 }
             return {
                 "action": "already_correct",
@@ -1811,7 +1848,7 @@ class ActionHandler:
             if turn.get("mistake_id") and (
                 result.intent in ("um_add", "um_update", "dialogue_update") or dialogue_answer_corrects_mistake
             ):
-                if replaces_mistake_field and self.uses_tablet_condition():
+                if replaces_mistake_field:
                     return {
                         "action": "update",
                         "field": field,
@@ -1819,10 +1856,12 @@ class ActionHandler:
                         "old_value": str(old_value),
                         "new_value": str(value),
                         "confidence": result.confidence,
-                        "reason": "Child corrected Leo with the already-stored value; tablet reveal still needs confirmation.",
+                        "reason": "Child corrected Leo with the already-stored value; visible mistake still needs confirmation.",
                         "source_text": transcript,
                         "confirmation_question": f"Wil je dat ik {field_label} verander naar {value}?",
                         "replace_field": True,
+                        "skip_um_write": True,
+                        "visible_mistake_correction_already_stored": True,
                     }
                 return {
                     "action": "already_correct",
@@ -1891,6 +1930,134 @@ class ActionHandler:
             "um_update",
         )
 
+    def normalized_wrong_value_terms(self, turn: dict) -> list:
+        field = (turn or {}).get("mistake_field") or ""
+        terms = []
+        for value in self.d.split_memory_values((turn or {}).get("mistake_wrong")):
+            normalized = self.normalized_field_value(field, value)
+            normalized = re.sub(r"\s+", " ", normalized).strip(" .,!?;:")
+            if normalized and normalized not in terms:
+                terms.append(normalized)
+            if field == "aspiration":
+                shortened = re.sub(r"\s+worden$", "", normalized).strip(" .,!?;:")
+                if shortened and shortened not in terms:
+                    terms.append(shortened)
+        return terms
+
+    def transcript_mentions_wrong_value(self, transcript: str, turn: dict) -> bool:
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if not text:
+            return False
+        for term in self.normalized_wrong_value_terms(turn):
+            if not term:
+                continue
+            if " " in term and term in text:
+                return True
+            if " " not in term and re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text):
+                return True
+        return False
+
+    def is_negative_wrong_value_response(self, result, transcript: str, turn: dict) -> bool:
+        if not self.is_memory_correction_window(turn):
+            return False
+        if (turn or {}).get("response_mode") != "mistake_interpretation":
+            return False
+        if not (turn or {}).get("mistake_field") or not self.d.is_known((turn or {}).get("mistake_wrong")):
+            return False
+        if self.is_plain_memory_acknowledgement(transcript):
+            return False
+        if not self.transcript_mentions_wrong_value(transcript, turn):
+            return False
+
+        result_value = self.meaningful_classifier_value(getattr(result, "value", None))
+        if result_value and not self.field_values_match(turn.get("mistake_field"), result_value, turn.get("mistake_wrong")):
+            return False
+
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        negative_patterns = (
+            r"\bhoef(?: ik)? geen\b",
+            r"\bhoeft niet\b",
+            r"\bwil(?: ik)? geen\b",
+            r"\bwil(?: ik)? niet\b",
+            r"\bgeen\b",
+            r"\bniet\b",
+            r"\bdon't want\b",
+            r"\bdo not want\b",
+            r"\bdont want\b",
+            r"\bdon't need\b",
+            r"\bdo not need\b",
+            r"\bdont need\b",
+            r"\bno need\b",
+        )
+        if any(re.search(pattern, text) for pattern in negative_patterns):
+            return True
+        if self.is_confirmation_yes(result, transcript):
+            return False
+
+        return getattr(result, "intent", "") in ("dialogue_answer", "dialogue_none", "dialogue_social")
+
+    def is_soft_memory_rejection_phrase(self, transcript: str) -> bool:
+        """True for soft negative/doubt phrases that should invite correction."""
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if not text:
+            return False
+
+        soft_exact = {
+            "beetje",
+            "een beetje",
+            "niet echt",
+            "niet helemaal",
+            "mwah",
+            "mwa",
+            "meh",
+            "volgens mij niet",
+            "ik denk het niet",
+            "misschien niet",
+        }
+        if text in soft_exact:
+            return True
+
+        soft_phrases = (
+            "ik weet niet of dat klopt",
+            "ik weet niet of het klopt",
+            "dat weet ik niet zeker",
+            "ik weet het niet zeker",
+            "ik weet niet zeker of dat klopt",
+            "ik weet niet zeker of het klopt",
+        )
+        return any(phrase in text for phrase in soft_phrases)
+
+    def turn_has_soft_memory_rejection_opportunity(self, turn: dict) -> bool:
+        """True when Leo just stated/reviewed memory and can ask for correction."""
+        mode = (turn or {}).get("response_mode")
+        if mode in (
+            "memory_access_change",
+            "memory_review_add_final",
+            "school_joke_transition",
+            "robot_school_guess",
+            "middle_school_feeling",
+            "role_model_discovery",
+        ):
+            return False
+
+        if mode in ("memory_review_group", "role_model_absence_check"):
+            return self.is_memory_correction_window(turn or {})
+        if mode == "explicit_memory_inspection_offer":
+            return bool((turn or {}).get("explicit_memory_inspection_active"))
+        if mode == "nudge_interpretation":
+            return not bool((turn or {}).get("nudge_memory_offer_made"))
+        return self.is_memory_correction_window(turn or {})
+
+    def is_soft_memory_rejection(self, result, transcript: str, turn: dict) -> bool:
+        """Treat child doubt as value-less rejection only in memory-correction turns."""
+        return (
+            self.is_soft_memory_rejection_phrase(transcript)
+            and self.turn_has_soft_memory_rejection_opportunity(turn or {})
+        )
+
     def contains_response_phrase(self, text: str, phrase: str) -> bool:
         if " " in phrase:
             return phrase in text
@@ -1909,6 +2076,33 @@ class ActionHandler:
         text = str(transcript or "").strip().lower()
         no_phrases = ("nee", "niet", "klopt niet", "laat maar", "verander niets")
         return any(self.contains_response_phrase(text, phrase) for phrase in no_phrases)
+
+    def is_mixed_memory_change_confirmation(self, result, transcript: str) -> bool:
+        text = str(transcript or "").strip().lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if not text:
+            return False
+        if self.is_explicit_memory_rejection(text) or self.is_memory_review_not_sure(text):
+            return False
+        if result.intent in ("um_add", "um_update", "dialogue_update") and self.meaningful_classifier_value(result.value):
+            return False
+        negative_only = ("zeker niet", "echt niet", "liever niet")
+        if any(phrase in text for phrase in negative_only):
+            return False
+        mixed_phrases = (
+            "ja nee",
+            "ja, nee",
+            "ja of nee",
+            "ja, of nee",
+            "ja nee of niet",
+            "ja, nee, of niet",
+            "wel of niet",
+            "of niet",
+            "misschien wel misschien niet",
+        )
+        if any(phrase in text for phrase in mixed_phrases):
+            return True
+        return self.is_confirmation_yes(result, text) and self.is_confirmation_no(result, text)
 
     def confirmation_decision_from_intent(self, result, transcript: str, change: dict) -> dict:
         refined_change = self.change_from_intent_result(
@@ -1996,6 +2190,14 @@ class ActionHandler:
             "",
             "nee",
             "nee hoor",
+            "niet echt",
+            "niet echt waar",
+            "wil ik niet",
+            "dat wil ik niet",
+            "will ik niet",
+            "dat will ik niet",
+            "wil ik niet zeggen",
+            "wil ik liever niet zeggen",
             "klopt niet",
             "dat klopt niet",
             "niet waar",
@@ -2062,6 +2264,15 @@ class ActionHandler:
                 )
 
         if turn.get("nudge_correction_requested"):
+            if self.is_soft_memory_rejection(result, transcript, turn):
+                response = "OkÃ©, als je het zo weet, mag je het gewoon zeggen."
+                self.d.speech.say(response)
+                return self.action_result(
+                    "nudge_correction_detail_missing",
+                    True,
+                    "Child gave a soft rejection phrase but no usable correction detail after the nudge.",
+                    leo_response=response,
+                )
             correction_action = self.nudge_correction_detail_action(result, transcript, turn)
             if correction_action:
                 return correction_action
@@ -2074,7 +2285,11 @@ class ActionHandler:
                 leo_response=response,
             )
 
-        if self.is_confirmation_no(result, transcript) or self.is_rejection_without_value(result, transcript):
+        if (
+            self.is_confirmation_no(result, transcript)
+            or self.is_rejection_without_value(result, transcript)
+            or self.is_soft_memory_rejection(result, transcript, turn)
+        ):
             response = "Oeps. Wil je zeggen wat er niet klopte?"
             turn["nudge_correction_requested"] = True
             self.d.speech.say(response)
@@ -2473,7 +2688,7 @@ class ActionHandler:
                 follow_up_needed=True,
             )
 
-        if self.is_vague_memory_correction(transcript):
+        if self.is_vague_memory_correction(transcript) or self.is_soft_memory_rejection(None, transcript, turn):
             response = "Oeps, wil je zeggen wat er niet klopt?"
             self.d.speech.say(response)
             return self.action_result(
@@ -2525,7 +2740,11 @@ class ActionHandler:
                 stop_phase_after_change=False,
                 continue_phase_after_change=bool(accepted),
             )
-        if self.is_explicit_memory_rejection(transcript) or self.is_rejection_without_value(result, transcript):
+        if (
+            self.is_explicit_memory_rejection(transcript)
+            or self.is_rejection_without_value(result, transcript)
+            or self.is_soft_memory_rejection(result, transcript, turn)
+        ):
             response = "Oeps, wie is dan iemand naar wie je opkijkt?"
             self.d.speech.say(response)
             self.mark_waiting_for_memory_correction(turn, "role_model", response)
@@ -2580,7 +2799,11 @@ class ActionHandler:
                 follow_up_needed=True,
             )
 
-        if self.is_vague_memory_correction(transcript) or self.is_confirmation_no(result, transcript):
+        if (
+            self.is_vague_memory_correction(transcript)
+            or self.is_confirmation_no(result, transcript)
+            or self.is_soft_memory_rejection(result, transcript, turn)
+        ):
             response = "Oeps, wat moet ik dan anders onthouden?"
             self.d.speech.say(response)
             return self.action_result(
@@ -2618,6 +2841,135 @@ class ActionHandler:
             True,
             "Child response to memory review group was unclear.",
             leo_response=response,
+        )
+
+    def memory_access_change_action(self, result, transcript: str, turn: dict) -> dict:
+        """End-inspection change step. Flow:
+        'Wil je iets veranderen?' -> child yes/no.
+          no / acknowledgement -> move on, nothing changed.
+          yes (no value yet)    -> ask 'Wat wil je veranderen?', listen once,
+                                    build the change, then confirm_topic_change
+                                    ('van X naar Y?' -> yes -> write + acknowledge).
+          full change in one go -> build + confirm directly.
+        Reuses change_from_intent_result + confirm_topic_change so the X->Y
+        confirmation and the write/acknowledge are identical to every other change.
+        """
+        # Child already stated a concrete change ("verander mijn eten naar pizza").
+        change = self.change_from_intent_result(result, turn, transcript)
+        if change and change.get("field") and self.d.is_known(change.get("new_value")):
+            accepted = self.confirm_topic_change(change)
+            return self.action_result(
+                "memory_access_change_confirmed" if accepted else "memory_access_change_rejected",
+                True,
+                "Child requested a memory change at the end inspection.",
+                change=change,
+                change_confirmed=accepted,
+            )
+        if self.is_mixed_memory_change_confirmation(result, transcript):
+            return self.memory_access_change_clarification_action()
+        if self.is_memory_review_not_sure(transcript):
+            response = "Oké, dan laat ik alles zo."
+            self.d.speech.say(response)
+            return self.action_result(
+                "memory_access_change_none",
+                True,
+                "Child was unsure about changing memory at the end inspection.",
+                leo_response=response,
+            )
+        # Child said yes but gave no value yet -> ask what.
+        # IMPORTANT: check YES before plain acknowledgement, because
+        # is_plain_memory_acknowledgement("ja") is also True.
+        if self.is_confirmation_yes(result, transcript):
+            ask = "Wat wil je veranderen?"
+            self.d.speech.say(ask)
+            time.sleep(0.5)
+            answer = self.d.speech.listen_with_review()
+            time.sleep(0.8)
+            ask_turn = dict(turn or {})
+            ask_turn["response_mode"] = "memory_access_change"
+            ask_turn["allow_memory_change"] = True
+            ask_turn["memory_correction_requested"] = True
+            self.mark_waiting_for_memory_correction(ask_turn, "", ask)
+            follow_result = self.classify_with_repeat(answer, ask_turn)
+            follow_change = self.change_from_intent_result(follow_result, ask_turn, answer)
+            if follow_change and follow_change.get("field") and self.d.is_known(follow_change.get("new_value")):
+                accepted = self.confirm_topic_change(follow_change)
+                return self.action_result(
+                    "memory_access_change_confirmed" if accepted else "memory_access_change_rejected",
+                    True,
+                    "Child named a change after being asked what to change.",
+                    change=follow_change,
+                    change_confirmed=accepted,
+                )
+            response = "Oké, dan laat ik het zo."
+            self.d.speech.say(response)
+            return self.action_result(
+                "memory_access_change_no_value",
+                True,
+                "Child wanted to change something but no clear field/value was captured.",
+                leo_response=response,
+            )
+
+        # Plain NO / not sure -> nothing to change. Do not treat "ja"/"klopt"
+        # as no here; those were handled above.
+        if self.is_confirmation_no(result, transcript) or self.is_memory_review_not_sure(transcript):
+            response = "Oké, dan laat ik alles zo."
+            self.d.speech.say(response)
+            return self.action_result(
+                "memory_access_change_none",
+                True,
+                "Child did not want to change anything at the end inspection.",
+                leo_response=response,
+            )
+        # Unclear but no concrete change yet -> ask what.
+        if not change:
+            ask = "Wat wil je veranderen?"
+            self.d.speech.say(ask)
+            time.sleep(0.5)
+            answer = self.d.speech.listen_with_review()
+            time.sleep(0.8)
+            ask_turn = dict(turn or {})
+            ask_turn["response_mode"] = "memory_access_change"
+            ask_turn["allow_memory_change"] = True
+            ask_turn["memory_correction_requested"] = True
+            self.mark_waiting_for_memory_correction(ask_turn, "", ask)
+            follow_result = self.classify_with_repeat(answer, ask_turn)
+            follow_change = self.change_from_intent_result(follow_result, ask_turn, answer)
+            if follow_change and follow_change.get("field") and self.d.is_known(follow_change.get("new_value")):
+                accepted = self.confirm_topic_change(follow_change)
+                return self.action_result(
+                    "memory_access_change_confirmed" if accepted else "memory_access_change_rejected",
+                    True,
+                    "Child named a change after being asked what to change.",
+                    change=follow_change,
+                    change_confirmed=accepted,
+                )
+            response = "Oké, dan laat ik het zo."
+            self.d.speech.say(response)
+            return self.action_result(
+                "memory_access_change_no_value",
+                True,
+                "Child wanted to change something but no clear field/value was captured.",
+                leo_response=response,
+            )
+        response = "Oké, dan laat ik alles zo."
+        self.d.speech.say(response)
+        return self.action_result(
+            "memory_access_change_unclear",
+            True,
+            "Change-step response was unclear; nothing changed.",
+            leo_response=response,
+        )
+
+    def memory_access_change_clarification_action(self) -> dict:
+        response = "Wil je iets veranderen? Zeg maar ja of nee."
+        self.d.speech.say(response)
+        return self.action_result(
+            "memory_access_change_clarify_yes_no",
+            True,
+            "Child gave a mixed yes/no answer to the memory-change question.",
+            leo_response=response,
+            follow_up_needed=True,
         )
 
     def memory_review_final_action(self, result, transcript: str, turn: dict) -> dict:
@@ -2676,7 +3028,7 @@ class ActionHandler:
                 follow_up_needed=True,
             )
 
-        response = "Dat is leuk om te weten. Ik heb het in dit gesprek gehoord."
+        response = "Dat is leuk om te weten. Dankjewel, ik heb dat toegevoegd."
         self.d.speech.say(response)
         self.d.log_conversation_event(
             "memory_review_extra_unmapped",
@@ -2770,7 +3122,18 @@ class ActionHandler:
         if mode == "role_model_discovery":
             return self.role_model_discovery_action(result, transcript, turn)
 
-        change = {} if listen_only_locks_memory else self.change_from_intent_result(result, turn, transcript)
+        soft_memory_rejection = self.is_soft_memory_rejection(result, transcript, turn)
+        negative_wrong_value_response = self.is_negative_wrong_value_response(result, transcript, turn)
+        soft_generic_memory_rejection = soft_memory_rejection and mode not in (
+            "explicit_memory_inspection_offer",
+            "memory_review_group",
+            "nudge_interpretation",
+        )
+        change = (
+            {}
+            if listen_only_locks_memory or soft_memory_rejection or negative_wrong_value_response
+            else self.change_from_intent_result(result, turn, transcript)
+        )
 
         if change:
             change = self.complete_expected_memory_values(change, turn)
@@ -2919,22 +3282,48 @@ class ActionHandler:
 
         listen_only_rejected_topic_memory = (
             mode == "listen_only"
+            and self.is_memory_correction_window(turn)
             and self.is_topic_turn(turn)
             and bool(self.mentioned_um_fields(turn))
-            and self.is_explicit_memory_rejection(transcript)
+            and (
+                self.is_explicit_memory_rejection(transcript)
+                or soft_memory_rejection
+            )
+        )
+        generic_memory_correction_mode = mode not in (
+            "explicit_memory_inspection_offer",
+            "memory_access_change",
+            "memory_review_group",
+            "memory_review_add_final",
+            "nudge_interpretation",
+            "role_model_absence_check",
         )
         can_ask_memory_correction = (
             (
                 mode != "listen_only"
+                and generic_memory_correction_mode
                 and (
-                    mode in ("mistake_interpretation", "topic_interpretation")
+                    self.is_memory_correction_window(turn)
                     or bool(turn.get("memory_correction_requested"))
                     or self.has_inline_memory_correction_cue(result, transcript, turn)
+                    or soft_generic_memory_rejection
                 )
             )
             or listen_only_rejected_topic_memory
         )
-        if can_ask_memory_correction and self.is_rejection_without_value(result, transcript):
+        if mode == "memory_access_change":
+            if self.is_mixed_memory_change_confirmation(result, transcript):
+                return self.memory_access_change_clarification_action()
+            if (
+                (self.is_confirmation_no(result, transcript) or self.is_memory_review_not_sure(transcript))
+                and not self.is_explicit_memory_rejection(transcript)
+            ):
+                return self.memory_access_change_action(result, transcript, turn)
+        if can_ask_memory_correction and (
+            self.is_rejection_without_value(result, transcript)
+            or soft_generic_memory_rejection
+            or negative_wrong_value_response
+        ):
             if mode == "mistake_interpretation":
                 response = self.mistake_correction_question(turn)
                 correction_field = turn.get("mistake_field", "")
@@ -2968,6 +3357,8 @@ class ActionHandler:
         if mode == "memory_review_group":
             return self.memory_review_group_action(result, transcript, turn)
 
+        if mode == "memory_access_change":
+            return self.memory_access_change_action(result, transcript, turn)
         if mode == "memory_review_add_final":
             return self.memory_review_final_action(result, transcript, turn)
 
@@ -3138,7 +3529,19 @@ class ActionHandler:
         self.d.handle_confirmed_mistake_related_change(change, self.d.current_turn_context)
         self.remember_confirmed_change_locally(change)
         self.prepare_tablet_change_reveal(change, self.d.current_turn_context)
-        written = self.d.write_um_change(change)
+        written = True if change.get("skip_um_write") else self.d.write_um_change(change)
+        if change.get("skip_um_write"):
+            log_event = getattr(self.d, "log_conversation_event", None)
+            if callable(log_event):
+                log_event(
+                    "um_write",
+                    action="no_op_visible_mistake_correction",
+                    field=change.get("field"),
+                    old_value=change.get("old_value"),
+                    new_value=change.get("new_value"),
+                    success=True,
+                    status_code="skipped_already_stored",
+                )
         if self.d.current_turn_context:
             self.d.phases_with_confirmed_change.add(self.d.current_turn_context.get("phase"))
         if written:
