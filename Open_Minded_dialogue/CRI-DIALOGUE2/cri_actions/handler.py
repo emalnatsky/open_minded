@@ -361,7 +361,9 @@ class ActionHandler:
             "klopt",
             "jawel",
             "zeker",
+            "jazeker",
             "ja zeker",
+            "ja, zeker",
             "inderdaad",
             "ja inderdaad",
             "ok",
@@ -1380,6 +1382,17 @@ class ActionHandler:
             )
         )
 
+    def can_store_unknown_aspiration_answer(self, result, turn: dict) -> bool:
+        """Only store unknown aspiration after Leo explicitly asks for that correction."""
+        turn = turn or {}
+        if turn.get("memory_correction_requested"):
+            field = turn.get("memory_correction_field") or getattr(result, "field", None)
+            if field == "aspiration":
+                return True
+            question = str(turn.get("last_correction_question") or "").lower()
+            return "later worden" in question or "later wilt worden" in question
+        return bool(turn.get("allow_memory_change") and getattr(result, "field", None) == "aspiration")
+
     def unknown_aspiration_change(self, field_label: str, old_value: str, transcript: str, confidence: float) -> dict:
         return {
             "action": "update",
@@ -1633,9 +1646,74 @@ class ActionHandler:
             phase=payload.get("phase"),
         )
 
+    def is_m2_food_mistake_turn(self, turn: dict) -> bool:
+        turn = turn or {}
+        return (
+            turn.get("response_mode") == "mistake_interpretation"
+            and turn.get("mistake_id") == "M2"
+            and turn.get("mistake_field") == "fav_food"
+            and self.d.is_known(turn.get("mistake_wrong"))
+        )
+
+    def m2_accepted_wrong_food_change(self, result, transcript: str, turn: dict) -> dict:
+        if not self.is_m2_food_mistake_turn(turn):
+            return {}
+        if turn.get("memory_correction_requested"):
+            return {}
+        if (
+            self.has_hard_memory_no_phrase(transcript)
+            or self.is_soft_memory_rejection_phrase(transcript)
+            or self.has_fav_food_dislike_phrase(transcript, turn)
+        ):
+            return {}
+        if not (
+            self.is_plain_memory_acknowledgement(transcript)
+            or self.is_confirmation_yes(result, transcript)
+        ):
+            return {}
+
+        field = "fav_food"
+        wrong_value = str(turn.get("mistake_wrong"))
+        context = self.turn_memory_context(turn)
+        old_value = (
+            context.get("current_values", {}).get(field)
+            or self.d.last_um_preview.get(field)
+            or turn.get("mistake_actual")
+            or self.d.UNKNOWN_VALUE
+        )
+        return {
+            "action": "update",
+            "field": field,
+            "field_label": context.get("field_labels", {}).get(field) or self.d.field_label(field),
+            "old_value": str(old_value),
+            "new_value": wrong_value,
+            "confidence": getattr(result, "confidence", 1.0),
+            "reason": "Child accepted the M2 wrong food as the value Leo should remember.",
+            "source_text": transcript,
+            "m2_accept_wrong_food": True,
+        }
+
+    def apply_m2_accepted_wrong_food_change(self, change: dict, turn: dict) -> bool:
+        self.remember_confirmed_change_locally(change)
+        written = self.d.write_um_change(change)
+        if self.d.current_turn_context:
+            self.d.phases_with_confirmed_change.add(self.d.current_turn_context.get("phase"))
+        else:
+            self.d.phases_with_confirmed_change.add(self.d.turn_phase(turn))
+        state = self.d.mistake_states.setdefault((turn or {}).get("mistake_id"), {"id": (turn or {}).get("mistake_id")})
+        state["accepted_wrong_value"] = True
+        state["accepted_value"] = change.get("new_value")
+        state["accepted_field"] = change.get("field")
+        if written:
+            self.refresh_tablet_state_after_change(turn)
+        self.d.pending_change = None
+        return bool(written)
+
     def change_from_intent_result(self, result, turn: dict, transcript: str) -> dict:
         intent = result.intent
         mistake_state = self.d.mistake_states.get(turn.get("mistake_id"), {})
+        if self.is_m1_hobby_wrong_value_acknowledgement(result, transcript, turn):
+            return {}
         if self.is_plain_memory_acknowledgement(transcript) and not turn.get("memory_correction_requested"):
             return {}
         # End-inspection change/add steps set memory_correction_requested=True,
@@ -1645,6 +1723,28 @@ class ActionHandler:
         if (
             turn.get("response_mode") in ("memory_access_change", "memory_review_add_final")
             and self.is_plain_memory_acknowledgement(transcript)
+        ):
+            return {}
+        if (
+            self.is_memory_correction_window(turn)
+            and not turn.get("memory_correction_requested")
+            and not self.meaningful_classifier_value(result.value)
+            and (
+                self.is_standalone_memory_rejection_phrase(transcript)
+                or self.has_fav_food_dislike_phrase(transcript, turn)
+                or self.has_hobby_fav_rejection_phrase(transcript, turn)
+            )
+        ):
+            return {}
+        if (
+            intent in ("um_update", "dialogue_update")
+            and not self.meaningful_classifier_value(result.value)
+            and (
+                self.has_hard_memory_no_phrase(transcript)
+                or self.is_soft_memory_rejection_phrase(transcript)
+                or self.has_fav_food_dislike_phrase(transcript, turn)
+                or self.has_hobby_fav_rejection_phrase(transcript, turn)
+            )
         ):
             return {}
         repaired_answer_value = self.repair_value_from_short_answer(result, transcript, turn, mistake_state)
@@ -1672,14 +1772,7 @@ class ActionHandler:
         )
         unknown_aspiration_correction = (
             self.is_unknown_aspiration_answer(transcript)
-            and (
-                turn.get("memory_correction_field") == "aspiration"
-                or (
-                    self.is_memory_correction_window(turn)
-                    and turn.get("response_mode") == "mistake_interpretation"
-                    and turn.get("mistake_field") == "aspiration"
-                )
-            )
+            and self.can_store_unknown_aspiration_answer(result, turn)
         )
         # On an explicit memory-check turn, let any clear child value through so
         # the child's words are the trigger.
@@ -1790,6 +1883,8 @@ class ActionHandler:
         is_topic_correction = self.is_topic_turn(turn) and replaces_spoken_field
 
         if field == "aspiration" and self.is_unknown_aspiration_answer(transcript):
+            if not unknown_aspiration_correction:
+                return {}
             return self.unknown_aspiration_change(field_label, old_value, transcript, result.confidence)
 
         if intent == "um_delete":
@@ -1918,17 +2013,253 @@ class ActionHandler:
 
     # ── confirmation intent predicates ───────────────────────────────────────
 
-    def is_rejection_without_value(self, result, transcript: str) -> bool:
+    def hard_memory_no_phrases(self) -> tuple[str, ...]:
+        return (
+            "nee",
+            "nee hoor",
+            "nee joh",
+            "nee echt niet",
+            "nee absoluut niet",
+            "absoluut niet",
+            "zeker niet",
+            "echt niet",
+            "echt niet hoor",
+            "helemaal niet",
+            "totaal niet",
+            "nooit",
+            "echt nooit",
+            "mooi niet",
+            "dacht het niet",
+            "geen sprake van",
+            "voor geen goud",
+            "nou nee",
+            "ja nee",
+            "dat klopt niet",
+            "klopt niet",
+            "niet waar",
+            "dat is niet waar",
+            "dat is niet zo",
+            "niet zo",
+            "dat is fout",
+            "dat is verkeerd",
+            "verkeerd",
+            "fout",
+            "dat wil ik niet worden",
+            "dat wil ik echt niet worden",
+            "ik wil dat niet worden",
+            "ik wil geen schooldirecteur worden",
+            "ik hoef geen schooldirecteur te worden",
+            "dat lijkt me niks",
+            "dat lijkt me niets",
+            "lijkt me niks",
+            "lijkt me niets",
+            "dat past niet bij mij",
+        )
+
+    def has_hard_memory_no_phrase(self, transcript: str) -> bool:
         text = str(transcript or "").lower()
-        rejection_words = ("klopt niet", "niet waar", "niet zo", "verkeerd", "helemaal niet", "nee")
-        if result.intent in ("um_update", "dialogue_update") and not self.meaningful_classifier_value(result.value):
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        return any(self.contains_response_phrase(text, phrase) for phrase in self.hard_memory_no_phrases())
+
+    def is_standalone_memory_rejection_phrase(self, transcript: str) -> bool:
+        text = str(transcript or "").lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        return text in self.hard_memory_no_phrases() or self.is_soft_memory_rejection_phrase(text)
+
+    def is_fav_food_rejection_context(self, turn: dict) -> bool:
+        turn = turn or {}
+        if not self.is_memory_correction_window(turn):
+            return False
+        if turn.get("mistake_field") == "fav_food" or turn.get("memory_correction_field") == "fav_food":
             return True
-        return any(word in text for word in rejection_words) and result.intent in (
+        fields = (turn.get("topic") or {}).get("fields") or []
+        return "fav_food" in fields
+
+    def fav_food_dislike_phrases(self) -> tuple[str, ...]:
+        return (
+            "dat vind ik niet lekker",
+            "ik vind dat niet lekker",
+            "niet lekker",
+            "vies",
+            "dat vind ik vies",
+            "ik vind dat vies",
+            "bah",
+            "gatver",
+            "lust ik niet",
+            "ik lust dat niet",
+            "dat lust ik niet",
+            "ik lust geen",
+            "ik hou daar niet van",
+            "ik houd daar niet van",
+            "ik hou niet van",
+            "ik houd niet van",
+            "dat eet ik niet",
+            "dat wil ik niet eten",
+            "dat is niet mijn lievelingseten",
+            "dat is niet mijn favoriete eten",
+            "dat is niet mijn favoriet",
+        )
+
+    def has_fav_food_dislike_phrase(self, transcript: str, turn: dict) -> bool:
+        if not self.is_fav_food_rejection_context(turn):
+            return False
+        text = str(transcript or "").lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if any(self.contains_response_phrase(text, phrase) for phrase in self.fav_food_dislike_phrases()):
+            return True
+        for term in self.normalized_wrong_value_terms(turn):
+            if not term:
+                continue
+            dynamic_phrases = (
+                f"{term} vind ik niet lekker",
+                f"{term} vind ik vies",
+                f"{term} is vies",
+                f"ik lust geen {term}",
+                f"ik hou niet van {term}",
+                f"ik houd niet van {term}",
+            )
+            if any(phrase in text for phrase in dynamic_phrases):
+                return True
+        return False
+
+    def is_hobby_fav_rejection_context(self, turn: dict) -> bool:
+        turn = turn or {}
+        if not self.is_memory_correction_window(turn):
+            return False
+        if turn.get("mistake_field") == "hobby_fav" or turn.get("memory_correction_field") == "hobby_fav":
+            return True
+        fields = (turn.get("topic") or {}).get("fields") or []
+        return "hobby_fav" in fields
+
+    def hobby_fav_rejection_phrases(self) -> tuple[str, ...]:
+        return (
+            "dat is niet mijn favoriete hobby",
+            "dat is niet mijn lievelingshobby",
+            "dat is niet mijn lievelings hobby",
+            "dat is niet mijn allerliefste hobby",
+            "niet mijn favoriete hobby",
+            "niet mijn lievelingshobby",
+            "niet mijn lievelings hobby",
+            "niet mijn allerliefste hobby",
+            "dat is niet mijn favoriet",
+            "dat is niet mijn favoriete",
+            "dat vind ik niet leuk",
+            "ik vind dat niet leuk",
+            "vind ik niet leuk",
+            "daar hou ik niet van",
+            "daar houd ik niet van",
+            "ik hou daar niet van",
+            "ik houd daar niet van",
+            "dat doe ik niet graag",
+            "dat doe ik niet zo graag",
+            "dat is niet wat ik het liefst doe",
+            "dat is niet wat ik leuk vind",
+        )
+
+    def has_hobby_fav_rejection_phrase(self, transcript: str, turn: dict) -> bool:
+        if not self.is_hobby_fav_rejection_context(turn):
+            return False
+        text = str(transcript or "").lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        if any(self.contains_response_phrase(text, phrase) for phrase in self.hobby_fav_rejection_phrases()):
+            return True
+        for term in self.normalized_wrong_value_terms(turn):
+            if not term:
+                continue
+            dynamic_phrases = (
+                f"{term} is niet mijn favoriete hobby",
+                f"{term} is niet mijn lievelingshobby",
+                f"{term} is niet mijn allerliefste hobby",
+                f"{term} is niet mijn favoriet",
+                f"ik vind {term} niet leuk",
+                f"{term} vind ik niet leuk",
+                f"ik hou niet van {term}",
+                f"ik houd niet van {term}",
+                f"ik doe {term} niet graag",
+            )
+            if any(phrase in text for phrase in dynamic_phrases):
+                return True
+        return False
+
+    def is_rejection_without_value(self, result, transcript: str, turn: dict = None) -> bool:
+        text = str(transcript or "").lower()
+        text = re.sub(r"\s+", " ", text).strip(" .,!?;:")
+        has_rejection_words = self.has_hard_memory_no_phrase(transcript)
+        has_doubt_words = self.is_soft_memory_rejection_phrase(transcript)
+        has_food_dislike_words = self.has_fav_food_dislike_phrase(transcript, turn or {})
+        has_hobby_rejection_words = self.has_hobby_fav_rejection_phrase(transcript, turn or {})
+        if self.is_plain_memory_acknowledgement(transcript) or (
+            self.is_confirmation_yes(result, transcript)
+            and not has_rejection_words
+            and not has_doubt_words
+            and not has_food_dislike_words
+            and not has_hobby_rejection_words
+        ):
+            return False
+        if result.intent in ("um_update", "dialogue_update") and not self.meaningful_classifier_value(result.value):
+            return has_rejection_words or has_doubt_words or has_food_dislike_words or has_hobby_rejection_words
+        return (has_rejection_words or has_doubt_words or has_food_dislike_words or has_hobby_rejection_words) and result.intent in (
             "dialogue_answer",
             "dialogue_social",
             "dialogue_none",
             "um_update",
         )
+
+    def is_m1_hobby_wrong_value_acknowledgement(self, result, transcript: str, turn: dict) -> bool:
+        turn = turn or {}
+        if not self.is_memory_correction_window(turn):
+            return False
+        if turn.get("mistake_id") != "M1" or turn.get("mistake_field") != "hobby_fav":
+            return False
+        if turn.get("memory_correction_requested"):
+            return False
+        if not self.d.is_known(turn.get("mistake_wrong")):
+            return False
+        if (
+            self.has_hard_memory_no_phrase(transcript)
+            or self.is_soft_memory_rejection_phrase(transcript)
+            or self.has_hobby_fav_rejection_phrase(transcript, turn)
+        ):
+            return False
+
+        result_value = self.meaningful_classifier_value(getattr(result, "value", None))
+        classifier_repeated_wrong = bool(
+            result_value
+            and getattr(result, "field", None) == "hobby_fav"
+            and self.field_values_match("hobby_fav", result_value, turn.get("mistake_wrong"))
+        )
+        transcript_repeated_wrong = self.transcript_mentions_wrong_value(transcript, turn)
+        if not (classifier_repeated_wrong or transcript_repeated_wrong):
+            return False
+        return True
+
+    def m2_food_should_ask_correction_detail(self, result, transcript: str, turn: dict) -> bool:
+        if not self.is_m2_food_mistake_turn(turn):
+            return False
+        if (turn or {}).get("memory_correction_requested"):
+            return False
+        text = str(transcript or "").strip()
+        if not text:
+            return False
+
+        has_rejection = self.has_hard_memory_no_phrase(text)
+        has_doubt = self.is_soft_memory_rejection_phrase(text)
+        has_food_dislike = self.has_fav_food_dislike_phrase(text, turn)
+        if has_rejection or has_doubt or has_food_dislike:
+            return True
+
+        if self.is_plain_memory_acknowledgement(text) or self.is_confirmation_yes(result, text):
+            return False
+
+        if getattr(result, "intent", "") in (
+            "dialogue_answer",
+            "dialogue_none",
+            "dialogue_social",
+            "um_update",
+            "dialogue_update",
+        ) and not self.meaningful_classifier_value(getattr(result, "value", None)):
+            return True
+        return False
 
     def normalized_wrong_value_terms(self, turn: dict) -> list:
         field = (turn or {}).get("mistake_field") or ""
@@ -2010,14 +2341,29 @@ class ActionHandler:
             "een beetje",
             "niet echt",
             "niet helemaal",
+            "niet bepaald",
+            "niet per se",
+            "nou niet echt",
             "mwah",
             "mwa",
             "meh",
             "volgens mij niet",
             "ik denk het niet",
+            "ik denk van niet",
             "misschien niet",
         }
         if text in soft_exact:
+            return True
+
+        soft_cues = ("mwah", "mwa", "meh", "beetje", "een beetje")
+        negative_cues = ("nee", "niet", "niet echt", "niet helemaal", "niet bepaald", "niet per se")
+        if (
+            any(self.contains_response_phrase(text, cue) for cue in soft_cues)
+            and any(cue in text for cue in negative_cues)
+        ):
+            return True
+
+        if any(phrase in text for phrase in ("niet echt hoor", "niet helemaal hoor", "niet bepaald hoor")):
             return True
 
         soft_phrases = (
@@ -2066,7 +2412,7 @@ class ActionHandler:
     def is_confirmation_yes(self, result, transcript: str) -> bool:
         text = str(transcript or "").strip().lower()
         yes_phrases = (
-            "ja", "jawel", "zeker", "klopt", "dat klopt", "goed",
+            "ja", "jawel", "zeker", "jazeker", "klopt", "dat klopt", "goed",
             "is goed", "dat is goed", "doe dat maar", "alsjeblieft",
             "prima", "ok", "oke", "oké", "mag",
         )
@@ -2074,7 +2420,7 @@ class ActionHandler:
 
     def is_confirmation_no(self, result, transcript: str) -> bool:
         text = str(transcript or "").strip().lower()
-        no_phrases = ("nee", "niet", "klopt niet", "laat maar", "verander niets")
+        no_phrases = self.hard_memory_no_phrases() + ("niet", "laat maar", "verander niets")
         return any(self.contains_response_phrase(text, phrase) for phrase in no_phrases)
 
     def is_mixed_memory_change_confirmation(self, result, transcript: str) -> bool:
@@ -2083,6 +2429,8 @@ class ActionHandler:
         if not text:
             return False
         if self.is_explicit_memory_rejection(text) or self.is_memory_review_not_sure(text):
+            return False
+        if self.has_hard_memory_no_phrase(text):
             return False
         if result.intent in ("um_add", "um_update", "dialogue_update") and self.meaningful_classifier_value(result.value):
             return False
@@ -2287,7 +2635,7 @@ class ActionHandler:
 
         if (
             self.is_confirmation_no(result, transcript)
-            or self.is_rejection_without_value(result, transcript)
+            or self.is_rejection_without_value(result, transcript, turn)
             or self.is_soft_memory_rejection(result, transcript, turn)
         ):
             response = "Oeps. Wil je zeggen wat er niet klopte?"
@@ -2742,7 +3090,7 @@ class ActionHandler:
             )
         if (
             self.is_explicit_memory_rejection(transcript)
-            or self.is_rejection_without_value(result, transcript)
+            or self.is_rejection_without_value(result, transcript, turn)
             or self.is_soft_memory_rejection(result, transcript, turn)
         ):
             response = "Oeps, wie is dan iemand naar wie je opkijkt?"
@@ -3129,8 +3477,11 @@ class ActionHandler:
             "memory_review_group",
             "nudge_interpretation",
         )
+        m2_accepted_wrong_food = self.m2_accepted_wrong_food_change(result, transcript, turn)
         change = (
-            {}
+            m2_accepted_wrong_food
+            if m2_accepted_wrong_food
+            else {}
             if listen_only_locks_memory or soft_memory_rejection or negative_wrong_value_response
             else self.change_from_intent_result(result, turn, transcript)
         )
@@ -3149,6 +3500,17 @@ class ActionHandler:
                     "Child gave too many values for a limited UM correction and did not clarify.",
                     change=change,
                     leo_response=response,
+                )
+
+            if change.get("m2_accept_wrong_food"):
+                written = self.apply_m2_accepted_wrong_food_change(change, turn)
+                return self.action_result(
+                    "m2_food_accept_wrong_value",
+                    True,
+                    "Child accepted M2 wrong food; stored it as the new favourite food.",
+                    change=change,
+                    change_confirmed=True,
+                    write_success=written,
                 )
 
             if change.get("action") == "already_correct":
@@ -3320,7 +3682,7 @@ class ActionHandler:
             ):
                 return self.memory_access_change_action(result, transcript, turn)
         if can_ask_memory_correction and (
-            self.is_rejection_without_value(result, transcript)
+            self.is_rejection_without_value(result, transcript, turn)
             or soft_generic_memory_rejection
             or negative_wrong_value_response
         ):
@@ -3391,6 +3753,21 @@ class ActionHandler:
             )
 
         if mode == "mistake_interpretation":
+            if self.m2_food_should_ask_correction_detail(result, transcript, turn):
+                response = self.mistake_correction_question(turn)
+                correction_field = turn.get("mistake_field", "")
+                self.mark_waiting_for_memory_correction(turn, correction_field, response)
+                if turn.get("mistake_id"):
+                    state = self.d.mistake_states.setdefault(turn["mistake_id"], {"id": turn["mistake_id"]})
+                    state["wrong_value_rejected"] = True
+                self.d.speech.say(response)
+                return self.action_result(
+                    "ask_correction_detail",
+                    True,
+                    "M2 food answer was not a clear acceptance; ask for the correct favourite food.",
+                    leo_response=response,
+                    follow_up_needed=True,
+                )
             return self.action_result(
                 "continue_wrong_value_followup",
                 True,

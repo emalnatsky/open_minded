@@ -11,7 +11,7 @@ The following files contain identifiable participant data and are excluded from 
 | File | Contents |
 |------|----------|
 | `util/test_config.pl` | Participant ID, real names, condition, researcher name |
-| `_local/.env` | OpenAI API credentials |
+| `_local/config/.env` | OpenAI API credentials and local STT backend settings |
 | `_local/session_state.json` | Current session state (refreshed every turn) |
 | `_local/session_config.local.json` | Session settings (refreshed each run) |
 | `_local/conversations/*.json` | Full conversation transcripts |

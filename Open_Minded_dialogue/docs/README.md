@@ -29,7 +29,7 @@ CRI-DIALOGUE2/
 └── README.md
 
 _local/                      # GITIGNORED: do not share
-├── .env                     # OpenAI API key
+├── config/.env              # OpenAI API key and local STT settings
 ├── session_config.local.json
 ├── session_state.json       # Written each turn for the tablet
 └── conversations/           # JSON conversation logs

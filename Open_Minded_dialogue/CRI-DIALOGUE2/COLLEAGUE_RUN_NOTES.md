@@ -32,7 +32,7 @@ to the sibling location:
 Open_Minded_dialogue\CRI-DIALOGUE2\_local
 ```
 
-2. Rename `_local\.example_env` to `_local\.env` and add your own OpenAI API key:
+2. Copy `CRI-DIALOGUE2\.example_env` to `Open_Minded_dialogue\_local\config\.env`, then add your own OpenAI API key and choose exactly one STT preset:
 
 ```env
 OPENAI_API_KEY=your_key_here

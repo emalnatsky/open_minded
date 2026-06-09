@@ -11,16 +11,17 @@ The dialogue uses the OpenAI API for intent classification and for L3 runtime ut
 Copy the example file:
 
 ```bash
-cp _local/.example_env _local/.env
+mkdir -p Open_Minded_dialogue/_local/config
+cp Open_Minded_dialogue/CRI-DIALOGUE2/.example_env Open_Minded_dialogue/_local/config/.env
 ```
 
-Open `_local/.env` and insert your key:
+Open `Open_Minded_dialogue/_local/config/.env` and insert your key:
 
 ```env
 OPENAI_API_KEY=sk-your-key-here
 ```
 
-The `_local/` folder is gitignored. Each researcher maintains their own copy on their laptop.
+The `_local/` folder is gitignored. Each researcher maintains their own copy on their laptop. For microphone sessions, also choose exactly one STT preset in that `.env` file: Mac safe, Windows NVIDIA, or Windows CPU fallback.
 
 ---
 

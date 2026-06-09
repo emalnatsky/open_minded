@@ -1,0 +1,75 @@
+# Open Minded CRI local environment example
+#
+# Copy this file to:
+#   Open_Minded_dialogue/_local/config/.env
+#
+# Never commit the real .env file.
+#
+# Lines starting with # are comments. They are ignored.
+# To activate a setting, remove the # at the start of that line.
+#
+# Choose ONE STT preset below. Do not enable Mac and Windows presets together.
+
+# Required: add your own OpenAI key here.
+OPENAI_API_KEY=sk-your-key-here
+
+
+# ---------------------------------------------------------------------
+# Default STT setup
+# ---------------------------------------------------------------------
+# Auto lets CRI choose a safe backend.
+# On Mac, auto should choose CPU + int8.
+# On Windows with NVIDIA/CUDA, auto may choose CUDA + float16.
+CRI_STT_DEVICE=auto
+CRI_STT_COMPUTE_TYPE=auto
+CRI_STT_MODEL=auto
+CRI_STT_GPU_INDEX=0
+
+
+# ---------------------------------------------------------------------
+# Mac safe setup
+# ---------------------------------------------------------------------
+# Use this if a Mac crashes, feels unstable, or you want fixed Mac settings.
+# Strong Macs can usually try small. If it is too slow, use base.
+#
+# To use this block:
+# 1. Comment out the four auto lines above, or replace them.
+# 2. Remove # from the four lines below.
+#
+# CRI_STT_DEVICE=cpu
+# CRI_STT_COMPUTE_TYPE=int8
+# CRI_STT_MODEL=small
+# CRI_STT_GPU_INDEX=0
+#
+# If small is too slow on Mac, change only this:
+# CRI_STT_MODEL=base
+#
+# Do NOT use mps or metal here.
+# This CRI path uses RealtimeSTT -> faster-whisper -> CTranslate2.
+# That stack is safe here with CPU or NVIDIA CUDA, not Apple MPS/Metal.
+
+
+# ---------------------------------------------------------------------
+# Windows NVIDIA setup
+# ---------------------------------------------------------------------
+# Use this on Windows laptops with an NVIDIA GPU and CUDA-capable PyTorch.
+#
+# To use this block:
+# 1. Comment out the four auto lines above, or replace them.
+# 2. Remove # from the four lines below.
+#
+# CRI_STT_DEVICE=cuda
+# CRI_STT_COMPUTE_TYPE=float16
+# CRI_STT_MODEL=small
+# CRI_STT_GPU_INDEX=0
+
+
+# ---------------------------------------------------------------------
+# Windows CPU fallback
+# ---------------------------------------------------------------------
+# Use this on Windows without NVIDIA/CUDA, or if CUDA is unstable.
+#
+# CRI_STT_DEVICE=cpu
+# CRI_STT_COMPUTE_TYPE=int8
+# CRI_STT_MODEL=base
+# CRI_STT_GPU_INDEX=0

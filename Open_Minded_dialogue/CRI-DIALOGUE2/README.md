@@ -17,10 +17,10 @@ CRI-DIALOGUE2/
 Copy `.example_env` to:
 
 ```text
-CRI-DIALOGUE2/_local/.env
+Open_Minded_dialogue/_local/config/.env
 ```
 
-Then fill in your own OpenAI key:
+Then fill in your own OpenAI key and choose exactly one STT preset for the laptop:
 
 ```env
 OPENAI_API_KEY=your_key_here

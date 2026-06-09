@@ -648,11 +648,7 @@ class ScriptBuilder:
         m4_actual_raw = self.d.known(um, m4_field)
         m4_actual = self.aspiration_later_phrase(m4_actual_raw) or self.d.UNKNOWN_VALUE
         m4_actual_label = self.aspiration_profession_label(m4_actual_raw) or "dat beroep"
-        m4_wrong_raw = m4_plan.get("wrong_value") or self.d.pick_wrong_value(
-            m4_actual_raw or "dierenarts",
-            ["juf", "kok", "architect"],
-        )
-        m4_wrong = self.aspiration_later_phrase(m4_wrong_raw) or "juf worden"
+        m4_wrong = "schooldirecteur worden"
         m4_type = m4_plan.get("type") or "completely-wrong"
         m4_topic = self.d.topic_candidate(
             domain="droom",
@@ -866,7 +862,7 @@ class ScriptBuilder:
             {
                 "phase": 6,
                 "name": "Mistake 1 - hobby_fav",
-                "layer": "L2-slot WRONG + L2-pregen",
+                "layer": "L2-slot WRONG + L2-slot",
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M1",
                 "mistake_type": m1_type,
@@ -890,42 +886,23 @@ class ScriptBuilder:
                         "defer_corrected_response": True,
                     },
                     {
-                        "content_plan": self.d.sequence(
-                            self.d.l1("Dat snap ik trouwens wel."),
-                            self.d.l2_pregen(
-                                "m1_wrong_opener",
-                                f"Iets maken met {m1_wrong} klinkt best indrukwekkend. Wat vind jij daar zo leuk aan?",
-                                [m1_field],
-                            ),
+                        "content_plan": self.d.l2_slot(
+                            "Wat vind jij het leukste aan {wrong_hobby}?",
+                            {"wrong_hobby": m1_wrong},
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",
+                        "memory_correction_available": True,
+                        "memory_correction_field": m1_field,
                         "skip_if_phase_confirmed_change": True,
                         "defer_corrected_response": True,
                     },
                     {
-                        "content_plan": self.d.l2_pregen(
-                            "m1_corrected_followup",
-                            "Wat vind jij het leukste aan {hobby_fav}?",
-                            [m1_field],
-                            require_input_values=True,
-                            branch="corrected",
-                        ),
+                        "content_plan": self.d.l2_slot("Wat vind jij het leukste aan {hobby_fav}?"),
                         "expects_response": True,
                         "response_mode": "listen_only",
                         "run_if_phase_confirmed_change": True,
                         "used_fields": {m1_field: m1_actual},
-                    },
-                    {
-                        "content_plan": self.d.l2_pregen(
-                            "m1_wrong_followup",
-                            f"Wat vind jij het leukste om te {m1_wrong}?",
-                            [m1_field],
-                            branch="not_corrected",
-                        ),
-                        "expects_response": True,
-                        "response_mode": "mistake_interpretation",
-                        "skip_if_phase_confirmed_change": True,
                     },
                 ],
                 "used_fields": {m1_field: m1_wrong},
@@ -974,29 +951,10 @@ class ScriptBuilder:
                         "defer_corrected_response": True,
                     },
                     {
-                        "content_plan": self.d.sequence(
-                            self.d.l1("Dat is op zich wel een lekkere keuze."),
-                            self.d.l2_pregen(
-                                "m2_wrong_followup",
-                                f"Wat vind jij daar eigenlijk zo lekker aan?",
-                                [m2_field],
-                                branch="not_corrected",
-                            ),
+                        "content_plan": self.d.l2_slot(
+                            "{fav_food}. Dat is op zich wel een sterke keuze. Wat vind jij daar eigenlijk zo lekker aan?"
                         ),
                         "expects_response": True,
-                        "response_mode": "mistake_interpretation",
-                        "skip_if_phase_confirmed_change": True,
-                        "defer_corrected_response": True,
-                    },
-                    {
-                        "content_plan": self.d.l2_pregen(
-                            "m2_corrected_followup",
-                            "Dan houden we het bij {fav_food}. Dat klinkt eerlijk gezegd veel meer als lievelingseten dan broccoli, haha.",
-                            [m2_field],
-                            require_input_values=True,
-                            branch="corrected",
-                        ),
-                        "expects_response": False,
                         "response_mode": "listen_only",
                         "run_if_phase_confirmed_change": True,
                         "used_fields": {m2_field: m2_actual},
@@ -1343,11 +1301,8 @@ class ScriptBuilder:
                         "expects_response": False,
                     },
                     {
-                        "content_plan": self.d.l2_pregen(
-                            "p3_m4_followup_wrong_aspiration",
-                            f"En volgens mij wil jij later {m4_wrong}.",
-                            [m4_field, "interest", "fav_subject", "school_strength"],
-                            branch="not_corrected",
+                        "content_plan": self.d.l1(
+                            "En volgens mij wil jij later schooldirecteur worden? Klopt dat?"
                         ),
                         "expects_response": True,
                         "response_mode": "mistake_interpretation",

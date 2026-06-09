@@ -72,7 +72,7 @@ Then restart the dialogue.
 
 ### Authentication errors
 
-- Confirm `_local/.env` exists and contains `OPENAI_API_KEY`
+- Confirm `Open_Minded_dialogue/_local/config/.env` exists and contains `OPENAI_API_KEY`
 - Confirm the key has no extra whitespace or quotes around it
 - Confirm the laptop has internet connectivity
 - Test the key independently:

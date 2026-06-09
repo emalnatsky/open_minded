@@ -628,8 +628,8 @@ class CRI_ScriptedDialogue(SICApplication):
     def change_from_intent_result(self, result, turn, transcript):
         return self.actions.change_from_intent_result(result, turn, transcript)
 
-    def is_rejection_without_value(self, result, transcript):
-        return self.actions.is_rejection_without_value(result, transcript)
+    def is_rejection_without_value(self, result, transcript, turn=None):
+        return self.actions.is_rejection_without_value(result, transcript, turn)
 
     def is_confirmation_yes(self, result, transcript):
         return self.actions.is_confirmation_yes(result, transcript)

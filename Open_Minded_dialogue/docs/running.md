@@ -9,7 +9,7 @@ This document describes the terminal-by-terminal launch sequence, the operator c
 Before starting the launch sequence, confirm:
 
 - `util/test_config.pl` is updated with the current participant's ID, names, and condition
-- `_local/.env` contains a valid `OPENAI_API_KEY`
+- `Open_Minded_dialogue/_local/config/.env` contains a valid `OPENAI_API_KEY` and the correct STT preset for the laptop
 - GraphDB is running and the correct TTL dataset is loaded
 - NAO, laptop, and tablet are all on the same router network
 - The DJI microphone receiver is plugged in and selected as the system input
