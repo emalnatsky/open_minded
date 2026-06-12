@@ -1,4 +1,6 @@
 import os
+import contextlib
+import io
 import time
 import json
 import random
@@ -8,41 +10,67 @@ import logging
 import platform
 import re
 import socket
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
+from terminal_output import (
+    LoadingStatus,
+    env_flag,
+    install_warning_line_clear_filter,
+    terminal_log_level,
+)
 from dotenv import load_dotenv
-from sic_framework.core import sic_logging
-from sic_framework.core.sic_application import SICApplication
+from audio_devices import (
+    AudioDeviceError,
+    describe_selected_input_device,
+    parse_optional_mic_index,
+)
+
+_sic_import_context = (
+    contextlib.nullcontext()
+    if env_flag("CRI_VERBOSE_LOGS", False)
+    else contextlib.redirect_stdout(io.StringIO())
+)
+with _sic_import_context:
+    from sic_framework.core import sic_logging
+    from sic_framework.core.sic_application import SICApplication
+    from sic_framework.devices import Nao
+    from sic_framework.devices.common_naoqi.naoqi_autonomous import (
+        NaoBlinkingRequest,
+        NaoWakeUpRequest,
+        NaoRestRequest,
+        NaoSetAutonomousLifeRequest,
+    )
+    from sic_framework.devices.common_naoqi.naoqi_motion import (
+        NaoqiAnimationRequest,
+    )
+    from sic_framework.services.llm import GPT, GPTConf, GPTRequest
 
 import config
 from speech_io import SpeechIO
 from session_setup import SessionSetup
 from tablet_state import TabletStateWriter
+from nao_discovery import (
+    NAODiscoveryError,
+    NAODiscoveryResult,
+    NAOQI_PORT,
+    discover_nao_ip_from_env,
+    tcp_port_open,
+)
 from cri_logger import ConversationLogger, ResumeHelper
 from cri_um import UMClient
 from cri_memory import MemoryAccess
 from cri_actions import ActionHandler, NudgeManager
 from cri_script import ContentPlan, Segments, ScriptBuilder
 
-from sic_framework.devices import Nao
-from sic_framework.devices.common_naoqi.naoqi_autonomous import (
-    NaoBlinkingRequest,
-    NaoWakeUpRequest,
-    NaoRestRequest,
-    NaoSetAutonomousLifeRequest,
-)
-from sic_framework.devices.common_naoqi.naoqi_motion import (
-    NaoqiAnimationRequest,
-)
 # RealtimeSTT replaces SIC Whisper; recorder lives inside SpeechIO.
 # from sic_framework.services.openai_whisper_stt.whisper_stt import (
 #     SICWhisper,
 #     WhisperConf,
 # )
-from sic_framework.services.llm import GPT, GPTConf, GPTRequest
 from openai import OpenAI
 
 # Path setup
@@ -372,10 +400,18 @@ class CRI_ScriptedDialogue(SICApplication):
             enabled=True,
         )
 
-        self.set_log_level(sic_logging.INFO)
+        install_warning_line_clear_filter()
+        self.stt_mic_index = None
+        self.stt_mic_description = ""
+        self.terminal_log_level = terminal_log_level()
+        self.set_log_level(self.terminal_log_level)
+        logging.getLogger().setLevel(self.terminal_log_level)
+        self.print_cri_dialogue_banner()
         self.configure_session_interface()
         self.configure_run_mode()
-        self.setup()
+        with LoadingStatus("Loading", enabled=not env_flag("CRI_DISABLE_LOADING_STATUS", False)):
+            self.setup()
+        self.print_compact_ready_status()
 
     def normalize_network_host(self, value):
         clean = str(value or "").strip()
@@ -396,6 +432,62 @@ class CRI_ScriptedDialogue(SICApplication):
             return ""
         finally:
             sock.close()
+
+    def preferred_lan_ip(self):
+        if self.nao_ip:
+            route_ip = self.local_ip_for_target(self.nao_ip)
+            if route_ip and not route_ip.startswith(("127.", "169.254.")):
+                return route_ip
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.connect(("8.8.8.8", 80))
+                ip = sock.getsockname()[0]
+                if ip and not ip.startswith(("127.", "169.254.")):
+                    return ip
+            finally:
+                sock.close()
+        except OSError:
+            pass
+
+        try:
+            candidates = socket.gethostbyname_ex(socket.gethostname())[2]
+        except OSError:
+            candidates = []
+        for ip in candidates:
+            if ip and not ip.startswith(("127.", "169.254.")):
+                return ip
+        return ""
+
+    def tablet_url_for_terminal(self):
+        ip = self.preferred_lan_ip()
+        if not ip:
+            return "http://<YOUR_LAPTOP_IP>:8080"
+        return f"http://{ip}:8080"
+
+    def print_cri_dialogue_banner(self):
+        print("=" * 72)
+        print("CRI Dialogue")
+        print("=" * 72)
+        print()
+
+    def print_compact_ready_status(self):
+        nao_connected = bool(self.CONNECT_NAO and self.nao is not None)
+        if nao_connected:
+            print(f"\nNAO status: connected at {self.nao_ip}")
+        else:
+            print("\nNAO status: disconnected")
+        if self.use_microphone_input() and not self.simulation_mode:
+            mic_description = self.stt_mic_description or "system default"
+            print(f"Microphone: {mic_description}")
+        condition = self.session_setup.normalize_condition_value(
+            self.local_condition,
+            default=self.CONDITION_CONTROL,
+        )
+        if condition == self.CONDITION_EXPERIMENT:
+            print(f"Experimental condition URL: {self.tablet_url_for_terminal()}")
+        print()
+        input("Press Enter to continue...")
 
     def configure_sic_db_ip_for_nao(self):
         target_ip = self.normalize_network_host(self.nao_ip)
@@ -421,6 +513,95 @@ class CRI_ScriptedDialogue(SICApplication):
             )
         else:
             self.logger.info("SIC Redis DB_IP already set to %s.", local_ip)
+
+    def resolve_nao_ip_for_connection(self):
+        configured_ip = self.normalize_network_host(self.nao_ip)
+        while True:
+            try:
+                result = discover_nao_ip_from_env(configured_ip)
+                break
+            except NAODiscoveryError as e:
+                result = self.prompt_for_nao_ip_after_discovery_failure(configured_ip, e)
+                if result is not None:
+                    break
+
+        self.nao_ip = result.selected_ip
+        local_ip = self.local_ip_for_target(self.nao_ip)
+        if env_flag("CRI_SHOW_NAO_NETWORK_CHECK", False):
+            print("\n========================================================================")
+            print("NAO NETWORK CHECK")
+            print("========================================================================")
+            print(f"Configured NAO IP: {result.configured_ip or '(none)'}")
+            if result.used_configured:
+                source = "configured" if result.selected_ip == result.configured_ip else "manual"
+                print(f"Using NAO IP:      {self.nao_ip}  ({source})")
+            else:
+                print(f"Using NAO IP:      {self.nao_ip}  (auto-discovered)")
+            if result.scanned_networks:
+                print("Scanned networks:  " + ", ".join(result.scanned_networks))
+            print(f"Laptop route IP:   {local_ip or '(unknown)'}")
+            print("========================================================================\n")
+        return self.nao_ip
+
+    def print_nao_discovery_failure(self, configured_ip, error):
+        LoadingStatus.clear_active()
+        print("\n========================================================================")
+        print("NAO NETWORK CHECK FAILED")
+        print("========================================================================")
+        print(f"Configured NAO IP: {configured_ip or '(none)'}")
+        if getattr(error, "scanned_networks", None):
+            print("Scanned local networks:")
+            for network in error.scanned_networks:
+                print(f"  - {network}")
+        if getattr(error, "candidates", None):
+            print("Possible NAO IPs found:")
+            for candidate in error.candidates:
+                print(f"  - {candidate}")
+        else:
+            print("No reachable NAO was found on the local networks.")
+            print("Check that the laptop and NAO are on the same network.")
+        print("========================================================================\n")
+
+    def prompt_for_nao_ip_after_discovery_failure(self, configured_ip, error):
+        self.print_nao_discovery_failure(configured_ip, error)
+        if not getattr(sys.stdin, "isatty", lambda: False)():
+            raise RuntimeError(
+                f"{error} In a non-interactive run, set CRI_NAO_IP or update test_config.pl."
+            ) from error
+
+        while True:
+            try:
+                manual = input(
+                    "NAO was not found automatically.\n"
+                    "Enter NAO IP manually, press Enter to retry, or type Q to quit: "
+                ).strip()
+            except (EOFError, KeyboardInterrupt) as exc:
+                raise RuntimeError("NAO IP entry was cancelled.") from exc
+
+            if not manual:
+                print("Retrying NAO auto-discovery...\n")
+                return None
+            if manual.lower() in {"q", "quit", "exit"}:
+                raise RuntimeError("NAO startup cancelled by researcher.")
+
+            manual_ip = self.normalize_network_host(manual)
+            if not manual_ip:
+                print("Please enter a valid NAO IP address, for example 192.168.1.4.\n")
+                continue
+
+            if tcp_port_open(manual_ip, NAOQI_PORT, timeout=1.5):
+                print(f"Using manual NAO IP for this session: {manual_ip}\n")
+                return NAODiscoveryResult(
+                    selected_ip=manual_ip,
+                    configured_ip=configured_ip,
+                    candidates=(manual_ip,),
+                    scanned_networks=getattr(error, "scanned_networks", ()),
+                    used_configured=True,
+                    auto_discovery_enabled=True,
+                )
+
+            print(f"Could not reach a NAO at {manual_ip} on port {NAOQI_PORT}.")
+            print("Check that NAO is on the same network, then try again.\n")
 
     # Setup
 
@@ -590,6 +771,26 @@ class CRI_ScriptedDialogue(SICApplication):
 
     def classify_with_repeat(self, transcript, turn_context=None):
         return self.actions.classify_with_repeat(transcript, turn_context)
+
+    def show_child_processing_loading(self) -> bool:
+        return (
+            not env_flag("CRI_DISABLE_LOADING_STATUS", False)
+            and self.use_microphone_input()
+            and not self.simulation_mode
+        )
+
+    def child_processing_loading(self):
+        return LoadingStatus("Loading", enabled=self.show_child_processing_loading())
+
+    def classify_child_response_with_loading(self, transcript, turn_context=None, delay: float = 0.0):
+        with self.child_processing_loading():
+            if delay:
+                time.sleep(delay)
+            return self.classify_with_repeat(transcript, turn_context)
+
+    def classify_yes_no_with_loading(self, transcript: str) -> str:
+        with self.child_processing_loading():
+            return self.classify_yes_no(transcript)
 
     def llm_response(self, child_input, turn=None):
         return self.actions.llm_response(child_input, turn)
@@ -1102,6 +1303,7 @@ class CRI_ScriptedDialogue(SICApplication):
 
         # NAO
         if self.CONNECT_NAO:
+            self.resolve_nao_ip_for_connection()
             self.configure_sic_db_ip_for_nao()
             self.logger.info("Connecting to NAO at %s...", self.nao_ip)
             self.nao = Nao(ip=self.nao_ip)
@@ -1116,6 +1318,8 @@ class CRI_ScriptedDialogue(SICApplication):
             stt_gpu_index = int(raw_gpu_index)
         except ValueError:
             raise RuntimeError(f"Invalid CRI_STT_GPU_INDEX value: {raw_gpu_index!r}")
+        stt_mic_index = None
+        self.stt_mic_index = stt_mic_index
 
         if self.use_keyboard_input():
             self.logger.info("Skipping STT setup because keyboard child input is enabled.")
@@ -1127,7 +1331,20 @@ class CRI_ScriptedDialogue(SICApplication):
                 note="STT disabled for keyboard input.",
             )
         else:
-            self.logger.info("RealtimeSTT will use the system/default microphone.")
+            raw_mic_index = os.environ.get("CRI_STT_MIC_INDEX", "")
+            try:
+                stt_mic_index = parse_optional_mic_index(raw_mic_index)
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+            self.stt_mic_index = stt_mic_index
+            try:
+                self.stt_mic_description = describe_selected_input_device(stt_mic_index)
+            except AudioDeviceError as exc:
+                raise RuntimeError(str(exc)) from exc
+            if stt_mic_index is None:
+                self.logger.info("RealtimeSTT will use the system/default microphone.")
+            else:
+                self.logger.info("RealtimeSTT will use explicit microphone index %s.", stt_mic_index)
             stt_backend = resolve_realtimestt_backend(
                 requested_device=stt_device,
                 requested_compute_type=stt_compute_type,
@@ -1182,6 +1399,7 @@ class CRI_ScriptedDialogue(SICApplication):
             stt_device=stt_backend.device,
             stt_compute_type=stt_backend.compute_type,
             stt_gpu_device_index=stt_backend.gpu_device_index,
+            stt_mic_index=stt_mic_index,
             pronunciation_overrides_path="tts_pronunciation.json",
         )
         self.speech.warm_up_stt()
@@ -2820,6 +3038,8 @@ class CRI_ScriptedDialogue(SICApplication):
         """Print raw UM and CRI scenario retrieval before interaction starts."""
         if not self.WAIT_FOR_PREVIEW_CONFIRMATION:
             return
+        if not env_flag("CRI_SHOW_STARTUP_OVERVIEW", False):
+            return
 
         print("\n" + "=" * 72)
         print("CRI 4.0 PRE-START CHECK")
@@ -2975,9 +3195,10 @@ class CRI_ScriptedDialogue(SICApplication):
         self.current_turn_context = change_context
 
         transcript = self.speech.listen_with_review()
-        result = self.classify_with_repeat(transcript, change_context)
-        change_action = self.action_handler(result, transcript, change_context)
-        self.log_action_handler_result(change_action)
+        with self.child_processing_loading():
+            result = self.classify_with_repeat(transcript, change_context)
+            change_action = self.action_handler(result, transcript, change_context)
+            self.log_action_handler_result(change_action)
         self.current_turn_context = source_turn
 
         if not change_action.get("handled"):
@@ -3020,9 +3241,10 @@ class CRI_ScriptedDialogue(SICApplication):
             change_context = self.memory_access_change_context(action, source_turn)
             self.current_turn_context = change_context
             transcript = self.speech.listen_with_review()
-            result = self.classify_with_repeat(transcript, change_context)
-            change_action = self.action_handler(result, transcript, change_context)
-            self.log_action_handler_result(change_action)
+            with self.child_processing_loading():
+                result = self.classify_with_repeat(transcript, change_context)
+                change_action = self.action_handler(result, transcript, change_context)
+                self.log_action_handler_result(change_action)
             self.current_turn_context = source_turn
 
             if change_action.get("change_confirmed") and change_action.get("change"):
@@ -3066,7 +3288,7 @@ class CRI_ScriptedDialogue(SICApplication):
         for attempt in range(max_tries):
             self.speech.say(question)
             transcript = self.speech.listen_with_review()
-            verdict = self.classify_yes_no(transcript)
+            verdict = self.classify_yes_no_with_loading(transcript)
             self.log_conversation_event(
                 "memory_access_yes_no",
                 question=question,
@@ -3424,11 +3646,11 @@ class CRI_ScriptedDialogue(SICApplication):
         while not (shutdown_event and shutdown_event.is_set()):
             time.sleep(0.5)
             transcript = self.speech.listen_with_review()
-            time.sleep(0.8)
-
-            result = self.classify_with_repeat(transcript, context)
-            action = self.action_handler(result, transcript, context)
-            self.log_action_handler_result(action)
+            with self.child_processing_loading():
+                time.sleep(0.8)
+                result = self.classify_with_repeat(transcript, context)
+                action = self.action_handler(result, transcript, context)
+                self.log_action_handler_result(action)
 
             if self.is_memory_access_action(action):
                 memory_action = self.memory_access_interrupt_control(action)
@@ -3502,12 +3724,13 @@ class CRI_ScriptedDialogue(SICApplication):
     def run(self):
         self.logger.info("Starting CRI 4.0 early interaction flow.")
 
-        script = self.build_script()
-        if not self.resume_from_log_path:
-            self.memory_fields_mentioned_so_far = set()
-            self.memory_review_requested = False
-        self.logger.info("Script ready - %d phases.", len(script))
-        self.start_conversation_log(script)
+        with LoadingStatus("Loading", enabled=not env_flag("CRI_DISABLE_LOADING_STATUS", False)):
+            script = self.build_script()
+            if not self.resume_from_log_path:
+                self.memory_fields_mentioned_so_far = set()
+                self.memory_review_requested = False
+            self.logger.info("Script ready - %d phases.", len(script))
+            self.start_conversation_log(script)
         self.print_prestart_preview(script)
         self.print_resume_context_before_interaction()
 

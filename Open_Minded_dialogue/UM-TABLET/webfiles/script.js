@@ -668,7 +668,10 @@ document.querySelectorAll(".back-btn").forEach(btn => {
 // Socket.IO — CRITICAL HANDLER, DO NOT CHANGE
 // =====================================================================
 try {
-  window.socket = io({ transports: ["websocket", "polling"] });
+  window.socket = io(window.location.origin, {
+    transports: ["polling", "websocket"],
+    path: "/socket.io",
+  });
 
   window.socket.on("connect",        () => setConn("connected", "Verbonden ✓"));
   window.socket.on("disconnect",     () => setConn("error", "Verbinding verbroken"));

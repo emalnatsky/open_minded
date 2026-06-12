@@ -153,18 +153,25 @@ class ScriptBuilder:
                 },
             },
             {
-                "content_plan": self.d.l1(
-                    "Vind jij dat ook, of zie ik dat een beetje robot-raar?"
+                "content_plan": self.d.l2_slot(
+                    "Wat vind jij zo leuk aan {fav_subject}?",
+                    {"fav_subject": fav_subject},
                 ),
                 "expects_response": True,
-                "response_mode": "listen_only",
-                "used_fields": {},
-            },
-            {
-                "content_plan": self.d.l1(
-                    "Dat snap ik. Ik vind het altijd leuk als dingen een beetje bij elkaar passen."
-                ),
-                "expects_response": False,
+                "response_mode": "acknowledge",
+                "llm_turn": True,
+                "used_fields": {"fav_subject": fav_subject},
+                "l3": {
+                    "script_phase": "part2_correct_fav_subject_connection",
+                    "topic": "school",
+                    "response_function": "wrap_up",
+                    "question_allowed": False,
+                    "relevant_um_fields": ["fav_subject"],
+                    "local_context": (
+                        "Leo asked what the child likes about their favourite school subject."
+                    ),
+                    "fallback": "O, dat kan ik begrijpen.",
+                },
             },
         ]
 
@@ -520,6 +527,31 @@ class ScriptBuilder:
                     "school_strength": self.d.known(um, "school_strength"),
                     "school_difficulty": difficulty_phrase["school_difficulty"],
                     "aspiration": actual,
+                },
+            },
+            {
+                # Warm acknowledgement after the child explains why they want to be X.
+                # LLM generates a short enthusiastic reaction; "Leuk!" is the fallback.
+                "content_plan": self.d.l1("Leuk!"),
+                "expects_response": False,
+                "response_mode": "acknowledge",
+                "llm_turn": True,
+                "run_if_phase_confirmed_change": True,
+                "condition_phase": condition_phase,
+                "used_fields": {"aspiration": actual},
+                "l3": {
+                    "script_phase": "part3_aspiration_reflection_ack",
+                    "topic": "aspiration",
+                    "response_function": "wrap_up",
+                    "question_allowed": False,
+                    "relevant_um_fields": ["aspiration"],
+                    "local_context": (
+                        "The child just explained why they want to become "
+                        f"{actual_label} in the future. "
+                        "React warmly and enthusiastically in one short sentence. "
+                        "Do not ask a question."
+                    ),
+                    "fallback": "Leuk!",
                 },
             },
         ]
@@ -891,11 +923,11 @@ class ScriptBuilder:
                             {"wrong_hobby": m1_wrong},
                         ),
                         "expects_response": True,
-                        "response_mode": "mistake_interpretation",
+                        "response_mode": "listen_only",
                         "memory_correction_available": True,
                         "memory_correction_field": m1_field,
                         "skip_if_phase_confirmed_change": True,
-                        "defer_corrected_response": True,
+                        "defer_corrected_response": {m1_field: m1_wrong},
                     },
                     {
                         "content_plan": self.d.l2_slot("Wat vind jij het leukste aan {hobby_fav}?"),
@@ -924,7 +956,7 @@ class ScriptBuilder:
             {
                 "phase": 8,
                 "name": "Mistake 2 - fav_food",
-                "layer": "L1 + L2-slot WRONG + L2-pregen",
+                "layer": "L1 + L2-slot WRONG + L2-pregen + L3",
                 "dialogue_case": self.d.CASE_MIXED_SEQUENCE,
                 "mistake_id": "M2",
                 "mistake_type": m2_type,
@@ -956,8 +988,20 @@ class ScriptBuilder:
                         ),
                         "expects_response": True,
                         "response_mode": "listen_only",
+                        "llm_turn": True,
                         "run_if_phase_confirmed_change": True,
                         "used_fields": {m2_field: m2_actual},
+                        "l3": {
+                            "script_phase": "part1_mistake2",
+                            "topic": "food",
+                            "response_function": "wrap_up",
+                            "question_allowed": False,
+                            "relevant_um_fields": [m2_field],
+                            "local_context": (
+                                "Leo asked what the child likes about their favourite food."
+                            ),
+                            "fallback": "O, dat snap ik wel!",
+                        },
                     },
                 ],
                 "used_fields": {m2_field: m2_wrong},
@@ -1366,8 +1410,8 @@ class ScriptBuilder:
                     {
                         "content_plan": self.d.l1(
                             (
-                                "Goed. Dan kunnen we samen kijken naar wat ik over jou onthoud. "
-                                "Kijk maar op de tablet. Daar staat mijn geheugenboek over jou."
+                                "Neem de tablet maar. Je kan nu zien dat alle hoofdstukken "
+                                "waar we over hebben gepraat in mijn geheugenboek over jou open zijn."
                             )
                             if tutorial_condition == self.d.CONDITION_EXPERIMENT
                             else "Goed. Dan vertel ik je wat ik tot nu toe over jou heb onthouden."
@@ -1408,13 +1452,13 @@ class ScriptBuilder:
                         ),
                         "used_fields": {},
                     },
-                    {
-                        "content_plan": self.d.l1(
-                            "Dat is ook goed."
-                        ),
-                        "expects_response": False,
-                        "condition": "run_if_memory_review_requested",
-                    },
+                    # {
+                    #     "content_plan": self.d.l1(
+                    #         "Dat is ook goed."
+                    #     ),
+                    #     "expects_response": False,
+                    #     "condition": "run_if_memory_review_requested",
+                    # },
                 ],
                 "used_fields": {},
                 "example_child": "Ja, dat klopt.",

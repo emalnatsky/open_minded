@@ -1,5 +1,8 @@
 import importlib.util
+import io
+import ipaddress
 import json
+import logging
 import os
 import queue
 import shutil
@@ -25,9 +28,11 @@ SHARED_LAUNCHER_PATH = OUTER_DIR / "launchers" / "run_cri_dialogue2.py"
 def load_cri_module():
     module_names = (
         "config",
+        "audio_devices",
         "speech_io",
         "session_setup",
         "tablet_state",
+        "nao_discovery",
         "cri_logger",
         "cri_um",
         "cri_memory",
@@ -54,6 +59,7 @@ def load_xlsx_scenario_converter():
 
 
 cri_module = load_cri_module()
+nao_discovery = sys.modules["nao_discovery"]
 CRI = cri_module.CRI_ScriptedDialogue
 IntentResult = cri_module.IntentResult
 
@@ -458,6 +464,243 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(selected["name"], "Mila")
         self.assertEqual(selected["exposure"], "new")
         self.assertEqual(app.session_condition_from_um("1002"), "E")
+
+    def test_compact_pl_session_setup_uses_defaults_when_enter_is_pressed(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_session_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        app.SESSION_CONFIG_PATH = str(Path(temp_dir) / "session_config.local.json")
+        app.session_setup.load_pl_config = lambda: {
+            "child_id": "test_boy_1",
+            "first_name_cri": "Ivo",
+            "first_name_tablet": "Ivo",
+            "operator_name": "Sander",
+            "condition": "E",
+            "nao_ip": "10.0.0.5",
+            "stt_timeout": None,
+            "stt_phrase_limit": None,
+            "review_transcripts": False,
+        }
+        app.session_setup.check_child_in_um_api = lambda child_id: None
+
+        with patch("builtins.input", side_effect=["", "", "", "", ""]) as input_mock:
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                app.session_setup._run_new_session_interface_roster_legacy()
+
+        self.assertEqual(app.CHILD_ID, "test_boy_1")
+        self.assertEqual(app.local_child_name_cri, "Ivo")
+        self.assertEqual(app.local_child_name_tablet, "Ivo")
+        self.assertEqual(app.researcher_name, "Sander")
+        self.assertEqual(app.local_condition, "E")
+        self.assertEqual(app.start_phase_index, 0)
+        self.assertEqual(input_mock.call_args_list[4].args[0], "Start at phase [1.1/1]: ")
+        self.assertNotIn("CRI SESSION SETUP", stdout.getvalue())
+        self.assertNotIn("Child ID:      test_boy_1", stdout.getvalue())
+
+    def test_compact_pl_session_setup_allows_overrides(self):
+        app = make_app()
+        app.USE_FAKE_PERSONA_UM = False
+        temp_dir = tempfile.mkdtemp(prefix="cri_dialogue2_session_test_")
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        app.SESSION_CONFIG_PATH = str(Path(temp_dir) / "session_config.local.json")
+        app.session_setup.load_pl_config = lambda: {
+            "child_id": "test_boy_1",
+            "first_name_cri": "Ivo",
+            "first_name_tablet": "Ivo",
+            "operator_name": "Sander",
+            "condition": "E",
+            "nao_ip": "",
+            "stt_timeout": None,
+            "stt_phrase_limit": None,
+            "review_transcripts": False,
+        }
+        app.session_setup.check_child_in_um_api = lambda child_id: None
+
+        with patch("builtins.input", side_effect=["child_2", "Eva", "Lena", "C", "2.1"]):
+            app.session_setup._run_new_session_interface_roster_legacy()
+
+        self.assertEqual(app.CHILD_ID, "child_2")
+        self.assertEqual(app.local_child_name_cri, "Eva")
+        self.assertEqual(app.local_child_name_tablet, "Eva")
+        self.assertEqual(app.researcher_name, "Lena")
+        self.assertEqual(app.local_condition, "C")
+        self.assertEqual(app.start_phase_index, app.session_setup.script_phase_id_map()["2.1"])
+
+    def test_configure_session_interface_defaults_to_new_without_mode_prompt(self):
+        app = make_app()
+        called = []
+        app.session_setup.run_new_session_interface = lambda: called.append("new")
+
+        with patch.dict(os.environ, {"CRI_SESSION_MODE": "", "CRI_RESUME_LOG_PATH": ""}):
+            with patch("builtins.input") as input_mock:
+                app.session_setup.configure_session_interface()
+
+        self.assertEqual(called, ["new"])
+        input_mock.assert_not_called()
+
+    def test_configure_run_mode_uses_default_without_prompt(self):
+        app = make_app()
+        app.child_input_mode = "microphone"
+
+        with patch.dict(os.environ, {"CRI_CHILD_INPUT_MODE": "", "CRI_SIMULATION_MODE": "", "CRI_PROMPT_CHILD_INPUT_MODE": ""}):
+            with patch("builtins.input") as input_mock:
+                app.session_setup.configure_run_mode()
+
+        self.assertEqual(app.child_input_mode, "microphone")
+        input_mock.assert_not_called()
+
+    def test_loading_status_clears_before_warning_and_continues(self):
+        terminal_output = sys.modules["terminal_output"]
+        stream = io.StringIO()
+        logger = logging.getLogger("cri_loading_test")
+        old_level = logger.level
+        old_propagate = logger.propagate
+        old_handlers = list(logger.handlers)
+        logger.setLevel(logging.WARNING)
+        logger.propagate = False
+        logger.addHandler(logging.NullHandler())
+
+        try:
+            terminal_output.install_warning_line_clear_filter()
+            with terminal_output.LoadingStatus("Loading", stream=stream) as status:
+                time.sleep(0.15)
+                logger.warning("warning should clear loading line")
+                self.assertFalse(status._stopped)
+                time.sleep(0.45)
+        finally:
+            logger.handlers[:] = old_handlers
+            logger.setLevel(old_level)
+            logger.propagate = old_propagate
+
+        output = stream.getvalue()
+        self.assertIn("\r", output)
+        self.assertGreaterEqual(output.count("Loading..."), 2)
+
+    def test_loading_status_prints_label_and_keeps_final_time(self):
+        terminal_output = sys.modules["terminal_output"]
+        stream = io.StringIO()
+
+        with terminal_output.LoadingStatus("Loading", stream=stream):
+            time.sleep(0.45)
+
+        output = stream.getvalue()
+        self.assertIn("Loading...", output)
+        self.assertRegex(output, r"\d\d:\d\d")
+        self.assertNotRegex(output, r"Loading\.{1,2}\s+\d\d:\d\d")
+        self.assertIn("\r", output)
+        self.assertIn(" " * 20, output)
+        self.assertIn("\nLoading...", output)
+        self.assertTrue(output.endswith("\n\n"))
+
+    def test_cri_dialogue_banner_has_blank_line_afterwards(self):
+        app = make_app()
+
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            app.print_cri_dialogue_banner()
+
+        self.assertTrue(stdout.getvalue().endswith("=" * 72 + "\n\n"))
+
+    def test_child_processing_loading_only_shows_for_microphone_mode(self):
+        app = make_app()
+        app.child_input_mode = "microphone"
+        app.simulation_mode = False
+
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            with app.child_processing_loading():
+                time.sleep(0.45)
+
+        self.assertIn("Loading...", stdout.getvalue())
+
+        app.child_input_mode = "keyboard"
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            with app.child_processing_loading():
+                time.sleep(0.45)
+
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_prestart_overview_is_hidden_unless_debug_env_is_enabled(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+
+        with patch.dict(os.environ, {"CRI_SHOW_STARTUP_OVERVIEW": ""}):
+            with patch("builtins.input") as input_mock:
+                with patch("sys.stdout", new=io.StringIO()) as stdout:
+                    app.print_prestart_preview([])
+
+        self.assertEqual(stdout.getvalue(), "")
+        input_mock.assert_not_called()
+
+        with patch.dict(os.environ, {"CRI_SHOW_STARTUP_OVERVIEW": "true"}):
+            with patch("builtins.input", return_value=""):
+                with patch("sys.stdout", new=io.StringIO()) as stdout:
+                    app.print_prestart_preview([])
+
+        self.assertIn("CRI 4.0 PRE-START CHECK", stdout.getvalue())
+        self.assertIn("DB RETRIEVAL OVERVIEW", stdout.getvalue())
+
+    def test_compact_ready_status_shows_nao_and_experiment_tablet_url(self):
+        app = make_app()
+        app.CONNECT_NAO = True
+        app.nao = object()
+        app.nao_ip = "192.168.1.4"
+        app.local_condition = "E"
+        app.preferred_lan_ip = lambda: "192.168.1.3"
+
+        with patch("builtins.input", return_value="") as input_mock:
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                app.print_compact_ready_status()
+
+        output = stdout.getvalue()
+        self.assertIn("NAO status: connected at 192.168.1.4", output)
+        self.assertIn("Experimental condition URL: http://192.168.1.3:8080", output)
+        self.assertTrue(output.endswith("\n\n"))
+        self.assertEqual(input_mock.call_args.args[0], "Press Enter to continue...")
+
+        app.local_condition = "C"
+        app.nao = None
+        with patch("builtins.input", return_value=""):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                app.print_compact_ready_status()
+
+        output = stdout.getvalue()
+        self.assertIn("NAO status: disconnected", output)
+        self.assertNotIn("Experimental condition URL", output)
+
+    def test_cri_dialogue_banner_prints_once(self):
+        app = make_app()
+
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            app.print_cri_dialogue_banner()
+
+        self.assertEqual(
+            stdout.getvalue(),
+            ("=" * 72) + "\nCRI Dialogue\n" + ("=" * 72) + "\n\n",
+        )
+
+    def test_compact_ready_status_shows_microphone_when_using_stt(self):
+        app = make_app()
+        app.CONNECT_NAO = False
+        app.nao = None
+        app.local_condition = "C"
+        app.child_input_mode = "microphone"
+        app.simulation_mode = False
+        app.stt_mic_description = "system default - Test Mic (index 2)"
+
+        with patch("builtins.input", return_value=""):
+            with patch("sys.stdout", new=io.StringIO()) as stdout:
+                app.print_compact_ready_status()
+
+        self.assertIn("Microphone: system default - Test Mic (index 2)", stdout.getvalue())
+
+    def test_parse_optional_mic_index_keeps_system_default_for_empty_values(self):
+        self.assertIsNone(cri_module.parse_optional_mic_index(""))
+        self.assertIsNone(cri_module.parse_optional_mic_index("auto"))
+        self.assertIsNone(cri_module.parse_optional_mic_index("default"))
+        self.assertEqual(cri_module.parse_optional_mic_index("18"), 18)
+
+        with self.assertRaisesRegex(ValueError, "Invalid CRI_STT_MIC_INDEX"):
+            cri_module.parse_optional_mic_index("laptop")
 
     def test_roster_session_config_sets_child_and_input_mode(self):
         app = make_app()
@@ -1291,7 +1534,8 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(segments[2]["defer_corrected_response"])
         self.assertEqual(segments[2]["used_fields"], {"aspiration": "schooldirecteur worden"})
         self.assertTrue(segments[3]["run_if_phase_confirmed_change"])
-        self.assertTrue(segments[4]["skip_if_phase_confirmed_change"])
+        self.assertTrue(segments[4]["run_if_phase_confirmed_change"])
+        self.assertTrue(segments[5]["skip_if_phase_confirmed_change"])
         self.assertEqual(app.mistake_correction_question(phase34), "Oeps, wat wil jij dan later worden?")
 
     def test_part3_mistake4_uses_static_schooldirecteur_when_um_missing(self):
@@ -2357,7 +2601,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertNotIn("Pannenkoeken", corrected_text)
 
         self.assertTrue(segments[1]["expects_response"])
-        self.assertEqual(segments[1]["response_mode"], "listen_only")
+        self.assertEqual(segments[1]["response_mode"], "acknowledge")
         self.assertTrue(segments[1]["run_if_phase_confirmed_change"])
 
     def test_build_script_uses_condition_specific_tutorial_text(self):
@@ -3415,7 +3659,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.run_phase_segment(phase, segment)
 
         self.assertEqual(captured["phase"], 18)
-        self.assertEqual(captured["fields"], ["fav_food"])
+        self.assertEqual(captured["fields"], list(CRI.UM_FIELDS))
         self.assertEqual(
             app.speech.spoken,
             ["Kijk maar op de tablet.", "Ik weet ook nog dat je lievelingseten pannenkoeken is."],
@@ -6444,7 +6688,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         accepted = app.confirm_topic_change(change)
 
         self.assertTrue(accepted)
-        self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby verander naar playmobiel spelen?"))
+        self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby van padel naar playmobiel spelen verander?"))
         self.assertEqual(
             events[1],
             (
@@ -6459,7 +6703,10 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
         self.assertEqual(
             events[2],
-            ("say", "Dankjewel, ik heb dat aangepast. Kijk maar op de tablet, daar zie je het veranderen."),
+            (
+                "say",
+                "Oké, dankjewel. Kijk maar naar het geheugenboek, als het goed is zie je dat ik het nu aanpas. Ik heb het aangepast.",
+            ),
         )
         self.assertEqual(
             events[3],
@@ -6586,6 +6833,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.last_um_preview = sample_um()
         app.last_um_preview["condition"] = "E"
         app.last_um_preview["fav_food"] = "pizza"
+        app.tablet_intro_shown = True
         app.speech.heard = ["ja"]
         app.write_um_change = lambda change: self.fail("already-stored visible mistake should not rewrite UM")
         prepared = []
@@ -6639,8 +6887,8 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(action["action"], "confirm_update")
         self.assertTrue(action["change"]["skip_um_write"])
-        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je lievelingseten verander naar pizza?")
-        self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
+        self.assertEqual(app.speech.spoken[0], "Wil je dat ik je lievelingseten van broccoli naar pizza verander?")
+        self.assertIn("Ik heb het aangepast.", app.speech.spoken[1])
         self.assertTrue(app.mistake_states["M2"].get("corrected"))
         self.assertEqual(prepared[0]["old_value"], "broccoli")
         self.assertEqual(prepared[0]["new_value"], "pizza")
@@ -6807,7 +7055,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(writes[0]["field"], "fav_food")
         self.assertEqual(writes[0]["new_value"], "pizza")
         self.assertEqual(app.last_um_preview["fav_food"], "pizza")
-        self.assertIn("Wil je dat ik je lievelingseten verander naar pizza?", app.speech.spoken[0])
+        self.assertIn("Wil je dat ik je lievelingseten van broccoli naar pizza verander?", app.speech.spoken[0])
         self.assertIn("Dankjewel, ik heb dat aangepast.", app.speech.spoken[1])
         followup = app.turn_text(app.segment_context(phase, phase["segments"][1], 2))
         self.assertIn("pizza. Dat is op zich wel een sterke keuze.", followup)
@@ -7534,6 +7782,266 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(launcher.DIALOGUE_FILE, PACKAGE_DIR / "CRI-BRANCH-BASIC4_0.py")
         self.assertEqual(launcher.DEFAULT_ENV, LOCAL_DIR / ".env")
 
+    def test_nao_discovery_uses_configured_ip_when_reachable(self):
+        calls = []
+
+        def fake_port_check(ip, port, timeout):
+            calls.append((ip, port, timeout))
+            return ip == "10.0.0.22"
+
+        result = nao_discovery.discover_nao_ip(
+            configured_ip="10.0.0.22",
+            networks_fn=lambda: (),
+            port_check_fn=fake_port_check,
+        )
+
+        self.assertEqual(result.selected_ip, "10.0.0.22")
+        self.assertTrue(result.used_configured)
+        self.assertEqual(calls[0][0], "10.0.0.22")
+
+    def test_nao_discovery_finds_single_candidate_when_configured_ip_fails(self):
+        networks = (
+            nao_discovery.LocalIPv4Network(
+                address="192.168.1.1",
+                network=ipaddress.ip_network("192.168.1.0/30"),
+                source="test",
+            ),
+        )
+
+        def fake_port_check(ip, port, timeout):
+            return ip == "192.168.1.2"
+
+        result = nao_discovery.discover_nao_ip(
+            configured_ip="10.0.0.22",
+            networks_fn=lambda: networks,
+            port_check_fn=fake_port_check,
+        )
+
+        self.assertEqual(result.selected_ip, "192.168.1.2")
+        self.assertFalse(result.used_configured)
+        self.assertEqual(result.scanned_networks, ("192.168.1.0/30",))
+
+    def test_nao_discovery_scans_arbitrary_active_ipv4_networks(self):
+        networks = (
+            nao_discovery.LocalIPv4Network(
+                address="145.108.12.41",
+                network=ipaddress.ip_network("145.108.12.40/30"),
+                source="test",
+            ),
+        )
+
+        def fake_port_check(ip, port, timeout):
+            return ip == "145.108.12.42"
+
+        result = nao_discovery.discover_nao_ip(
+            configured_ip="",
+            networks_fn=lambda: networks,
+            port_check_fn=fake_port_check,
+        )
+
+        self.assertEqual(result.selected_ip, "145.108.12.42")
+        self.assertEqual(result.scanned_networks, ("145.108.12.40/30",))
+
+    def test_nao_discovery_checks_arp_visible_candidates_before_large_scan(self):
+        networks = (
+            nao_discovery.LocalIPv4Network(
+                address="172.16.1.250",
+                network=ipaddress.ip_network("172.16.0.0/22"),
+                source="test",
+            ),
+            nao_discovery.LocalIPv4Network(
+                address="192.168.1.3",
+                network=ipaddress.ip_network("192.168.1.0/24"),
+                source="test",
+            ),
+        )
+        checked = []
+
+        def fake_port_check(ip, port, timeout):
+            checked.append(ip)
+            return ip == "192.168.1.4"
+
+        result = nao_discovery.discover_nao_ip(
+            configured_ip="10.0.0.22",
+            timeout_seconds=0.5,
+            networks_fn=lambda: networks,
+            priority_hosts_fn=lambda: ("192.168.1.4",),
+            port_check_fn=fake_port_check,
+        )
+
+        self.assertEqual(result.selected_ip, "192.168.1.4")
+        self.assertIn("192.168.1.4", checked[:2])
+
+    def test_nao_discovery_refuses_to_guess_between_multiple_robots(self):
+        networks = (
+            nao_discovery.LocalIPv4Network(
+                address="192.168.1.1",
+                network=ipaddress.ip_network("192.168.1.0/29"),
+                source="test",
+            ),
+        )
+
+        def fake_port_check(ip, port, timeout):
+            return ip in {"192.168.1.2", "192.168.1.3"}
+
+        with self.assertRaisesRegex(nao_discovery.NAODiscoveryError, "Multiple"):
+            nao_discovery.discover_nao_ip(
+                configured_ip="10.0.0.22",
+                networks_fn=lambda: networks,
+                port_check_fn=fake_port_check,
+            )
+
+    def test_nao_discovery_reports_no_candidate_clearly(self):
+        networks = (
+            nao_discovery.LocalIPv4Network(
+                address="192.168.1.1",
+                network=ipaddress.ip_network("192.168.1.0/30"),
+                source="test",
+            ),
+        )
+
+        with self.assertRaisesRegex(nao_discovery.NAODiscoveryError, "not reachable"):
+            nao_discovery.discover_nao_ip(
+                configured_ip="10.0.0.22",
+                networks_fn=lambda: networks,
+                port_check_fn=lambda ip, port, timeout: False,
+            )
+
+    def test_nao_env_override_and_disabled_auto_discovery(self):
+        env = {
+            "CRI_NAO_IP": "192.168.1.44",
+            "CRI_NAO_AUTO_DISCOVER": "false",
+            "CRI_NAO_DISCOVERY_TIMEOUT_SECONDS": "1",
+        }
+
+        result = nao_discovery.discover_nao_ip_from_env(
+            configured_ip="10.0.0.22",
+            env=env,
+            networks_fn=lambda: (),
+            port_check_fn=lambda ip, port, timeout: False,
+        )
+
+        self.assertEqual(result.selected_ip, "192.168.1.44")
+        self.assertFalse(result.auto_discovery_enabled)
+        self.assertTrue(result.used_configured)
+
+    def test_cri_startup_applies_discovered_nao_ip_before_db_route(self):
+        app = make_app()
+        app.nao_ip = "10.0.0.22"
+        app.local_ip_for_target = lambda ip: "192.168.1.3"
+        result = nao_discovery.NAODiscoveryResult(
+            selected_ip="192.168.1.4",
+            configured_ip="10.0.0.22",
+            candidates=("192.168.1.4",),
+            scanned_networks=("192.168.1.0/24",),
+            used_configured=False,
+        )
+
+        with patch.object(cri_module, "discover_nao_ip_from_env", return_value=result) as discover:
+            with patch("builtins.print"):
+                selected = app.resolve_nao_ip_for_connection()
+
+        self.assertEqual(selected, "192.168.1.4")
+        self.assertEqual(app.nao_ip, "192.168.1.4")
+        discover.assert_called_once_with("10.0.0.22")
+
+    def test_cri_startup_accepts_manual_nao_ip_after_discovery_failure(self):
+        app = make_app()
+        app.nao_ip = ""
+        app.local_ip_for_target = lambda ip: "192.168.1.3"
+        error = nao_discovery.NAODiscoveryError(
+            "No NAO IP is configured, and no NAO was discovered on the local networks.",
+            scanned_networks=("192.168.1.0/24",),
+        )
+
+        with patch.object(cri_module, "discover_nao_ip_from_env", side_effect=[error]) as discover:
+            with patch.object(cri_module.sys, "stdin", SimpleNamespace(isatty=lambda: True)):
+                with patch("builtins.input", return_value="http://192.168.1.4/"):
+                    with patch.object(cri_module, "tcp_port_open", return_value=True) as port_check:
+                        with patch("builtins.print"):
+                            selected = app.resolve_nao_ip_for_connection()
+
+        self.assertEqual(selected, "192.168.1.4")
+        self.assertEqual(app.nao_ip, "192.168.1.4")
+        discover.assert_called_once_with("")
+        port_check.assert_called_once_with("192.168.1.4", nao_discovery.NAOQI_PORT, timeout=1.5)
+
+    def test_cri_startup_retries_discovery_when_manual_prompt_is_blank(self):
+        app = make_app()
+        app.nao_ip = ""
+        app.local_ip_for_target = lambda ip: "192.168.1.3"
+        error = nao_discovery.NAODiscoveryError(
+            "No NAO IP is configured, and no NAO was discovered on the local networks.",
+            scanned_networks=("192.168.1.0/24",),
+        )
+        result = nao_discovery.NAODiscoveryResult(
+            selected_ip="192.168.1.4",
+            configured_ip="",
+            candidates=("192.168.1.4",),
+            scanned_networks=("192.168.1.0/24",),
+            used_configured=False,
+        )
+
+        with patch.object(cri_module, "discover_nao_ip_from_env", side_effect=[error, result]) as discover:
+            with patch.object(cri_module.sys, "stdin", SimpleNamespace(isatty=lambda: True)):
+                with patch("builtins.input", return_value=""):
+                    with patch("builtins.print"):
+                        selected = app.resolve_nao_ip_for_connection()
+
+        self.assertEqual(selected, "192.168.1.4")
+        self.assertEqual(discover.call_count, 2)
+
+    def test_cri_startup_reprompts_after_unreachable_manual_nao_ip(self):
+        app = make_app()
+        app.nao_ip = ""
+        app.local_ip_for_target = lambda ip: "192.168.1.3"
+        error = nao_discovery.NAODiscoveryError(
+            "No NAO IP is configured, and no NAO was discovered on the local networks.",
+            scanned_networks=("192.168.1.0/24",),
+        )
+
+        def fake_port_check(ip, port, timeout):
+            return ip == "192.168.1.4"
+
+        with patch.object(cri_module, "discover_nao_ip_from_env", side_effect=[error]):
+            with patch.object(cri_module.sys, "stdin", SimpleNamespace(isatty=lambda: True)):
+                with patch("builtins.input", side_effect=["192.168.1.99", "192.168.1.4"]):
+                    with patch.object(cri_module, "tcp_port_open", side_effect=fake_port_check):
+                        with patch("builtins.print"):
+                            selected = app.resolve_nao_ip_for_connection()
+
+        self.assertEqual(selected, "192.168.1.4")
+
+    def test_cri_startup_manual_nao_prompt_can_quit(self):
+        app = make_app()
+        app.nao_ip = ""
+        error = nao_discovery.NAODiscoveryError(
+            "No NAO IP is configured, and no NAO was discovered on the local networks."
+        )
+
+        with patch.object(cri_module, "discover_nao_ip_from_env", side_effect=[error]):
+            with patch.object(cri_module.sys, "stdin", SimpleNamespace(isatty=lambda: True)):
+                with patch("builtins.input", return_value="q"):
+                    with patch("builtins.print"):
+                        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+                            app.resolve_nao_ip_for_connection()
+
+    def test_cri_startup_discovery_failure_does_not_prompt_when_noninteractive(self):
+        app = make_app()
+        app.nao_ip = ""
+        error = nao_discovery.NAODiscoveryError(
+            "No NAO IP is configured, and no NAO was discovered on the local networks."
+        )
+
+        with patch.object(cri_module, "discover_nao_ip_from_env", side_effect=[error]):
+            with patch.object(cri_module.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
+                with patch("builtins.input") as prompt:
+                    with patch("builtins.print"):
+                        with self.assertRaisesRegex(RuntimeError, "non-interactive"):
+                            app.resolve_nao_ip_for_connection()
+
+        prompt.assert_not_called()
+
     def test_realtimestt_backend_mac_auto_uses_cpu_int8_small_without_cuda_probe(self):
         torch = FakeTorchModule(mps_available=True, fail_cuda_check=True)
         ctranslate2 = FakeCTranslate2Module(fail_cuda_count=True)
@@ -7612,19 +8120,131 @@ class CRIDialogue2Tests(unittest.TestCase):
                 super().__init__("")
                 recorder_kwargs.update(kwargs)
 
-        with patch.dict(
-            cri_module.SpeechIO.__init__.__globals__,
-            {"AudioToTextRecorder": DummyRecorder},
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.dict(
+                cri_module.SpeechIO.__init__.__globals__,
+                {"AudioToTextRecorder": DummyRecorder},
+            ),
         ):
             speech = cri_module.SpeechIO()
 
         self.assertIs(recorder_kwargs["spinner"], False)
+        self.assertIs(recorder_kwargs["use_microphone"], True)
+        self.assertEqual(recorder_kwargs["allowed_latency_limit"], 80)
         self.assertEqual(recorder_kwargs["model"], "small")
         self.assertEqual(recorder_kwargs["device"], "cpu")
         self.assertEqual(recorder_kwargs["compute_type"], "int8")
         self.assertEqual(recorder_kwargs["post_speech_silence_duration"], 1.6)
+        self.assertNotIn("input_device_index", recorder_kwargs)
         self.assertEqual(speech._recorder.microphone_states, [False])
+        self.assertTrue(speech._recorder.queue_cleared)
         self.assertIsNotNone(speech._stt_spinner_lock)
+
+    def test_realtimestt_allowed_latency_limit_can_be_overridden(self):
+        recorder_kwargs = {}
+
+        class DummyRecorder(FakeSTTRecorder):
+            def __init__(self, **kwargs):
+                super().__init__("")
+                recorder_kwargs.update(kwargs)
+
+        with (
+            patch.dict(os.environ, {"CRI_STT_ALLOWED_LATENCY_LIMIT": "120"}, clear=True),
+            patch.dict(
+                cri_module.SpeechIO.__init__.__globals__,
+                {"AudioToTextRecorder": DummyRecorder},
+            ),
+        ):
+            cri_module.SpeechIO()
+
+        self.assertEqual(recorder_kwargs["allowed_latency_limit"], 120)
+
+    def test_realtimestt_explicit_mic_index_is_passed_to_recorder(self):
+        recorder_kwargs = {}
+
+        class DummyRecorder(FakeSTTRecorder):
+            def __init__(self, **kwargs):
+                super().__init__("")
+                recorder_kwargs.update(kwargs)
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.dict(
+                cri_module.SpeechIO.__init__.__globals__,
+                {"AudioToTextRecorder": DummyRecorder},
+            ),
+        ):
+            cri_module.SpeechIO(stt_mic_index=18)
+
+        self.assertEqual(recorder_kwargs["input_device_index"], 18)
+
+    def test_realtimestt_queue_warning_filter_suppresses_only_queue_spam(self):
+        install_filter = cri_module.SpeechIO.__init__.__globals__[
+            "_install_realtimestt_queue_warning_filter"
+        ]
+        filter_obj = install_filter()
+        realtimestt_logger = logging.getLogger("realtimestt")
+        records = []
+
+        class ListHandler(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        handler = ListHandler(level=logging.WARNING)
+        old_level = realtimestt_logger.level
+        old_propagate = realtimestt_logger.propagate
+        realtimestt_logger.addHandler(handler)
+        realtimestt_logger.setLevel(logging.WARNING)
+        realtimestt_logger.propagate = False
+        before_count, _ = filter_obj.snapshot()
+        try:
+            realtimestt_logger.warning(
+                "Audio queue size exceeds latency limit. Current size: 42. "
+                "Discarding old audio chunks."
+            )
+            realtimestt_logger.warning("Different warning should still be visible.")
+        finally:
+            realtimestt_logger.removeHandler(handler)
+            realtimestt_logger.setLevel(old_level)
+            realtimestt_logger.propagate = old_propagate
+
+        after_count, last_size = filter_obj.snapshot()
+        self.assertEqual(after_count - before_count, 1)
+        self.assertEqual(last_size, 42)
+        self.assertEqual(records, ["Different warning should still be visible."])
+
+    def test_listen_reports_suppressed_queue_warning_once_after_spinner(self):
+        events = []
+        filter_obj = cri_module.SpeechIO.__init__.__globals__[
+            "_install_realtimestt_queue_warning_filter"
+        ]()
+
+        class WarningRecorder(FakeSTTRecorder):
+            def text(self):
+                logging.getLogger("realtimestt").warning(
+                    "Audio queue size exceeds latency limit. Current size: 43. "
+                    "Discarding old audio chunks."
+                )
+                return super().text()
+
+        speech = cri_module.SpeechIO(
+            use_keyboard_input_fn=lambda: True,
+            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+        )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = WarningRecorder("ja")
+        speech._stt_queue_warning_filter = filter_obj
+
+        with patch("builtins.print"), self.assertLogs("speech_io", level="WARNING") as logs:
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "ja")
+        queue_events = [data for event_type, data in events if event_type == "stt_queue_overflow"]
+        self.assertEqual(len(queue_events), 1)
+        self.assertEqual(queue_events[0]["warnings"], 1)
+        self.assertEqual(queue_events[0]["last_size"], 43)
+        self.assertIn("suppressed", "\n".join(logs.output))
 
     def test_stt_normalize_transcript_removes_symbols_accents_and_non_latin_text(self):
         transcript = "Oké — één café ✓ Привет, dat klopt!"

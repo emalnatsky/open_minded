@@ -18,6 +18,7 @@ BUT we need for it:
 
 import os
 import json
+import re
 import socket
 import threading
 import time
@@ -44,6 +45,7 @@ TABLET_EVENT_PORT = 8081
 API_TIMEOUT_S   = 3.0
 SESSION_STATE_PATH = "../_local/session_state.json"  # written by CRI-DIALOGUE/tablet_state.py
 TABLET_EVENTS_LOG_PATH = "../_local/tablet_events.jsonl"
+TEST_CONFIG_PATH = "../util/test_config.pl"
 # Note: child name + ID now come from session_state.json (written by the dialogue).
 # No separate roster file needed — the dialogue reads util/test_config.pl and
 # writes the resolved names into session_state.json.
@@ -103,31 +105,83 @@ class UMTabletServer(SICApplication):
                 self.load_env(path)
                 return
 
+    def _normalize_condition_value(self, value: str) -> str:
+        clean = " ".join(str(value or "").strip().lower().replace("_", " ").split())
+        if clean in ("e", "c2", "2", "condition 2", "experimental", "experiment", "tablet", "with tablet"):
+            return "E"
+        if clean in ("c", "c1", "1", "condition 1", "control", "no tablet", "without tablet"):
+            return "C"
+        return str(value or "").strip()
+
+    def _read_test_config_state(self) -> dict:
+        """Read current child ID/name/condition from util/test_config.pl."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, TEST_CONFIG_PATH)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception:
+            return {}
+
+        text = re.sub(r"%[^\n]*", "", text)
+
+        def get_fact(name):
+            m = re.search(rf'{re.escape(name)}\(\s*[\'"]?([^\'"(),]+)[\'"]?\s*\)', text)
+            return m.group(1).strip() if m else ""
+
+        def get_local_var(var_name):
+            m = re.search(
+                rf'localVariable\(\s*{re.escape(var_name)}\s*,\s*["\']?([^"\'\\)]+)["\']?\s*\)',
+                text,
+            )
+            return m.group(1).strip() if m else ""
+
+        child_id = get_fact("userId")
+        child_name = get_local_var("first_name_tablet") or get_local_var("first_name_cri")
+        condition = self._normalize_condition_value(get_fact("condition"))
+
+        state = {}
+        if child_id:
+            state["child_id"] = child_id
+        if child_name:
+            state["child_name"] = child_name
+        if condition:
+            state["condition"] = condition
+        return state
+
     def _read_session_state(self) -> dict:
         """
-        Read session_state.json written by the dialogue's TabletStateWriter.
-        Also updates self._child_id automatically from the file so the tablet
-        server tracks whichever child the dialogue is talking to.
+        Read session_state.json, then overlay current util/test_config.pl identity.
+
+        The overlay prevents an old local session_state.json from keeping a
+        previous child's name on the tablet before the new CRI session writes
+        its first state update.
         """
         here = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(here, SESSION_STATE_PATH)
+        state = {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            if isinstance(state, dict):
-                session_child_id = str(state.get("child_id") or "").strip()
-                if session_child_id and session_child_id != self._child_id:
-                    self.logger.debug(
-                        "Child ID updated from session_state: %s → %s",
-                        self._child_id, session_child_id,
-                    )
-                    self._child_id = session_child_id
-                return state
+                loaded_state = json.load(f)
+            if isinstance(loaded_state, dict):
+                state.update(loaded_state)
         except FileNotFoundError:
             pass
         except Exception as e:
             self.logger.warning("Could not read session_state.json: %s", e)
-        return {}
+
+        config_state = self._read_test_config_state()
+        if config_state:
+            state.update(config_state)
+
+        session_child_id = str(state.get("child_id") or "").strip()
+        if session_child_id and session_child_id != self._child_id:
+            self.logger.debug(
+                "Child ID updated from local session config: %s -> %s",
+                self._child_id, session_child_id,
+            )
+            self._child_id = session_child_id
+        return state
 
     def _check_api(self):
         time.sleep(1.0)
@@ -154,17 +208,45 @@ class UMTabletServer(SICApplication):
             time.sleep(0.2)
         webbrowser.open(url, new=2)
 
-    def _log_tablet_url(self):
+    def _get_lan_ips(self) -> list:
+        candidates = []
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                candidates.append(sock.getsockname()[0])
+        except Exception:
+            pass
+
         try:
             hostname = socket.gethostname()
-            lan_ip   = socket.gethostbyname(hostname)
+            for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+                candidates.append(info[4][0])
         except Exception:
-            lan_ip = "YOUR_LAPTOP_IP"
+            pass
+
+        usable = []
+        for ip_address in candidates:
+            if (
+                ip_address
+                and not ip_address.startswith(("127.", "169.254."))
+                and ip_address not in usable
+            ):
+                usable.append(ip_address)
+        return usable or ["<YOUR_LAPTOP_IP>"]
+
+    def _log_tablet_url(self):
+        tablet_urls = [f"http://{lan_ip}:{WEB_PORT}" for lan_ip in self._get_lan_ips()]
         time.sleep(1.5)
-        self.logger.debug("=" * 55)
-        self.logger.debug("  Open this on the tablet (same WiFi):")
-        self.logger.debug("  http://%s:%s", lan_ip, WEB_PORT)
-        self.logger.debug("=" * 55)
+        print("")
+        print("=" * 55)
+        print("Open this on the tablet (same WiFi):")
+        for tablet_url in tablet_urls:
+            print(tablet_url)
+        if len(tablet_urls) > 1:
+            print("Use the URL with the same IP range as the tablet.")
+        print("=" * 55)
+        print("")
 
     def _tablet_events_log_path(self) -> str:
         here = os.path.dirname(os.path.abspath(__file__))
@@ -359,6 +441,7 @@ class UMTabletServer(SICApplication):
         last_um = None
         try:
             while not self.shutdown_event.is_set():
+                self._read_session_state()
                 um = self._fetch_um()
                 self._broadcast_um(um)
 

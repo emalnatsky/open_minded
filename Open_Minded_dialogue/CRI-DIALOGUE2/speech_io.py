@@ -52,7 +52,54 @@ from difflib import SequenceMatcher
 
 from RealtimeSTT import AudioToTextRecorder
 
+try:
+    from terminal_output import LoadingStatus
+except Exception:  # pragma: no cover - fallback for standalone imports
+    LoadingStatus = None
+
 logger = logging.getLogger(__name__)
+
+_REALTIME_STT_QUEUE_WARNING_TEXT = "Audio queue size exceeds latency limit"
+
+
+class _RealtimeSTTQueueWarningFilter(logging.Filter):
+    """Suppress noisy RealtimeSTT queue spam while keeping a count for CRI."""
+
+    def __init__(self):
+        super().__init__()
+        self.count = 0
+        self.last_size = None
+        self._lock = threading.Lock()
+
+    def filter(self, record):
+        message = record.getMessage()
+        if _REALTIME_STT_QUEUE_WARNING_TEXT not in message:
+            return True
+        size = None
+        match = re.search(r"Current size:\s*(\d+)", message)
+        if match:
+            try:
+                size = int(match.group(1))
+            except ValueError:
+                size = None
+        with self._lock:
+            self.count += 1
+            self.last_size = size
+        return False
+
+    def snapshot(self):
+        with self._lock:
+            return self.count, self.last_size
+
+
+_REALTIME_STT_QUEUE_WARNING_FILTER = _RealtimeSTTQueueWarningFilter()
+
+
+def _install_realtimestt_queue_warning_filter():
+    realtimestt_logger = logging.getLogger("realtimestt")
+    if _REALTIME_STT_QUEUE_WARNING_FILTER not in realtimestt_logger.filters:
+        realtimestt_logger.addFilter(_REALTIME_STT_QUEUE_WARNING_FILTER)
+    return _REALTIME_STT_QUEUE_WARNING_FILTER
 
 # ── NAO TTS speed prefix ──────────────────────────────────────────────────────
 # ACAPELA control tag understood by NAO's TTS engine. \rspd=92\ sets the
@@ -287,6 +334,11 @@ class SpeechIO:
             "CRI_STT_STALE_AUDIO_TOLERANCE_SECONDS",
             0.4,
         )
+        self._stt_allowed_latency_limit = self._env_positive_int(
+            "CRI_STT_ALLOWED_LATENCY_LIMIT",
+            80,
+        )
+        self._stt_queue_warning_filter = _install_realtimestt_queue_warning_filter()
         self._pronunciation_overrides = {}
         if pronunciation_overrides_path:
             import json, os
@@ -320,6 +372,8 @@ class SpeechIO:
                 language=stt_language,
                 post_speech_silence_duration=stt_post_speech_silence,
                 realtime_processing_pause=stt_realtime_processing_pause,
+                # Keep RealtimeSTT's audio reader worker alive; CRI mutes it
+                # immediately after construction and only unmutes during listen().
                 use_microphone=True,
                 enable_realtime_transcription=False,  # final result only
                 spinner=False,                         # CRI owns terminal status
@@ -335,7 +389,7 @@ class SpeechIO:
                 min_length_of_recording=0.5,          # ignore <0.5s blips
                 min_gap_between_recordings=0.4,       # avoid queued carryover between turns
                 pre_recording_buffer_duration=0.25,   # keep only a tiny onset buffer
-                allowed_latency_limit=40,             # drop very old chunks earlier
+                allowed_latency_limit=self._stt_allowed_latency_limit,
             )
             if stt_mic_index is not None:
                 recorder_kwargs["input_device_index"] = stt_mic_index
@@ -353,10 +407,9 @@ class SpeechIO:
             )
             self._recorder = AudioToTextRecorder(**recorder_kwargs)
             logger.info("RealtimeSTT recorder ready.")
-            # Mute the mic until it's actually the child's turn. The recorder
-            # keeps running but processes silence, so NAO's own TTS won't be
-            # transcribed and won't trigger a recording.
-            self._set_mic(False)
+            # Start muted and purge any startup fragments before the first
+            # child turn. listen() is the only place that opens the mic.
+            self._reset_stt_audio_state("after_recorder_init")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     def shutdown(self):
@@ -540,6 +593,8 @@ class SpeechIO:
     def _print_leo_terminal(self, text: str):
         """Show Leo's spoken text after clearing any active STT status line."""
         self._stop_stt_spinner()
+        if LoadingStatus is not None:
+            LoadingStatus.stop_active(keep_line=True)
         print(f"\n[LEO]: {text}\n")
 
     def say(self, text: str):
@@ -597,11 +652,13 @@ class SpeechIO:
             return transcript
 
         logger.info("Listening via RealtimeSTT...")
+        queue_warning_snapshot = None
         try:
             # Update Whisper context with Leo's last question before decoding.
             self._set_context_prompt()
             self._reset_stt_audio_state("before_listen")
             listen_started_at = time.time()
+            queue_warning_snapshot = self._stt_queue_warning_snapshot()
             # Unmute the mic — now the recorder will hear the child.
             self._set_mic(True)
             self._set_eyes("green")
@@ -613,6 +670,7 @@ class SpeechIO:
             if timed_out:
                 self._set_eyes("white")
                 self._stop_stt_spinner()
+                self._report_stt_queue_overflow_if_needed(queue_warning_snapshot, "timeout")
                 self._reset_stt_audio_state("after_timeout")
                 return ""
             transcript = transcript.strip() if transcript else ""
@@ -621,11 +679,13 @@ class SpeechIO:
                 self._log_event("stt_rejected", reason="stale_audio", text=transcript)
                 self._set_eyes("white")
                 self._stop_stt_spinner()
+                self._report_stt_queue_overflow_if_needed(queue_warning_snapshot, "stale_audio")
                 self._reset_stt_audio_state("after_stale_audio")
                 return ""
             transcript = self._clean_stt_transcript(transcript)
             self._set_eyes("white")
             self._stop_stt_spinner()
+            self._report_stt_queue_overflow_if_needed(queue_warning_snapshot, "listen")
             self._reset_stt_audio_state("after_success")
             # Print prominently so the researcher can monitor in the terminal.
             _print_transcript(transcript)
@@ -641,6 +701,7 @@ class SpeechIO:
         except Exception as e:
             self._set_eyes("white")
             self._stop_stt_spinner()
+            self._report_stt_queue_overflow_if_needed(queue_warning_snapshot, "error")
             self._reset_stt_audio_state("after_error")
             logger.error("STT error: %s", e)
             self._log_event("stt_error", error=str(e))
@@ -727,10 +788,50 @@ class SpeechIO:
         return cls._positive_float(os.environ.get(name)) or default
 
     @staticmethod
+    def _env_positive_int(name: str, default: int) -> int:
+        try:
+            number = int(str(os.environ.get(name, "")).strip())
+        except (TypeError, ValueError):
+            return default
+        return number if number > 0 else default
+
+    @staticmethod
     def _bounded_similarity(value: float) -> float:
         if value is None:
             return 0.82
         return max(0.0, min(float(value), 1.0))
+
+    def _stt_queue_warning_snapshot(self):
+        filter_obj = getattr(self, "_stt_queue_warning_filter", None)
+        if filter_obj is None:
+            return 0, None
+        return filter_obj.snapshot()
+
+    def _report_stt_queue_overflow_if_needed(self, start_snapshot, reason: str):
+        filter_obj = getattr(self, "_stt_queue_warning_filter", None)
+        if filter_obj is None or start_snapshot is None:
+            return
+        start_count, _start_size = start_snapshot
+        current_count, current_size = filter_obj.snapshot()
+        delta = max(0, current_count - start_count)
+        if not delta:
+            return
+        self._log_event(
+            "stt_queue_overflow",
+            reason=reason,
+            warnings=delta,
+            last_size=current_size,
+            allowed_latency_limit=self._stt_allowed_latency_limit,
+        )
+        logger.warning(
+            "RealtimeSTT audio queue overflowed during %s (%d warning%s suppressed, "
+            "last size=%s, limit=%s).",
+            reason,
+            delta,
+            "" if delta == 1 else "s",
+            current_size if current_size is not None else "unknown",
+            self._stt_allowed_latency_limit,
+        )
 
     @staticmethod
     def _effective_listen_timeout(*values):

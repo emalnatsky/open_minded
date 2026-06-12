@@ -179,14 +179,6 @@ class SessionSetup:
             "stt_phrase_limit":   stt_phrase_limit,
             "review_transcripts": review_transcripts,
         }
-        print(f"  Loaded {path}")
-        print(f"  Child ID:       {child_id}")
-        print(f"  CRI name:       {first_name_cri}  (NAO pronounces this)")
-        print(f"  Tablet name:    {first_name_tablet}  (shown on book cover)")
-        print(f"  Researcher:     {operator_name}")
-        print(f"  Condition:      {condition}")
-        if nao_ip:
-            print(f"  NAO IP:         {nao_ip}")
         return result
 
     def save_local_session_config(self, config: dict):
@@ -202,7 +194,7 @@ class SessionSetup:
     def ask_session_value(self, label: str, default: str = "") -> str:
         default_hint = f" [{default}]" if default else ""
         try:
-            value = input(f"  {label}{default_hint}: ").strip()
+            value = input(f"{label}{default_hint}: ").strip()
             return value if value else default
         except (EOFError, KeyboardInterrupt):
             return default
@@ -292,7 +284,6 @@ class SessionSetup:
         nao_ip_from_config = str(self.d.session_config.get("nao_ip") or "").strip()
         if nao_ip_from_config:
             self.d.nao_ip = nao_ip_from_config
-            print(f"  NAO IP set from test_config.pl: {nao_ip_from_config}")
 
         # first_name_cri   → what NAO TTS pronounces in the dialogue
         # first_name_tablet → what appears on the tablet book cover
@@ -332,10 +323,8 @@ class SessionSetup:
 
     def check_child_in_um_api(self, child_id: str):
         if self.d.USE_FAKE_PERSONA_UM:
-            print(f"\nUsing fake persona JSON for child '{child_id}'.")
             return
 
-        print(f"\nChecking child '{child_id}' in UM API ({self.d.UM_API_BASE})...")
         try:
             health = requests.get(f"{self.d.UM_API_BASE}/health/graphdb", timeout=3)
             if health.status_code != 200:
@@ -344,11 +333,9 @@ class SessionSetup:
                 print(f"  Health check returned {health.status_code}: {health.text[:160]}")
                 return
             response = requests.get(f"{self.d.UM_API_BASE}/api/um/{child_id}", timeout=3)
-            if response.status_code == 200:
-                print("  Child found.")
-            elif response.status_code == 404:
+            if response.status_code == 404:
                 print("  Child not found.")
-            else:
+            elif response.status_code != 200:
                 print(f"  UM API returned {response.status_code}.")
         except Exception as e:
             print("  UM API/GraphDB is not reachable. Start Full Stack first.")
@@ -394,11 +381,6 @@ class SessionSetup:
         The researcher just presses Enter to confirm and optionally picks
         the start phase.
         """
-        print("\n" + "=" * 72)
-        print("CRI SESSION SETUP")
-        print("Reading from test_config.pl ...")
-        print("=" * 72)
-
         pl = self.load_pl_config()
 
         # Pull values from the pl file
@@ -416,15 +398,20 @@ class SessionSetup:
         researcher    = pl.get("operator_name", "")
 
         # If pl file was empty or missing, fall back to asking
-        if not child_id:
-            child_id = self.ask_session_value("Child ID (not in pl file)", "")
+        child_id = self.ask_session_value("Child ID", child_id)
+        child_name = self.ask_session_value("Child name", first_name_cri or first_name_tablet)
+        first_name_cri = child_name
+        first_name_tablet = child_name or first_name_tablet
 
         # 2. Researcher name — prefilled from pl, can override
-        researcher = self.ask_session_value("Researcher name", researcher)
+        researcher = self.ask_session_value("Researcher", researcher)
+        condition = self.normalize_condition_value(
+            self.ask_session_value("Condition", condition),
+            default=self.d.CONDITION_CONTROL,
+        )
 
         # 3. Start phase
-        total = self.d.TOTAL_SCRIPT_PHASES
-        phase_raw = self.ask_session_value(f"Start phase (1-{total}, or 2.1/3.6)", "1")
+        phase_raw = self.ask_session_value("Start at phase", "1.1/1")
         start_phase_index = self.parse_phase_index(phase_raw, default_index=0)
 
         fake_persona_path = self.d.simulated_persona_path
@@ -438,6 +425,26 @@ class SessionSetup:
 
         # Verify the child exists in the UM source
         self.check_child_in_um_api(child_id)
+
+        config = {
+            "mode":                "new",
+            "child_id":            child_id,
+            "child_name":          first_name_cri,
+            "first_name_cri":      first_name_cri,
+            "first_name_tablet":   first_name_tablet,
+            "researcher_name":     researcher,
+            "condition":           condition,
+            "nao_ip":              nao_ip,
+            "stt_timeout":         stt_timeout,
+            "stt_phrase_limit":    stt_phrase_limit,
+            "review_transcripts":  review_transcripts,
+            "fake_persona_path":   fake_persona_path,
+            "start_phase_index":   start_phase_index,
+            "created_at":          datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+        self.save_local_session_config(config)
+        self.apply_session_config(config)
+        return
 
         # Summary
         print("\n" + "-" * 56)
@@ -562,6 +569,9 @@ class SessionSetup:
         if env_mode in ("new", "n"):
             self.run_new_session_interface()
             return
+        if not env_mode:
+            self.run_new_session_interface()
+            return
 
         print("\n" + "=" * 72)
         print("CRI SESSION")
@@ -601,6 +611,10 @@ class SessionSetup:
             return
         if env_choice in ("0", "false", "no", "n", "real", "normal"):
             self.d.simulation_mode = False
+
+        prompt_mode = os.environ.get("CRI_PROMPT_CHILD_INPUT_MODE", "").strip().lower()
+        if prompt_mode not in ("1", "true", "yes", "y", "on"):
+            return
 
         print("\n" + "=" * 72)
         print("CRI 4.0 CHILD INPUT MODE")

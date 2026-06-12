@@ -25,6 +25,31 @@ CRI_STT_COMPUTE_TYPE=auto
 CRI_STT_MODEL=auto
 CRI_STT_GPU_INDEX=0
 
+# Optional microphone override.
+# Leave this commented out or empty to use the system/default microphone.
+# To debug a lab setup, run:
+#   python Open_Minded_dialogue/CRI-DIALOGUE2/list_audio_devices.py
+# Then set the input index only if the system default is wrong.
+#
+# CRI_STT_MIC_INDEX=
+
+
+# ---------------------------------------------------------------------
+# NAO network setup
+# ---------------------------------------------------------------------
+# In NAO mode, CRI first tries CRI_NAO_IP if it is set.
+# If CRI_NAO_IP is empty, CRI uses the NAO IP from test_config.pl if present.
+# If no configured IP works, CRI automatically searches the local network.
+# If no NAO is found, the terminal asks you to enter the NAO IP manually.
+CRI_NAO_AUTO_DISCOVER=true
+CRI_NAO_DISCOVERY_TIMEOUT_SECONDS=3
+#
+# Usually leave this commented out or empty.
+# Use it only when you want to force one NAO IP before startup.
+# The manual terminal prompt is session-only and does not save the IP here.
+#
+# CRI_NAO_IP=
+
 
 # ---------------------------------------------------------------------
 # Mac safe setup
