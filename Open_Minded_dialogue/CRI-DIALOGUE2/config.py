@@ -125,6 +125,8 @@ FIELD_LABELS = {
 
 STT_TIMEOUT      = 20    # seconds Whisper waits for any speech
 STT_PHRASE_LIMIT = 18    # seconds max for a single phrase
+STT_QUALITY_FILTER_ENABLED = True
+STT_QUALITY_FILTER_SCOPE = "all"  # "all" checks every child answer; "memory" checks only memory-risk answers.
 
 
 # ── LLM ──────────────────────────────────────────────────────────────────────

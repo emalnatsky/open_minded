@@ -6,6 +6,7 @@ import logging
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -60,6 +61,7 @@ def load_xlsx_scenario_converter():
 
 cri_module = load_cri_module()
 nao_discovery = sys.modules["nao_discovery"]
+speech_io_module = sys.modules["speech_io"]
 CRI = cri_module.CRI_ScriptedDialogue
 IntentResult = cri_module.IntentResult
 
@@ -8141,6 +8143,31 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(speech._recorder.queue_cleared)
         self.assertIsNotNone(speech._stt_spinner_lock)
 
+    def test_retry_prompts_have_ten_variants_without_hmm(self):
+        prompts = speech_io_module._RETRY_PROMPTS
+
+        self.assertEqual(len(prompts), 10)
+        self.assertTrue(all("hmm" not in prompt.lower() for prompt in prompts))
+
+    def test_realtimestt_language_defaults_to_dutch_and_can_be_overridden(self):
+        recorder_kwargs = {}
+
+        class DummyRecorder(FakeSTTRecorder):
+            def __init__(self, **kwargs):
+                super().__init__("")
+                recorder_kwargs.update(kwargs)
+
+        with patch.dict(
+            cri_module.SpeechIO.__init__.__globals__,
+            {"AudioToTextRecorder": DummyRecorder},
+        ):
+            cri_module.SpeechIO()
+            self.assertEqual(recorder_kwargs["language"], "nl")
+
+            recorder_kwargs.clear()
+            cri_module.SpeechIO(stt_language="en")
+            self.assertEqual(recorder_kwargs["language"], "en")
+
     def test_realtimestt_allowed_latency_limit_can_be_overridden(self):
         recorder_kwargs = {}
 
@@ -8258,6 +8285,238 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(speech._clean_stt_transcript("basta — oké"), "pasta oke")
         self.assertEqual(speech._clean_stt_transcript("gym en rekenen"), "gym en rekenen")
+
+    def test_stt_quality_filter_accepts_dutch_loanwords_and_domain_answers(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        accepted = (
+            "pizza",
+            "computer",
+            "minecraft",
+            "ik speel games",
+            "gym en rekenen",
+            "Ik vind pizza lekker",
+        )
+
+        for transcript in accepted:
+            with self.subTest(transcript=transcript):
+                self.assertEqual(speech._stt_quality_rejection_reason(transcript), "")
+
+    def test_stt_quality_filter_rejects_foreign_and_gibberish_transcripts(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        self.assertEqual(
+            speech._stt_quality_rejection_reason("oui je ne sais pas"),
+            "suspected_non_dutch",
+        )
+        self.assertEqual(
+            speech._stt_quality_rejection_reason("porque no quiero"),
+            "suspected_non_dutch",
+        )
+        self.assertEqual(
+            speech._stt_quality_rejection_reason("I don't know what you mean"),
+            "suspected_non_dutch",
+        )
+        self.assertEqual(
+            speech._stt_quality_rejection_reason("qwrty psstt xkcd zzzpq"),
+            "suspected_gibberish",
+        )
+
+    def test_stt_quality_filter_rejects_high_confidence_non_dutch_metadata(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+        speech._recorder = SimpleNamespace(
+            detected_language="fr",
+            detected_language_probability=0.95,
+        )
+
+        self.assertEqual(
+            speech._stt_quality_rejection_reason("la maison rouge arrive"),
+            "suspected_non_dutch",
+        )
+        self.assertEqual(speech._stt_quality_rejection_reason("pizza"), "")
+
+    def test_stt_quality_filter_default_shared_config_applies_to_all_turns(self):
+        events = []
+        with patch.dict(os.environ, {}, clear=True):
+            speech = cri_module.SpeechIO(
+                use_keyboard_input_fn=lambda: True,
+                is_memory_risk_turn_fn=lambda: False,
+                log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+            )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FakeSTTRecorder("I like hockey because it is fast")
+
+        with patch("builtins.print") as print_mock:
+            transcript = speech.listen()
+
+        self.assertEqual(speech._stt_quality_filter_scope, "all")
+        self.assertEqual(transcript, "")
+        self.assertFalse(print_mock.called)
+        rejections = [
+            data for event_type, data in events
+            if event_type == "stt_rejected"
+        ]
+        self.assertEqual(rejections[-1]["reason"], "suspected_non_dutch")
+
+    def test_stt_quality_filter_env_off_disables_runtime_rejection(self):
+        events = []
+        with patch.dict(os.environ, {"CRI_STT_QUALITY_FILTER": "false"}, clear=True):
+            speech = cri_module.SpeechIO(
+                use_keyboard_input_fn=lambda: True,
+                is_memory_risk_turn_fn=lambda: True,
+                log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+            )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FakeSTTRecorder("oui je ne sais pas")
+
+        with patch("builtins.print") as print_mock:
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "oui je ne sais pas")
+        self.assertTrue(print_mock.called)
+        self.assertFalse([
+            data for event_type, data in events
+            if event_type == "stt_rejected"
+        ])
+
+    def test_stt_quality_filter_memory_scope_rejects_memory_risk_transcript(self):
+        events = []
+        with patch.dict(
+            os.environ,
+            {"CRI_STT_QUALITY_FILTER": "true", "CRI_STT_QUALITY_FILTER_SCOPE": "memory"},
+        ):
+            speech = cri_module.SpeechIO(
+                use_keyboard_input_fn=lambda: True,
+                is_memory_risk_turn_fn=lambda: True,
+                log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+            )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FakeSTTRecorder("oui je ne sais pas")
+
+        with patch("builtins.print") as print_mock:
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "")
+        self.assertFalse(print_mock.called)
+        rejections = [
+            data for event_type, data in events
+            if event_type == "stt_rejected"
+        ]
+        self.assertEqual(rejections[-1]["reason"], "suspected_non_dutch")
+
+    def test_stt_quality_filter_memory_scope_allows_suspicious_casual_transcript(self):
+        events = []
+        with patch.dict(
+            os.environ,
+            {"CRI_STT_QUALITY_FILTER": "true", "CRI_STT_QUALITY_FILTER_SCOPE": "memory"},
+        ):
+            speech = cri_module.SpeechIO(
+                use_keyboard_input_fn=lambda: True,
+                is_memory_risk_turn_fn=lambda: False,
+                log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+            )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FakeSTTRecorder("I like hockey because it is fast")
+
+        with patch("builtins.print") as print_mock:
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "I like hockey because it is fast")
+        self.assertTrue(print_mock.called)
+        passed = [
+            data for event_type, data in events
+            if event_type == "stt_suspicious_passed"
+        ]
+        self.assertEqual(passed[-1]["reason"], "suspected_non_dutch")
+        self.assertFalse(passed[-1]["memory_risk"])
+
+    def test_stt_quality_filter_memory_scope_rejects_english_in_memory_risk_turn(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        casual = speech.stt_quality_filter_decision(
+            "I like hockey because it is fast",
+            memory_risk=False,
+            scope="memory",
+            enabled=True,
+        )
+        memory = speech.stt_quality_filter_decision(
+            "I like hockey because it is fast",
+            memory_risk=True,
+            scope="memory",
+            enabled=True,
+        )
+
+        self.assertEqual(casual["result"], "pass-log:suspected_non_dutch")
+        self.assertFalse(casual["reject"])
+        self.assertEqual(memory["result"], "reject:suspected_non_dutch")
+        self.assertTrue(memory["reject"])
+
+    def test_stt_quality_filter_disabled_passes_memory_risk_transcript(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        decision = speech.stt_quality_filter_decision(
+            "oui je ne sais pas",
+            memory_risk=True,
+            scope="memory",
+            enabled=False,
+        )
+
+        self.assertEqual(decision["result"], "pass")
+        self.assertFalse(decision["reject"])
+
+    def test_stt_quality_filter_accepts_memory_risk_domain_value(self):
+        speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)
+
+        decision = speech.stt_quality_filter_decision(
+            "pizza",
+            memory_risk=True,
+            scope="memory",
+            enabled=True,
+        )
+
+        self.assertEqual(decision["result"], "pass")
+        self.assertFalse(decision["reject"])
+
+    def test_stt_quality_filter_all_scope_rejects_casual_suspicious_transcript(self):
+        events = []
+        with patch.dict(
+            os.environ,
+            {"CRI_STT_QUALITY_FILTER": "true", "CRI_STT_QUALITY_FILTER_SCOPE": "all"},
+        ):
+            speech = cri_module.SpeechIO(
+                use_keyboard_input_fn=lambda: True,
+                is_memory_risk_turn_fn=lambda: False,
+                log_event_fn=lambda event_type, **data: events.append((event_type, data)),
+            )
+        speech._use_keyboard_input = lambda: False
+        speech._recorder = FakeSTTRecorder("I like hockey because it is fast")
+
+        with patch("builtins.print") as print_mock:
+            transcript = speech.listen()
+
+        self.assertEqual(transcript, "")
+        self.assertFalse(print_mock.called)
+        rejections = [
+            data for event_type, data in events
+            if event_type == "stt_rejected"
+        ]
+        self.assertEqual(rejections[-1]["reason"], "suspected_non_dutch")
+
+    def test_stt_filter_demo_outputs_latency_table(self):
+        result = subprocess.run(
+            [sys.executable, str(PACKAGE_DIR / "stt_filter_demo.py")],
+            cwd=str(PACKAGE_DIR),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertIn("transcript", result.stdout)
+        self.assertIn("memory scope", result.stdout)
+        self.assertIn("check ms", result.stdout)
+        self.assertIn("Shared default after git pull", result.stdout)
+        self.assertIn("I like hockey because it is fast", result.stdout)
+        self.assertIn("pass-log:suspected_non_dutch", result.stdout)
+        self.assertIn("qwrty psstt xkcd zzzpq", result.stdout)
 
     def test_say_clears_stale_realtimestt_spinner_before_output(self):
         speech = cri_module.SpeechIO(use_keyboard_input_fn=lambda: True)

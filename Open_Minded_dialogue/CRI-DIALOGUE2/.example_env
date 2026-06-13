@@ -23,7 +23,24 @@ OPENAI_API_KEY=sk-your-key-here
 CRI_STT_DEVICE=auto
 CRI_STT_COMPUTE_TYPE=auto
 CRI_STT_MODEL=auto
+CRI_STT_LANGUAGE=nl
 CRI_STT_GPU_INDEX=0
+
+# STT quality filter:
+# The shared git-tracked default checks suspicious foreign/gibberish STT after
+# every child answer. You do not need to add anything here after pulling.
+# This was tested with the demo script and did not add meaningful latency.
+#
+# Emergency local rollback during a session:
+# 1. Add the line below to Open_Minded_dialogue/_local/config/.env.
+# 2. Save the file.
+# 3. Stop CRI and start it again.
+#
+# CRI_STT_QUALITY_FILTER=false
+#
+# Less strict local mode, only for answers that could change memory:
+#
+# CRI_STT_QUALITY_FILTER_SCOPE=memory
 
 # Optional microphone override.
 # Leave this commented out or empty to use the system/default microphone.
@@ -64,6 +81,7 @@ CRI_NAO_DISCOVERY_TIMEOUT_SECONDS=3
 # CRI_STT_DEVICE=cpu
 # CRI_STT_COMPUTE_TYPE=int8
 # CRI_STT_MODEL=small
+# CRI_STT_LANGUAGE=nl
 # CRI_STT_GPU_INDEX=0
 #
 # If small is too slow on Mac, change only this:
@@ -86,6 +104,7 @@ CRI_NAO_DISCOVERY_TIMEOUT_SECONDS=3
 # CRI_STT_DEVICE=cuda
 # CRI_STT_COMPUTE_TYPE=float16
 # CRI_STT_MODEL=small
+# CRI_STT_LANGUAGE=nl
 # CRI_STT_GPU_INDEX=0
 
 
@@ -97,4 +116,5 @@ CRI_NAO_DISCOVERY_TIMEOUT_SECONDS=3
 # CRI_STT_DEVICE=cpu
 # CRI_STT_COMPUTE_TYPE=int8
 # CRI_STT_MODEL=base
+# CRI_STT_LANGUAGE=nl
 # CRI_STT_GPU_INDEX=0

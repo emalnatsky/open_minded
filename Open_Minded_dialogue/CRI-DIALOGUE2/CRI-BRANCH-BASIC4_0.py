@@ -772,6 +772,29 @@ class CRI_ScriptedDialogue(SICApplication):
     def classify_with_repeat(self, transcript, turn_context=None):
         return self.actions.classify_with_repeat(transcript, turn_context)
 
+    def is_stt_memory_risk_context(self) -> bool:
+        """True when a child transcript could become or confirm a memory value."""
+        if getattr(self, "pending_change", None):
+            return True
+        context = self.current_turn_context or {}
+        if not context:
+            return False
+        try:
+            return bool(self.actions.is_memory_correction_window(context))
+        except Exception:
+            mode = context.get("response_mode")
+            return bool(
+                mode in {
+                    "memory_access_change",
+                    "change_confirmation",
+                    "mistake_interpretation",
+                    "memory_review_group",
+                    "memory_review_add_final",
+                }
+                or context.get("memory_correction_available")
+                or context.get("allow_memory_change")
+            )
+
     def show_child_processing_loading(self) -> bool:
         return (
             not env_flag("CRI_DISABLE_LOADING_STATUS", False)
@@ -1313,6 +1336,7 @@ class CRI_ScriptedDialogue(SICApplication):
         stt_device = os.environ.get("CRI_STT_DEVICE", "auto").strip() or "auto"
         stt_compute_type = os.environ.get("CRI_STT_COMPUTE_TYPE", "auto").strip() or "auto"
         stt_model = os.environ.get("CRI_STT_MODEL", "auto").strip() or "auto"
+        stt_language = os.environ.get("CRI_STT_LANGUAGE", "nl").strip() or "nl"
         raw_gpu_index = os.environ.get("CRI_STT_GPU_INDEX", "0").strip() or "0"
         try:
             stt_gpu_index = int(raw_gpu_index)
@@ -1345,6 +1369,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 self.logger.info("RealtimeSTT will use the system/default microphone.")
             else:
                 self.logger.info("RealtimeSTT will use explicit microphone index %s.", stt_mic_index)
+            self.logger.info("RealtimeSTT language: %s.", stt_language)
             stt_backend = resolve_realtimestt_backend(
                 requested_device=stt_device,
                 requested_compute_type=stt_compute_type,
@@ -1386,11 +1411,12 @@ class CRI_ScriptedDialogue(SICApplication):
             use_keyboard_input_fn=self.use_keyboard_input,
             review_transcripts=self.REVIEW_TRANSCRIPTS,
             log_event_fn=self.log_conversation_event,
+            is_memory_risk_turn_fn=self.is_stt_memory_risk_context,
             simulated_history=self.simulated_history,
             generate_simulated_response_fn=self.generate_simulated_child_response,
             set_last_utterance_fn=lambda t: setattr(self, "last_leo_utterance", t),
             stt_model=stt_backend.model,
-            stt_language="nl",
+            stt_language=stt_language,
             stt_timeout=self.STT_TIMEOUT,
             stt_phrase_limit=self.STT_PHRASE_LIMIT,
             stt_post_speech_silence=0.6,

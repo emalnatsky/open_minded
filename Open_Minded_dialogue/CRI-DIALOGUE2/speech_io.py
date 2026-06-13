@@ -57,9 +57,20 @@ try:
 except Exception:  # pragma: no cover - fallback for standalone imports
     LoadingStatus = None
 
+try:
+    import config as _cri_config
+except Exception:  # pragma: no cover - standalone imports outside CRI
+    _cri_config = None
+
 logger = logging.getLogger(__name__)
 
 _REALTIME_STT_QUEUE_WARNING_TEXT = "Audio queue size exceeds latency limit"
+_DEFAULT_STT_QUALITY_FILTER_ENABLED = bool(
+    getattr(_cri_config, "STT_QUALITY_FILTER_ENABLED", True)
+)
+_DEFAULT_STT_QUALITY_FILTER_SCOPE = str(
+    getattr(_cri_config, "STT_QUALITY_FILTER_SCOPE", "all") or "all"
+)
 
 
 class _RealtimeSTTQueueWarningFilter(logging.Filter):
@@ -142,12 +153,45 @@ _STT_CORRECTIONS = {
 }
 # ── Retry prompts (Dutch, rotated so they don't sound identical) ──────────────
 _RETRY_PROMPTS = (
-    "Hmm, ik heb je niet goed gehoord. Kun je het nog een keer proberen?",
+    "Ik heb je niet goed gehoord. Kun je het nog een keer proberen?",
     "Sorry, dat heb ik gemist. Kun je het nog eens zeggen?",
-    "Ik heb je helaas niet verstaan. Kun je het nog één keer proberen?",
+    "Ik hoorde je niet goed. Wil je het nog een keer zeggen?",
+    "Kun je dat nog een keer zeggen?",
+    "Volgens mij miste ik je antwoord. Probeer het nog eens.",
+    "Ik verstond je niet helemaal. Zeg het maar nog een keer.",
+    "Oeps, dat kwam niet goed bij mij binnen. Wil je het herhalen?",
+    "Ik hoorde vooral ruis. Kun je het nog eens proberen?",
+    "Dat ging net te zacht voor mij. Zeg het nog maar een keer.",
+    "Ik ben even de draad kwijt. Wat zei je?",
 )
 
-# ── Whisper silence hallucinations ────────────────────────────────────────────
+_SHORT_STT_SAFE_ANSWERS = frozenset({
+    "ja", "nee", "jawel", "jazeker", "klopt", "ok", "oke", "pizza", "pasta",
+    "lasagne", "sushi", "friet", "patat", "shoarma", "computer", "minecraft",
+    "youtube", "tiktok", "hockey", "voetbal", "gamen", "game", "gym",
+    "rekenen", "taal", "turnen", "tekenen", "dansen", "bakken",
+})
+
+_STT_DOMAIN_WORDS = frozenset({
+    "ja", "nee", "niet", "klopt", "ik", "mijn", "jij", "je", "dat", "dit",
+    "de", "het", "een", "is", "zijn", "was", "voor", "naar", "met", "op",
+    "in", "en", "of", "maar", "wel", "goed", "weet", "denk", "vind",
+    "wil", "hoef", "hou", "houd", "van", "leuk",
+    "lekker", "lievelingseten", "lievelingsvak", "favoriete", "hobby",
+    "school", "later", "worden", "sport", "dieren", "dier", "vrienden",
+    "pizza", "pasta", "lasagne", "sushi", "friet", "patat", "shoarma",
+    "computer", "minecraft", "youtube", "tiktok", "hockey", "voetbal",
+    "gamen", "games", "gym", "rekenen", "taal", "turnen", "tekenen",
+    "dansen", "bakken", "muziek", "buiten", "spelen",
+})
+
+_FOREIGN_STT_PHRASES = (
+    "je suis", "je ne sais pas", "bonjour", "bonsoir", "merci", "oui",
+    "avec", "pourquoi", "parce que", "porque", "quiero", "hola", "gracias",
+    "vamos", "entonces", "no quiero", "no se", "i don't know",
+    "i dont know", "what do you mean", "yes sure", "i want", "i like",
+)
+# --- Whisper silence hallucinations ────────────────────────────────────────────
 # Whisper emits these token strings for silent audio instead of returning "".
 _WHISPER_SILENCE_ARTEFACTS = frozenset({
     ".", "..", "...",
@@ -245,6 +289,7 @@ class SpeechIO:
         use_keyboard_input_fn=None,
         review_transcripts: bool = True,
         log_event_fn=None,
+        is_memory_risk_turn_fn=None,
         simulated_history: list = None,
         generate_simulated_response_fn=None,
         set_last_utterance_fn=None,
@@ -308,6 +353,7 @@ class SpeechIO:
         self._use_keyboard_input = use_keyboard_input_fn or (lambda: False)
         self.review_transcripts = review_transcripts
         self._log_event = log_event_fn or (lambda *a, **kw: None)
+        self._is_memory_risk_turn = is_memory_risk_turn_fn or (lambda: False)
         self._simulated_history = simulated_history if simulated_history is not None else []
         self._generate_simulated_response = generate_simulated_response_fn or (lambda: "")
         self._set_last_utterance = set_last_utterance_fn or (lambda t: None)
@@ -338,10 +384,18 @@ class SpeechIO:
             "CRI_STT_ALLOWED_LATENCY_LIMIT",
             80,
         )
+        self._stt_quality_filter_enabled = self._env_bool(
+            "CRI_STT_QUALITY_FILTER",
+            _DEFAULT_STT_QUALITY_FILTER_ENABLED,
+        )
+        self._stt_quality_filter_scope = self._env_quality_filter_scope(
+            "CRI_STT_QUALITY_FILTER_SCOPE",
+            _DEFAULT_STT_QUALITY_FILTER_SCOPE,
+        )
         self._stt_queue_warning_filter = _install_realtimestt_queue_warning_filter()
         self._pronunciation_overrides = {}
         if pronunciation_overrides_path:
-            import json, os
+            import json
             if os.path.exists(pronunciation_overrides_path):
                 with open(pronunciation_overrides_path, "r", encoding="utf-8") as f:
                     self._pronunciation_overrides = json.load(f)
@@ -683,6 +737,15 @@ class SpeechIO:
                 self._reset_stt_audio_state("after_stale_audio")
                 return ""
             transcript = self._clean_stt_transcript(transcript)
+            stt_rejection_reason = self._stt_quality_runtime_rejection_reason(transcript)
+            if stt_rejection_reason:
+                logger.warning("Rejected STT transcript (%s): %s", stt_rejection_reason, transcript)
+                self._log_event("stt_rejected", reason=stt_rejection_reason, text=transcript)
+                self._set_eyes("white")
+                self._stop_stt_spinner()
+                self._report_stt_queue_overflow_if_needed(queue_warning_snapshot, stt_rejection_reason)
+                self._reset_stt_audio_state(f"after_{stt_rejection_reason}")
+                return ""
             self._set_eyes("white")
             self._stop_stt_spinner()
             self._report_stt_queue_overflow_if_needed(queue_warning_snapshot, "listen")
@@ -794,6 +857,29 @@ class SpeechIO:
         except (TypeError, ValueError):
             return default
         return number if number > 0 else default
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        raw = os.environ.get(name)
+        if raw is None or str(raw).strip() == "":
+            return bool(default)
+        return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    @staticmethod
+    def _normalise_quality_filter_scope(value: str) -> str:
+        scope = str(value or "memory").strip().lower()
+        if scope in {"0", "false", "off", "none", "disabled"}:
+            return "off"
+        if scope == "all":
+            return "all"
+        return "memory"
+
+    @classmethod
+    def _env_quality_filter_scope(cls, name: str, default: str) -> str:
+        raw = os.environ.get(name)
+        if raw is None or str(raw).strip() == "":
+            raw = default
+        return cls._normalise_quality_filter_scope(raw)
 
     @staticmethod
     def _bounded_similarity(value: float) -> float:
@@ -1174,6 +1260,146 @@ class SpeechIO:
             )
             return ""
         return self.normalize_transcript(fixed)
+
+    def _stt_quality_rejection_reason(self, transcript: str) -> str:
+        """Return a rejection reason for obvious non-Dutch or gibberish STT."""
+        if not transcript:
+            return ""
+        text = self.normalize_transcript(transcript).lower().strip()
+        words = self._normalise_stt_words(text)
+        if not words:
+            return "suspected_gibberish"
+
+        compact = " ".join(words)
+        if compact in _SHORT_STT_SAFE_ANSWERS:
+            return ""
+        if len(words) <= 2 and all(word.isalnum() for word in words):
+            if not any(self._contains_phrase(compact, phrase) for phrase in _FOREIGN_STT_PHRASES):
+                return ""
+
+        if any(self._contains_phrase(compact, phrase) for phrase in _FOREIGN_STT_PHRASES):
+            return "suspected_non_dutch"
+
+        detected_language, language_probability = self._detected_stt_language()
+        if (
+            detected_language
+            and detected_language not in {"nl", "nld", "dutch"}
+            and language_probability >= 0.80
+            and not self._has_dutch_or_domain_signal(words)
+        ):
+            return "suspected_non_dutch"
+
+        if self._looks_like_gibberish_text(text, words):
+            return "suspected_gibberish"
+        return ""
+
+    def stt_quality_rejection_reason(self, transcript: str) -> str:
+        """Public wrapper used by tests/demo code without touching internals."""
+        return self._stt_quality_rejection_reason(transcript)
+
+    def stt_quality_filter_decision(
+        self,
+        transcript: str,
+        *,
+        memory_risk: bool = False,
+        scope: str = None,
+        enabled: bool = None,
+    ) -> dict:
+        """Return how the STT quality filter would handle a transcript."""
+        reason = self._stt_quality_rejection_reason(transcript)
+        filter_enabled = self._stt_quality_filter_enabled if enabled is None else bool(enabled)
+        filter_scope = self._normalise_quality_filter_scope(
+            self._stt_quality_filter_scope if scope is None else scope
+        )
+        reject = bool(
+            filter_enabled
+            and reason
+            and filter_scope != "off"
+            and (filter_scope == "all" or (filter_scope == "memory" and memory_risk))
+        )
+        if reject:
+            result = f"reject:{reason}"
+        elif reason and filter_enabled and filter_scope == "memory" and not memory_risk:
+            result = f"pass-log:{reason}"
+        else:
+            result = "pass"
+        return {
+            "result": result,
+            "reject": reject,
+            "reason": reason,
+            "scope": filter_scope,
+            "enabled": filter_enabled,
+            "memory_risk": bool(memory_risk),
+        }
+
+    def _stt_quality_runtime_rejection_reason(self, transcript: str) -> str:
+        """Apply strict STT filtering only in the configured runtime scope."""
+        decision = self.stt_quality_filter_decision(
+            transcript,
+            memory_risk=self._current_turn_is_memory_risk(),
+        )
+        reason = decision["reason"]
+        if not reason:
+            return ""
+        if decision["reject"]:
+            return reason
+        if decision["result"].startswith("pass-log"):
+            self._log_event(
+                "stt_suspicious_passed",
+                reason=reason,
+                text=transcript,
+                scope=decision["scope"],
+                memory_risk=decision["memory_risk"],
+            )
+            logger.debug(
+                "Passed suspicious STT transcript outside memory-risk scope (%s): %s",
+                reason,
+                transcript,
+            )
+        return ""
+
+    def _current_turn_is_memory_risk(self) -> bool:
+        try:
+            return bool(self._is_memory_risk_turn())
+        except Exception as e:
+            logger.debug("Could not determine STT memory-risk turn: %s", e)
+            return False
+
+    @staticmethod
+    def _contains_phrase(text: str, phrase: str) -> bool:
+        phrase = phrase.lower().strip()
+        if not phrase:
+            return False
+        if " " in phrase or "'" in phrase:
+            return phrase in text
+        return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
+
+    def _detected_stt_language(self) -> tuple[str, float]:
+        recorder = getattr(self, "_recorder", None)
+        language = str(getattr(recorder, "detected_language", "") or "").lower()
+        try:
+            probability = float(getattr(recorder, "detected_language_probability", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            probability = 0.0
+        return language, probability
+
+    @staticmethod
+    def _has_dutch_or_domain_signal(words: list[str]) -> bool:
+        return any(word in _STT_DOMAIN_WORDS or word in _SHORT_STT_SAFE_ANSWERS for word in words)
+
+    @classmethod
+    def _looks_like_gibberish_text(cls, text: str, words: list[str]) -> bool:
+        if len(text) >= 8:
+            alnum = sum(ch.isalnum() for ch in text)
+            if alnum / max(1, len(text)) < 0.45:
+                return True
+        if any(len(word) > 24 for word in words):
+            return True
+        if len(words) >= 4 and not cls._has_dutch_or_domain_signal(words):
+            vowel_words = sum(1 for word in words if re.search(r"[aeiou]", word))
+            if vowel_words / len(words) < 0.35:
+                return True
+        return False
 
     @staticmethod
     def _normalise_stt_words(text: str):

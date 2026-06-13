@@ -131,13 +131,20 @@ class ActionHandler:
 
     def classify_with_repeat(self, transcript: str, turn_context: dict = None):
         """Classify once, ask for repetition on low confidence, then retry."""
-        result = self.call_classifier("classify", transcript, turn_context)
-        if result.intent == REPEAT_SENTINEL:
-            self.d.logger.info("Low confidence - asking to repeat.")
-            self.d.speech.say("Kun je dat nog een keer zeggen?")
-            time.sleep(0.8)
-            transcript = self.d.speech.listen_with_review()
-            result = self.call_classifier("classify_retry", transcript, turn_context)
+        previous_turn_context = getattr(self.d, "current_turn_context", None)
+        if turn_context is not None:
+            self.d.current_turn_context = turn_context
+        try:
+            result = self.call_classifier("classify", transcript, turn_context)
+            if result.intent == REPEAT_SENTINEL:
+                self.d.logger.info("Low confidence - asking to repeat.")
+                self.d.speech.say("Kun je dat nog een keer zeggen?")
+                time.sleep(0.8)
+                transcript = self.d.speech.listen_with_review()
+                result = self.call_classifier("classify_retry", transcript, turn_context)
+        finally:
+            if turn_context is not None:
+                self.d.current_turn_context = previous_turn_context
         self.d.logger.info("Intent: %s", result.to_dict())
         self.d.log_intent_classifier_result(transcript, result)
         return result

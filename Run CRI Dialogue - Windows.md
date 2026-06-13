@@ -27,12 +27,34 @@ OPENAI_API_KEY=your-key-here
 CRI_STT_DEVICE=auto
 CRI_STT_COMPUTE_TYPE=auto
 CRI_STT_MODEL=auto
+CRI_STT_LANGUAGE=nl
 CRI_STT_GPU_INDEX=0
 CRI_NAO_AUTO_DISCOVER=true
 CRI_NAO_DISCOVERY_TIMEOUT_SECONDS=3
 ```
 
 Normally leave `CRI_NAO_IP` empty or commented out. CRI will auto-discover NAO. If NAO is not found, CRI asks for the IP in the terminal.
+
+The STT quality filter is controlled by the shared code after `git pull`, so you do not need to add it to `.env`. By default, suspicious foreign/gibberish STT is retried after every child answer. We tested the filter timing with the demo script; the check is only a text comparison after Whisper finishes and did not add meaningful latency.
+
+If the filter does not work well in a real interaction, turn it off on that laptop:
+
+1. Open this private file:
+   ```text
+   Open_Minded_dialogue\_local\config\.env
+   ```
+2. Add this line at the bottom of the file:
+   ```env
+   CRI_STT_QUALITY_FILTER=false
+   ```
+3. Save the file.
+4. Stop CRI and start it again.
+
+To make the check less strict instead of fully off, add this line instead:
+
+```env
+CRI_STT_QUALITY_FILTER_SCOPE=memory
+```
 
 ## 3. Start GraphDB First
 
