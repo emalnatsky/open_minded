@@ -58,8 +58,6 @@ CRI_STT_QUALITY_FILTER_SCOPE=memory
 
 Mac STT note: `auto` uses the Mac-safe CPU/int8 path. Do not set `CRI_STT_DEVICE=mps` or `CRI_STT_DEVICE=metal` for this RealtimeSTT/faster-whisper/CTranslate2 setup.
 
-Microphone selection is normally done in the CRI terminal. Leave `CRI_STT_MIC_INDEX` and `CRI_STT_MIC_SOURCE` empty unless you want to skip that prompt. During startup, press Enter for the system/default laptop or DJI mic, type a local mic index, or type `N` for the NAO front microphone when NAO is connected.
-
 ## 3. Start GraphDB First
 
 1. Open GraphDB Desktop.
@@ -191,40 +189,7 @@ Use:
 
 The child ID must exist in GraphDB.
 
-## 6. Microphone Selection
-
-In microphone mode, CRI asks which microphone to use.
-
-```text
-Microphone Selection
-Press Enter for the system/default laptop microphone.
-Local microphones:
-  1: MacBook Microphone ... [system default]
-  4: DJI Mic ...
-
-  N: NAO front microphone at <nao-ip>
-
-Microphone choice:
-```
-
-Use:
-
-- Press Enter for the macOS default input device.
-- Type a number, for example `4`, to use that local/DJI microphone.
-- Type `N` only when you want to use NAO's own front microphone.
-
-Local/DJI is still the recommended default because it uses the tested RealtimeSTT path. NAO mic uses a separate SIC Whisper path because NAO is a network stream, not a macOS microphone device.
-
-Optional overrides in `Open_Minded_dialogue/_local/config/.env`:
-
-```env
-CRI_STT_MIC_INDEX=4
-CRI_STT_MIC_SOURCE=nao
-```
-
-Use only one override at a time. Remove both lines to get the terminal selector again.
-
-## 7. NAO Connection
+## 6. NAO Connection
 
 The NAO IP should normally stay empty in config.
 
@@ -244,7 +209,7 @@ Enter NAO IP manually, press Enter to retry, or type Q to quit: <NAO_IP_FROM_CHE
 
 The manual IP is only used for that session. It is not saved.
 
-## 8. Tablet
+## 7. Tablet
 
 Only use the tablet for condition `E`.
 
@@ -264,7 +229,7 @@ Expected result:
 - the child name appears on the cover;
 - pages update during the interaction.
 
-## 9. During The Conversation
+## 8. During The Conversation
 
 The terminal should show:
 
@@ -280,7 +245,7 @@ NAO eyes:
 
 The child should only answer when NAO's eyes are green.
 
-## 10. Ending The Session
+## 9. Ending The Session
 
 1. Let the final phase finish.
 2. Check that the conversation log is saved in:
@@ -293,7 +258,7 @@ Open_Minded_dialogue/_local/conversations
 4. Stop the other terminals.
 5. For the next participant, restart CRI and fill in the new child ID/name/condition.
 
-## 11. Common Problems
+## 10. Common Problems
 
 ### NAO Not Found
 
@@ -318,7 +283,7 @@ source .venv/bin/activate
 python Open_Minded_dialogue/CRI-DIALOGUE2/list_audio_devices.py
 ```
 
-If the wrong mic is selected, restart CRI and choose the correct index in the terminal microphone selector. To skip the selector next time, set `CRI_STT_MIC_INDEX` in:
+If the wrong mic is selected, set `CRI_STT_MIC_INDEX` in:
 
 ```text
 Open_Minded_dialogue/_local/config/.env

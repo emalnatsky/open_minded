@@ -258,21 +258,6 @@ class FakeNao:
         self.leds = FakeNaoChannel()
         self.autonomous = FakeNaoChannel()
         self.motion = FakeNaoChannel()
-        self.mic = SimpleNamespace()
-
-
-class FakeWhisperConnector:
-    def __init__(self, transcript="pizza"):
-        self.transcript = transcript
-        self.requests = []
-        self.stopped = False
-
-    def request(self, request, timeout=100.0, block=True):
-        self.requests.append((request, timeout, block))
-        return SimpleNamespace(transcript=self.transcript)
-
-    def stop_component(self):
-        self.stopped = True
 
 
 def make_app(openai_payloads=None):
@@ -718,82 +703,6 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid CRI_STT_MIC_INDEX"):
             cri_module.parse_optional_mic_index("laptop")
-
-    def test_terminal_mic_selector_enter_uses_system_default(self):
-        app = make_app()
-        app.child_input_mode = "microphone"
-        app.simulation_mode = False
-        app.CONNECT_NAO = False
-        app.nao = None
-
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch("builtins.input", return_value=""),
-            patch.object(cri_module, "list_input_devices", return_value=[]),
-            patch.object(cri_module, "describe_selected_input_device", return_value="system default - Test Mic (index 1)"),
-            patch("sys.stdout", new=io.StringIO()),
-        ):
-            app.configure_stt_microphone_source(force_prompt=True)
-
-        self.assertEqual(app.stt_mic_source, "local")
-        self.assertIsNone(app.stt_mic_index)
-        self.assertEqual(app.stt_mic_description, "system default - Test Mic (index 1)")
-
-    def test_terminal_mic_selector_number_uses_local_device_index(self):
-        app = make_app()
-        app.child_input_mode = "microphone"
-        app.simulation_mode = False
-        app.CONNECT_NAO = False
-        app.nao = None
-
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch("builtins.input", return_value="18"),
-            patch.object(cri_module, "list_input_devices", return_value=[]),
-            patch.object(cri_module, "describe_selected_input_device", return_value="index 18 - DJI Mic"),
-            patch("sys.stdout", new=io.StringIO()),
-        ):
-            app.configure_stt_microphone_source(force_prompt=True)
-
-        self.assertEqual(app.stt_mic_source, "local")
-        self.assertEqual(app.stt_mic_index, 18)
-        self.assertEqual(app.stt_mic_description, "index 18 - DJI Mic")
-
-    def test_terminal_mic_selector_n_uses_nao_microphone_when_connected(self):
-        app = make_app()
-        app.child_input_mode = "microphone"
-        app.simulation_mode = False
-        app.CONNECT_NAO = True
-        app.nao = FakeNao()
-        app.nao_ip = "192.168.1.4"
-
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch("builtins.input", return_value="n"),
-            patch.object(cri_module, "list_input_devices", return_value=[]),
-            patch("sys.stdout", new=io.StringIO()),
-        ):
-            app.configure_stt_microphone_source(force_prompt=True)
-
-        self.assertEqual(app.stt_mic_source, "nao")
-        self.assertIsNone(app.stt_mic_index)
-        self.assertEqual(app.stt_mic_description, "NAO front microphone at 192.168.1.4")
-
-    def test_mic_source_env_nao_bypasses_prompt(self):
-        app = make_app()
-        app.child_input_mode = "microphone"
-        app.simulation_mode = False
-        app.CONNECT_NAO = True
-        app.nao = FakeNao()
-        app.nao_ip = "192.168.1.4"
-
-        with (
-            patch.dict(os.environ, {"CRI_STT_MIC_SOURCE": "nao"}, clear=True),
-            patch("builtins.input", side_effect=AssertionError("prompt should be skipped")),
-        ):
-            app.configure_stt_microphone_source()
-
-        self.assertEqual(app.stt_mic_source, "nao")
 
     def test_roster_session_config_sets_child_and_input_mode(self):
         app = make_app()
@@ -8296,57 +8205,6 @@ class CRIDialogue2Tests(unittest.TestCase):
             cri_module.SpeechIO(stt_mic_index=18)
 
         self.assertEqual(recorder_kwargs["input_device_index"], 18)
-
-    def test_nao_microphone_source_does_not_construct_realtimestt(self):
-        def fail_recorder(**_kwargs):
-            raise AssertionError("RealtimeSTT should not be constructed for NAO mic input")
-
-        with patch.dict(
-            cri_module.SpeechIO.__init__.__globals__,
-            {"AudioToTextRecorder": fail_recorder},
-        ):
-            speech = cri_module.SpeechIO(
-                stt_input_source="nao",
-                whisper=FakeWhisperConnector("pizza"),
-            )
-
-        self.assertIsNone(speech._recorder)
-        self.assertEqual(speech._stt_input_source, "nao")
-
-    def test_nao_microphone_listen_uses_sic_whisper_and_quality_filter(self):
-        events = []
-        whisper = FakeWhisperConnector("pizza")
-        speech = cri_module.SpeechIO(
-            stt_input_source="nao",
-            whisper=whisper,
-            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
-        )
-
-        with patch("sys.stdout", new=io.StringIO()) as stdout:
-            transcript = speech.listen()
-
-        self.assertEqual(transcript, "pizza")
-        self.assertEqual(len(whisper.requests), 1)
-        self.assertIn("CHILD: pizza", stdout.getvalue())
-        self.assertIn(("utterance", {
-            "speaker": "CHILD",
-            "text": "pizza",
-            "input_mode": "microphone",
-            "stt_backend": "SICWhisperNAO",
-        }), events)
-
-    def test_nao_microphone_listen_rejects_filtered_transcript(self):
-        events = []
-        speech = cri_module.SpeechIO(
-            stt_input_source="nao",
-            whisper=FakeWhisperConnector("oui je ne sais pas"),
-            log_event_fn=lambda event_type, **data: events.append((event_type, data)),
-        )
-
-        transcript = speech.listen()
-
-        self.assertEqual(transcript, "")
-        self.assertTrue(any(event == "stt_rejected" for event, _data in events))
 
     def test_realtimestt_queue_warning_filter_suppresses_only_queue_spam(self):
         install_filter = cri_module.SpeechIO.__init__.__globals__[

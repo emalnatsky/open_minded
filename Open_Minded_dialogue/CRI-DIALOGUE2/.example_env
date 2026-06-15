@@ -42,21 +42,13 @@ CRI_STT_GPU_INDEX=0
 #
 # CRI_STT_QUALITY_FILTER_SCOPE=memory
 
-# Microphone selection.
-# In microphone mode, CRI asks in the terminal which microphone to use.
-# Press Enter for the system/default laptop/DJI mic, type a local mic index,
-# or type N for the NAO front microphone when NAO is connected.
-#
-# Optional overrides. Usually leave both commented out.
+# Optional microphone override.
+# Leave this commented out or empty to use the system/default microphone.
 # To debug a lab setup, run:
 #   python Open_Minded_dialogue/CRI-DIALOGUE2/list_audio_devices.py
-# Then set the input index only if you want to skip the terminal prompt.
+# Then set the input index only if the system default is wrong.
 #
-# CRI_STT_MIC_SOURCE=local
 # CRI_STT_MIC_INDEX=
-#
-# Force NAO microphone for one laptop/session config:
-# CRI_STT_MIC_SOURCE=nao
 
 
 # ---------------------------------------------------------------------

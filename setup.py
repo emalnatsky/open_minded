@@ -6,7 +6,6 @@ setup(
     packages=find_packages(),
     install_requires=[
         "social-interaction-cloud>=2.0.13",
-        "SpeechRecognition>=3.10.0",
     ],
     extras_require={
         "dev": [

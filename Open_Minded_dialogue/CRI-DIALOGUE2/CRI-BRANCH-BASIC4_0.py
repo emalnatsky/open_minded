@@ -26,7 +26,6 @@ from dotenv import load_dotenv
 from audio_devices import (
     AudioDeviceError,
     describe_selected_input_device,
-    list_input_devices,
     parse_optional_mic_index,
 )
 
@@ -404,8 +403,6 @@ class CRI_ScriptedDialogue(SICApplication):
         install_warning_line_clear_filter()
         self.stt_mic_index = None
         self.stt_mic_description = ""
-        self.stt_mic_source = "local"
-        self.nao_whisper = None
         self.terminal_log_level = terminal_log_level()
         self.set_log_level(self.terminal_log_level)
         logging.getLogger().setLevel(self.terminal_log_level)
@@ -491,134 +488,6 @@ class CRI_ScriptedDialogue(SICApplication):
             print(f"Experimental condition URL: {self.tablet_url_for_terminal()}")
         print()
         input("Press Enter to continue...")
-
-    def _normalise_stt_mic_source(self, value):
-        raw = str(value or "").strip().lower()
-        if raw in ("", "auto", "default"):
-            return ""
-        if raw in ("local", "desktop", "pc", "system", "laptop", "dji"):
-            return "local"
-        if raw in ("nao", "robot"):
-            return "nao"
-        raise RuntimeError(
-            f"Invalid CRI_STT_MIC_SOURCE value: {value!r}. "
-            "Use local, nao, or leave it empty for the terminal selector."
-        )
-
-    def _select_local_stt_mic(self, stt_mic_index):
-        self.USE_DESKTOP_MIC = True
-        self.stt_mic_source = "local"
-        self.stt_mic_index = stt_mic_index
-        try:
-            self.stt_mic_description = describe_selected_input_device(stt_mic_index)
-        except AudioDeviceError as exc:
-            raise RuntimeError(str(exc)) from exc
-        return stt_mic_index
-
-    def _select_nao_stt_mic(self):
-        if not self.CONNECT_NAO or self.nao is None:
-            raise RuntimeError("NAO microphone selected, but NAO is not connected.")
-        self.USE_DESKTOP_MIC = False
-        self.stt_mic_source = "nao"
-        self.stt_mic_index = None
-        self.stt_mic_description = f"NAO front microphone at {self.nao_ip}"
-        return None
-
-    def _print_microphone_choices(self, allow_nao=True):
-        print("\n" + "=" * 72)
-        print("Microphone Selection")
-        print("=" * 72)
-        print("Press Enter for the system/default laptop microphone.")
-        try:
-            devices = list_input_devices()
-        except AudioDeviceError as exc:
-            devices = []
-            print(f"Could not list local microphones: {exc}")
-        if devices:
-            print("\nLocal microphones:")
-            for device in devices:
-                default = "  [system default]" if device.is_default else ""
-                print(f"  {device.index}: {device.name}{default}")
-        if allow_nao and self.CONNECT_NAO and self.nao is not None:
-            print(f"\n  N: NAO front microphone at {self.nao_ip}")
-        print()
-
-    def prompt_for_stt_microphone(self, allow_nao=True):
-        while True:
-            self._print_microphone_choices(allow_nao=allow_nao)
-            choice = input("Microphone choice: ").strip().lower()
-            if choice == "":
-                return self._select_local_stt_mic(None)
-            if choice in ("n", "nao", "robot") and allow_nao:
-                return self._select_nao_stt_mic()
-            try:
-                mic_index = parse_optional_mic_index(choice)
-                return self._select_local_stt_mic(mic_index)
-            except Exception as exc:
-                print(f"Invalid microphone choice: {exc}")
-
-    def configure_stt_microphone_source(self, *, allow_nao=True, force_prompt=False):
-        """
-        Choose the child-input microphone for this session.
-
-        Local microphones go through RealtimeSTT/PortAudio. The NAO microphone
-        is a SIC network stream and is handled by a separate Whisper connector.
-        """
-        if self.use_keyboard_input() or self.simulation_mode:
-            self.stt_mic_source = "local"
-            self.stt_mic_index = None
-            self.stt_mic_description = ""
-            return None
-
-        raw_source = os.environ.get("CRI_STT_MIC_SOURCE", "")
-        source = self._normalise_stt_mic_source(raw_source)
-        raw_mic_index = os.environ.get("CRI_STT_MIC_INDEX", "")
-        has_mic_index_override = str(raw_mic_index or "").strip().lower() not in (
-            "",
-            "auto",
-            "default",
-            "system",
-        )
-        if source == "nao" and has_mic_index_override:
-            raise RuntimeError("Use either CRI_STT_MIC_SOURCE=nao or CRI_STT_MIC_INDEX, not both.")
-
-        if source == "nao":
-            return self._select_nao_stt_mic()
-        if source == "local" or has_mic_index_override:
-            try:
-                stt_mic_index = parse_optional_mic_index(raw_mic_index)
-            except ValueError as exc:
-                raise RuntimeError(str(exc)) from exc
-            return self._select_local_stt_mic(stt_mic_index)
-
-        prompt_env = os.environ.get("CRI_PROMPT_MIC_SELECTION", "").strip().lower()
-        should_prompt = force_prompt or prompt_env not in ("0", "false", "no", "n", "off")
-        if should_prompt and (force_prompt or (sys.stdin is not None and sys.stdin.isatty())):
-            was_loading = LoadingStatus.pause_active(keep_line=True)
-            try:
-                return self.prompt_for_stt_microphone(allow_nao=allow_nao)
-            finally:
-                if was_loading:
-                    LoadingStatus.resume_active()
-
-        return self._select_local_stt_mic(None)
-
-    def create_nao_whisper_connector(self):
-        if self.nao is None:
-            raise RuntimeError("Cannot initialize NAO microphone STT before NAO is connected.")
-        try:
-            from sic_framework.services.openai_whisper_stt.whisper_stt import (
-                SICWhisper,
-                WhisperConf,
-            )
-
-            whisper_conf = WhisperConf(openai_key=os.environ["OPENAI_API_KEY"])
-            return SICWhisper(input_source=self.nao.mic, conf=whisper_conf)
-        except Exception as exc:
-            raise RuntimeError(
-                "NAO microphone STT could not be initialized. "
-                "Choose a local/DJI microphone or check the SIC NAO microphone service."
-            ) from exc
 
     def configure_sic_db_ip_for_nao(self):
         target_ip = self.normalize_network_host(self.nao_ip)
@@ -1447,6 +1316,13 @@ class CRI_ScriptedDialogue(SICApplication):
         self.logger.info("UM: LIVE - %s, child=%s", self.UM_API_BASE, self.CHILD_ID)
         self.logger.info("Child input mode: %s", self.child_input_mode)
         self.logger.info("NAO connected for output: %s", bool(self.CONNECT_NAO))
+        self.logger.info(
+            "Whisper input source: %s",
+            "desktop/laptop/DJI microphone" if self.USE_DESKTOP_MIC else "NAO microphone",
+        )
+
+        if not self.USE_DESKTOP_MIC and not self.CONNECT_NAO:
+            raise RuntimeError("NAO microphone selected, but CONNECT_NAO is False.")
 
         # NAO
         if self.CONNECT_NAO:
@@ -1456,12 +1332,7 @@ class CRI_ScriptedDialogue(SICApplication):
             self.nao = Nao(ip=self.nao_ip)
             self.logger.info("NAO connected.")
 
-        # Child microphone routing. Local/DJI microphones use RealtimeSTT;
-        # NAO's microphone is a SIC stream and uses a separate Whisper connector.
-        self.configure_stt_microphone_source()
-        self.logger.info("Whisper input source: %s", self.stt_mic_description or "system default")
-
-        # RealtimeSTT for local/DJI microphones; NAO mic uses SIC Whisper.
+        # RealtimeSTT (replaces SIC Whisper) - recorder lives inside SpeechIO.
         stt_device = os.environ.get("CRI_STT_DEVICE", "auto").strip() or "auto"
         stt_compute_type = os.environ.get("CRI_STT_COMPUTE_TYPE", "auto").strip() or "auto"
         stt_model = os.environ.get("CRI_STT_MODEL", "auto").strip() or "auto"
@@ -1471,6 +1342,9 @@ class CRI_ScriptedDialogue(SICApplication):
             stt_gpu_index = int(raw_gpu_index)
         except ValueError:
             raise RuntimeError(f"Invalid CRI_STT_GPU_INDEX value: {raw_gpu_index!r}")
+        stt_mic_index = None
+        self.stt_mic_index = stt_mic_index
+
         if self.use_keyboard_input():
             self.logger.info("Skipping STT setup because keyboard child input is enabled.")
             stt_backend = STTBackendConfig(
@@ -1480,35 +1354,21 @@ class CRI_ScriptedDialogue(SICApplication):
                 model="small",
                 note="STT disabled for keyboard input.",
             )
-        elif self.stt_mic_source == "nao":
-            self.logger.info("Initializing NAO microphone STT via SIC Whisper.")
-            try:
-                self.nao_whisper = self.create_nao_whisper_connector()
-            except RuntimeError as exc:
-                print(f"\n{exc}")
-                print("Falling back to local microphone selection.\n")
-                self.configure_stt_microphone_source(allow_nao=False, force_prompt=True)
-                self.nao_whisper = None
-            if self.stt_mic_source == "nao":
-                stt_backend = STTBackendConfig(
-                    device="nao",
-                    compute_type="sic-whisper",
-                    gpu_device_index=stt_gpu_index,
-                    model="whisper-1",
-                    note="NAO microphone selected via SIC Whisper.",
-                )
-            else:
-                stt_backend = resolve_realtimestt_backend(
-                    requested_device=stt_device,
-                    requested_compute_type=stt_compute_type,
-                    requested_model=stt_model,
-                    requested_gpu_index=stt_gpu_index,
-                )
         else:
-            if self.stt_mic_index is None:
+            raw_mic_index = os.environ.get("CRI_STT_MIC_INDEX", "")
+            try:
+                stt_mic_index = parse_optional_mic_index(raw_mic_index)
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+            self.stt_mic_index = stt_mic_index
+            try:
+                self.stt_mic_description = describe_selected_input_device(stt_mic_index)
+            except AudioDeviceError as exc:
+                raise RuntimeError(str(exc)) from exc
+            if stt_mic_index is None:
                 self.logger.info("RealtimeSTT will use the system/default microphone.")
             else:
-                self.logger.info("RealtimeSTT will use explicit microphone index %s.", self.stt_mic_index)
+                self.logger.info("RealtimeSTT will use explicit microphone index %s.", stt_mic_index)
             self.logger.info("RealtimeSTT language: %s.", stt_language)
             stt_backend = resolve_realtimestt_backend(
                 requested_device=stt_device,
@@ -1565,9 +1425,7 @@ class CRI_ScriptedDialogue(SICApplication):
             stt_device=stt_backend.device,
             stt_compute_type=stt_backend.compute_type,
             stt_gpu_device_index=stt_backend.gpu_device_index,
-            stt_mic_index=self.stt_mic_index,
-            stt_input_source=self.stt_mic_source,
-            whisper=self.nao_whisper,
+            stt_mic_index=stt_mic_index,
             pronunciation_overrides_path="tts_pronunciation.json",
         )
         self.speech.warm_up_stt()
