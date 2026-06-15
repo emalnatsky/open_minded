@@ -699,6 +699,29 @@ class InteractionEvent(BaseModel):
     session_id: str = "unknown"
 
 
+class MistakeUpdate(BaseModel):
+    wrong_value: str
+
+@app.patch("/api/um/{child_id}/scenario/mistake/{mistake_id}",
+           tags=["CRI Scenario"], dependencies=[Depends(require_api_key)])
+def update_mistake(child_id: str, mistake_id: str, body: MistakeUpdate):
+    """Update the wrong_value of a single mistake by its id (e.g. 'M4')."""
+    if not db.child_exists(child_id):
+        raise HTTPException(404, f"Child '{child_id}' not found.")
+    if not cri_scenario.scenario_exists(child_id):
+        raise HTTPException(404, f"No scenario found for child '{child_id}'.")
+
+    cri_scenario.update_mistake_value(child_id, mistake_id, body.wrong_value)
+    return {
+        "status": "ok",
+        "data": {
+            "child_id": child_id,
+            "mistake_id": mistake_id,
+            "wrong_value": body.wrong_value,
+        }
+    }
+
+
 @app.post("/api/um/{child_id}/scenario/generate", tags=["CRI Scenario"],
           dependencies=[Depends(require_api_key)])
 def generate_scenario(child_id: str, body: ScenarioGenerate):
@@ -747,6 +770,9 @@ def get_scenario(child_id: str):
             "scenario": scenario,
         }
     }
+
+
+
 
 
 @app.post("/api/um/{child_id}/scenario/utterance", tags=["CRI Scenario"],

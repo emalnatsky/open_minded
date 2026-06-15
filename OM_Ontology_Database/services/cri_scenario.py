@@ -184,6 +184,45 @@ def set_utterances_batch(child_id: str, utterances: list[dict]) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# UPDATE SINGLE MISTAKE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def update_mistake_value(
+    child_id: str,
+    mistake_id: str,
+    new_wrong_value: str,
+) -> None:
+    """
+    Update the wrong_value of a single CRIMistake node by its mistake_id.
+
+    mistake_id: "M1", "M2", etc.
+    new_wrong_value: replacement wrong value (e.g. "broccoli")
+
+    Raises 404 if the mistake node doesn't exist.
+    """
+    m_uri = _mistake_uri(child_id, mistake_id)
+
+    # Verify the mistake node exists
+    exists = sparql_ask(f"""
+    {_PREFIXES}
+    ASK {{ <{m_uri}> rdf:type um:CRIMistake }}
+    """)
+    if not exists:
+        raise HTTPException(
+            404,
+            f"Mistake '{mistake_id}' not found for child '{child_id}'."
+        )
+
+    # Swap out only the wrongValue triple, leave everything else untouched
+    sparql_update(f"""
+    {_PREFIXES}
+    DELETE {{ <{m_uri}> um:wrongValue ?old }}
+    INSERT {{ <{m_uri}> um:wrongValue "{_escape_sparql_string(new_wrong_value)}" }}
+    WHERE  {{ <{m_uri}> um:wrongValue ?old }}
+    """)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # READ SCENARIO
 # ═══════════════════════════════════════════════════════════════════════════════
 

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMR Admin — UM & CRI Editor</title>
+<style>
+  :root {
+    --bg:#f8f9fa; --surface:#fff; --border:#dee2e6; --text:#212529;
+    --muted:#6c757d; --accent:#4472c4; --red:#c0504d; --green:#9bbb59;
+    --amber:#f0ad4e; --hover:#e9ecef; --radius:6px;
+    --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+
+  /* Topbar */
+  .topbar{background:var(--accent);color:#fff;display:flex;align-items:center;padding:0 20px;height:48px;gap:16px}
+  .topbar h1{font-size:15px;font-weight:600}
+  .topbar .status{margin-left:auto;font-size:12px;opacity:.8}
+
+  /* Landing */
+  .landing{max-width:500px;margin:80px auto;text-align:center}
+  .landing h2{margin-bottom:24px;font-size:20px}
+  .landing select,.landing input{padding:10px 14px;font-size:14px;border:1px solid var(--border);border-radius:var(--radius);width:100%;margin-bottom:12px}
+  .landing .btn-group{display:flex;gap:12px;margin-top:16px}
+  .landing .btn-group .btn{flex:1;padding:14px;font-size:14px}
+
+  /* Layout */
+  .app-layout{display:grid;grid-template-columns:200px 1fr;height:calc(100vh - 48px)}
+  .sidebar{background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:8px 0}
+  .sidebar .item{padding:8px 14px;cursor:pointer;font-size:13px;border-left:3px solid transparent}
+  .sidebar .item:hover{background:var(--hover)}
+  .sidebar .item.active{border-left-color:var(--accent);background:#e8f0fe;font-weight:600}
+  .sidebar .section-hd{padding:10px 14px 4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .main-panel{overflow-y:auto;padding:20px}
+
+  /* Provenance bar */
+  .prov-bar{display:flex;gap:12px;align-items:center;margin-bottom:16px;padding:10px 14px;background:#f0f4f8;border-radius:var(--radius);border:1px solid var(--border)}
+  .prov-bar label{font-size:12px;color:var(--muted);font-weight:500}
+  .prov-bar input{padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;width:180px}
+
+  /* Tabs */
+  .tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:16px}
+  .tab{padding:8px 18px;cursor:pointer;font-size:13px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px}
+  .tab:hover{color:var(--text)} .tab.active{border-bottom-color:var(--accent);color:var(--accent)}
+  .tab-content{display:none} .tab-content.active{display:block}
+
+  /* Table */
+  table{width:100%;border-collapse:collapse;background:var(--surface);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);margin-bottom:16px}
+  th{background:#f5f6f8;text-align:left;padding:8px 12px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+  td{padding:6px 12px;border-bottom:1px solid #f0f0f0;vertical-align:top}
+  tr:hover td{background:#fafbfc}
+  .field-name{font-weight:500;font-size:13px;min-width:140px}
+  .field-cat{font-size:11px;color:var(--muted)}
+  .section-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;padding:12px 0 4px;border-bottom:1px solid var(--border);margin-top:12px}
+
+  /* Inline edit */
+  .val-input{padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;width:100%}
+  .val-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(68,114,196,.15)}
+
+  /* Node tags */
+  .node-values{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+  .node-tag{display:inline-flex;align-items:center;gap:4px;background:#e8f0fe;padding:3px 10px;border-radius:12px;font-size:12px}
+  .node-tag .extra{color:var(--muted);font-style:italic}
+  .node-tag .rm{cursor:pointer;color:var(--red);font-weight:bold;margin-left:2px;font-size:14px}
+  .node-tag .rm:hover{color:#8b0000}
+
+  /* Pet add */
+  .add-row{display:flex;gap:6px;align-items:center}
+  .add-row input{padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px}
+  .add-row input.main-val{flex:2} .add-row input.extra-val{flex:2}
+
+  /* Buttons */
+  .btn{padding:6px 14px;border:none;border-radius:var(--radius);font-size:12px;cursor:pointer;font-weight:500}
+  .btn-primary{background:var(--accent);color:#fff} .btn-primary:hover{background:#3a63aa}
+  .btn-danger{background:var(--red);color:#fff} .btn-danger:hover{background:#a33f3d}
+  .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)} .btn-outline:hover{background:var(--hover)}
+  .btn-sm{padding:3px 8px;font-size:11px}
+  .btn-green{background:var(--green);color:#fff}
+
+  /* Utterance */
+  .utt-text{width:100%;min-height:55px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);font-family:inherit;font-size:13px;resize:vertical}
+  .utt-text:focus{outline:none;border-color:var(--accent)}
+
+  /* Mistake row */
+  .mistake-val{padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;width:160px}
+
+  /* Toast */
+  .toast{position:fixed;bottom:20px;right:20px;padding:10px 20px;border-radius:var(--radius);color:#fff;font-size:13px;z-index:1000;animation:fadeIn .2s}
+  .toast.ok{background:var(--green)} .toast.err{background:var(--red)}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}}
+
+  /* History */
+  .history-table td{font-size:13px}
+  .history-table .old{color:var(--red);text-decoration:line-through}
+  .history-table .new{color:var(--green);font-weight:500}
+  .history-table .meta{color:var(--muted);font-size:12px}
+
+  .empty{text-align:center;padding:40px;color:var(--muted)}
+  .back-btn{margin-bottom:16px;cursor:pointer;color:var(--accent);font-size:13px}
+  .back-btn:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>OMR Admin</h1>
+  <span>UM & CRI Editor</span>
+  <span class="status" id="apiStatus">connecting...</span>
+</div>
+
+<div id="app"></div>
+
+<script>
+const API = 'http://localhost:8000';
+let schema = null;
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0,200)}`);
+  return r.json();
+}
+function toast(msg, ok=true) {
+  const el = document.createElement('div');
+  el.className = `toast ${ok?'ok':'err'}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 3000);
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function getSource() { return document.getElementById('srcInput')?.value || 'admin_gui'; }
+function getSession() { return document.getElementById('sessInput')?.value || 'admin'; }
+
+// ── Init ─────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const h = await api('GET','/');
+    document.getElementById('apiStatus').textContent = 'connected';
+    schema = (await api('GET','/api/schema')).data;
+    showLanding();
+  } catch(e) {
+    document.getElementById('apiStatus').textContent = 'disconnected';
+    document.getElementById('app').innerHTML = '<div class="empty">Cannot connect to API at '+API+'</div>';
+  }
+}
+
+// ── Landing page ─────────────────────────────────────────────────────────
+async function showLanding() {
+  const children = (await api('GET','/api/um/')).data.children;
+  document.getElementById('app').innerHTML = `
+    <div class="landing">
+      <h2>OMR Admin</h2>
+      <select id="childSelect">
+        <option value="">Select a child...</option>
+        ${children.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+      </select>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="openEditor()">View & Edit Values</button>
+        <button class="btn btn-outline" onclick="openHistory()">View History</button>
+      </div>
+    </div>`;
+}
+
+function getSelectedChild() {
+  const sel = document.getElementById('childSelect');
+  if (!sel || !sel.value) { toast('Select a child first','err'); return null; }
+  return sel.value;
+}
+function openEditor() { const c = getSelectedChild(); if(c) showEditor(c); }
+function openHistory() { const c = getSelectedChild(); if(c) showHistoryView(c); }
+
+// ── Editor view ──────────────────────────────────────────────────────────
+async function showEditor(childId) {
+  const profile = (await api('GET',`/api/um/${childId}`)).data.profile;
+  let scenario = null;
+  try { scenario = (await api('GET',`/api/um/${childId}/scenario`)).data.scenario; } catch{}
+
+  document.getElementById('app').innerHTML = `
+    <div class="app-layout">
+      <div class="sidebar" id="sidebar"></div>
+      <div class="main-panel">
+        <div class="back-btn" onclick="showLanding()">← Back to child selection</div>
+        <h2 style="margin-bottom:8px">Child: ${esc(childId)}</h2>
+        <div class="prov-bar">
+          <label>Source:</label><input id="srcInput" value="manual_cleaning" placeholder="source">
+          <label>Session:</label><input id="sessInput" value="manual_cleaning" placeholder="session_id">
+        </div>
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab(this,'tab-um')">UM Fields</div>
+          <div class="tab" onclick="switchTab(this,'tab-mistakes')" style="color:var(--red)">Mistakes</div>
+          <div class="tab" onclick="switchTab(this,'tab-utts')" style="color:var(--green)">Utterances</div>
+        </div>
+        <div id="tab-um" class="tab-content active"></div>
+        <div id="tab-mistakes" class="tab-content"></div>
+        <div id="tab-utts" class="tab-content"></div>
+      </div>
+    </div>`;
+
+  buildSidebar(childId, profile);
+  renderUM(childId, profile);
+  renderMistakes(childId, scenario);
+  renderUtterances(childId, scenario);
+}
+
+function switchTab(el, tabId) {
+  el.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+}
+
+function buildSidebar(childId, profile) {
+  const sb = document.getElementById('sidebar');
+  let html = '<div class="section-hd">Categories</div>';
+  for (const [cat, label] of Object.entries(schema.categories)) {
+    html += `<div class="item" onclick="scrollToCat('${cat}')">${label}</div>`;
+  }
+  html += '<div class="section-hd" style="margin-top:12px">Actions</div>';
+  html += `<div class="item" onclick="openHistory('${esc(childId)}')">View History</div>`;
+  sb.innerHTML = html;
+}
+
+function scrollToCat(cat) {
+  const el = document.getElementById('cat-'+cat);
+  if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// ── Render UM ────────────────────────────────────────────────────────────
+function renderUM(childId, profile) {
+  const c = document.getElementById('tab-um');
+  const fields = schema.fields;
+  const byCategory = {};
+  for (const [fn, fd] of Object.entries(fields)) {
+    const cat = fd.category||'other';
+    (byCategory[cat] = byCategory[cat]||[]).push({fn,fd});
+  }
+
+  let html = '';
+  for (const [cat, items] of Object.entries(byCategory)) {
+    const label = schema.categories[cat]||cat;
+    html += `<div id="cat-${cat}" class="section-label">${label}</div><table>`;
+
+    for (const {fn,fd} of items) {
+      if (fd.storage === 'scalar') {
+        const val = profile.scalars?.[fn]?.value || '';
+        html += `<tr><td class="field-name">${fn}<br><span class="field-cat">${fd.type}${fd.allowed_values?' — '+fd.allowed_values.join(', '):''}</span></td>
+          <td><div style="display:flex;gap:6px;align-items:center">
+            <input class="val-input" id="scalar-${fn}" value="${esc(val)}" style="flex:1">
+            <button class="btn btn-primary btn-sm" onclick="saveScalar('${childId}','${fn}')">Save</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteField('${childId}','${fn}')">Del</button>
+          </div></td></tr>`;
+      } else {
+        const nodes = profile.nodes?.[fn] || [];
+        const hasPetName = fd.extra_node_props?.includes('petName');
+        html += `<tr><td class="field-name">${fn}<br><span class="field-cat">${fd.multi_value?'multi':'single'} node${hasPetName?' + petName':''}</span></td><td>`;
+
+        // Current values
+        html += '<div class="node-values">';
+        for (const n of nodes) {
+          const extras = Object.entries(n.extra_props||{}).map(([k,v])=>`<span class="extra">(${k}: ${v})</span>`).join(' ');
+          html += `<span class="node-tag">${esc(n.value)} ${extras}
+            <span class="rm" onclick="removeNode('${childId}','${fn}','${esc(n.value)}')">&times;</span></span>`;
+        }
+        html += '</div>';
+
+        // Add row
+        if (hasPetName) {
+          html += `<div class="add-row">
+            <input class="main-val" id="add-${fn}" placeholder="Type (e.g. Hond)">
+            <input class="extra-val" id="add-${fn}-petName" placeholder="Name (e.g. Buddy)">
+            <button class="btn btn-outline btn-sm" onclick="addPet('${childId}','${fn}')">+</button></div>`;
+        } else {
+          html += `<div class="add-row">
+            <input class="main-val" id="add-${fn}" placeholder="Add value..." onkeydown="if(event.key==='Enter')addNode('${childId}','${fn}')">
+            <button class="btn btn-outline btn-sm" onclick="addNode('${childId}','${fn}')">+</button></div>`;
+        }
+        html += '</td></tr>';
+      }
+    }
+    html += '</table>';
+  }
+  c.innerHTML = html;
+}
+
+async function saveScalar(cid, fn) {
+  const val = document.getElementById('scalar-'+fn).value.trim();
+  if (!val) return;
+  try {
+    await api('POST',`/api/um/${cid}/fields`, {fields:{[fn]:val}, source:getSource(), session_id:getSession()});
+    toast(`${fn} saved`);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function addNode(cid, fn) {
+  const input = document.getElementById('add-'+fn);
+  const val = input.value.trim(); if (!val) return;
+  try {
+    await api('POST',`/api/um/${cid}/fields`, {fields:{[fn]:val}, source:getSource(), session_id:getSession()});
+    input.value=''; toast(`Added ${val}`);
+    refreshEditor(cid);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function addPet(cid, fn) {
+  const typeInput = document.getElementById('add-'+fn);
+  const nameInput = document.getElementById('add-'+fn+'-petName');
+  const type = typeInput.value.trim(); if (!type) return;
+  const name = nameInput.value.trim();
+  const extra = name ? {petName: name} : {};
+  try {
+    await api('POST',`/api/um/${cid}/fields`, {fields:{[fn]:type}, extra_props:extra, source:getSource(), session_id:getSession()});
+    typeInput.value=''; nameInput.value='';
+    toast(`Added pet ${type}${name?' ('+name+')':''}`);
+    refreshEditor(cid);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function removeNode(cid, fn, val) {
+  if (!confirm(`Remove "${val}" from ${fn}?`)) return;
+  try {
+    await api('DELETE',`/api/um/${cid}/field/${fn}/value/${encodeURIComponent(val)}`);
+    toast(`Removed ${val}`); refreshEditor(cid);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function deleteField(cid, fn) {
+  if (!confirm(`Delete field ${fn}?`)) return;
+  try {
+    await api('DELETE',`/api/um/${cid}/field/${fn}`);
+    toast(`${fn} deleted`); refreshEditor(cid);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function refreshEditor(cid) {
+  const profile = (await api('GET',`/api/um/${cid}`)).data.profile;
+  renderUM(cid, profile);
+}
+
+// ── Render Mistakes ──────────────────────────────────────────────────────
+function renderMistakes(cid, scenario) {
+  const c = document.getElementById('tab-mistakes');
+  if (!scenario) {
+    c.innerHTML = '<div class="empty">No CRI scenario. Import via load_scenarios.py.</div>';
+    return;
+  }
+  const mistakes = scenario.mistakes||[];
+  let html = '<table><tr><th>ID</th><th>Target Field</th><th>Wrong Value</th><th>Type</th><th>SPT</th><th>Step</th><th></th></tr>';
+  for (const m of mistakes) {
+    html += `<tr>
+      <td><strong>${m.id}</strong></td>
+      <td>${m.target_field}</td>
+      <td><input class="mistake-val" id="mval-${m.id}" value="${esc(m.wrong_value)}"></td>
+      <td>${m.mistake_type}</td>
+      <td>${m.spt_level}</td>
+      <td>${m.step}</td>
+      <td><button class="btn btn-primary btn-sm" onclick="saveMistake('${cid}','${m.id}')">Save</button></td>
+    </tr>`;
+  }
+  html += '</table>';
+  html += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Edit the wrong value directly. For structural changes (target_field, type), re-import via the XLSX workflow.</div>';
+  c.innerHTML = html;
+}
+
+async function saveMistake(cid, mid) {
+  const val = document.getElementById('mval-'+mid).value.trim();
+  if (!val) return;
+  try {
+    await api('PATCH',`/api/um/${cid}/scenario/mistake/${mid}`, {wrong_value:val});
+    toast(`${mid} updated to "${val}"`);
+  } catch(e) { toast(e.message, false); }
+}
+
+// ── Render Utterances ────────────────────────────────────────────────────
+function renderUtterances(cid, scenario) {
+  const c = document.getElementById('tab-utts');
+  if (!scenario) { c.innerHTML = '<div class="empty">No CRI scenario.</div>'; return; }
+
+  const utts = scenario.utterances||{};
+  const sections = {
+    'Part 1: Hobby Bridge':['p1_hobby_bridge_comment'],
+    'Part 1: Topic 1':['topic_1','p1_t1_recall','p1_t1_open','p1_t1_question','p1_t1_followup'],
+    'Part 1: M1 Hobby':['p1_m1_wrong_hobby_opener','p1_m1_followup_wrong_hobby'],
+    'Part 1: Topic 2':['topic_2','p1_t2_open','p1_t2_followup','p1_t2_close'],
+    'Part 1: M2 Food':['p1_m2_followup_wrong_food','p1_m2_postcorrection_true_food'],
+    'Part 2: School':['p2_fav_subject_comment_subject','p2_subject_profile_link'],
+    'Part 2: M3 Strength':['p2_m3_postcorrection_true_strength','p2_school_wrap_after_difficulty'],
+    'Part 3: Aspiration':['p3_future_theme_wrap','p3_rolemodel_recall','p3_rolemodel_ack','p3_norolemodel_ack'],
+    'Part 3: M4':['p3_m4_followup_wrong_aspiration','p3_m4_postcorrection_reflection'],
+    'Closing':['closing']
+  };
+
+  let html = '';
+  for (const [sec, sids] of Object.entries(sections)) {
+    html += `<div class="section-label">${sec}</div><table><tr><th style="width:250px">Step ID</th><th>Text</th><th style="width:60px"></th></tr>`;
+    for (const sid of sids) {
+      const branches = utts[sid]||{};
+      const text = branches['default']||Object.values(branches)[0]||'';
+      const isMeta = sid.startsWith('topic_');
+      html += `<tr><td class="field-name">${sid}${isMeta?' <span class="field-cat">metadata</span>':''}</td>
+        <td><textarea class="utt-text" id="utt-${sid}">${esc(text)}</textarea></td>
+        <td><button class="btn btn-green btn-sm" onclick="saveUtt('${cid}','${sid}')">Save</button></td></tr>`;
+    }
+    html += '</table>';
+  }
+  c.innerHTML = html;
+}
+
+async function saveUtt(cid, sid) {
+  const text = document.getElementById('utt-'+sid).value.trim();
+  if (!text) { toast('Text cannot be empty', false); return; }
+  try {
+    await api('POST',`/api/um/${cid}/scenario/utterance`, {step_id:sid, layer:'L2-pregen', branch:'default', text:text});
+    toast(`${sid} saved`);
+  } catch(e) { toast(e.message, false); }
+}
+
+// ── History view ─────────────────────────────────────────────────────────
+async function showHistoryView(childId) {
+  if (typeof childId !== 'string') childId = getSelectedChild();
+  if (!childId) return;
+
+  const history = (await api('GET',`/api/um/${childId}/history`)).data.history;
+  const fields = [...new Set(history.map(h=>h.field))].sort();
+
+  document.getElementById('app').innerHTML = `
+    <div style="max-width:900px;margin:20px auto;padding:0 20px">
+      <div class="back-btn" onclick="showLanding()">← Back to child selection</div>
+      <h2 style="margin-bottom:16px">History: ${esc(childId)}</h2>
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+        <label style="font-size:12px;color:var(--muted)">Filter by field:</label>
+        <select id="histFilter" onchange="filterHistory()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px">
+          <option value="">All fields (${history.length} entries)</option>
+          ${fields.map(f=>`<option value="${f}">${f}</option>`).join('')}
+        </select>
+      </div>
+      <table class="history-table">
+        <tr><th>Field</th><th>Old Value</th><th>New Value</th><th>Changed By</th><th>Time</th><th>Type</th></tr>
+        ${history.map(h=>`<tr class="hist-row" data-field="${esc(h.field)}">
+          <td class="field-name">${h.field}</td>
+          <td class="old">${esc(h.old_value)}</td>
+          <td class="new">${esc(h.new_value)}</td>
+          <td class="meta">${esc(h.changed_by)}<br>${esc(h.session_id)}</td>
+          <td class="meta">${new Date(h.changed_at).toLocaleString()}</td>
+          <td class="meta">${h.change_type||'updated'}</td>
+        </tr>`).join('')}
+      </table>
+      ${history.length===0?'<div class="empty">No history entries yet.</div>':''}
+    </div>`;
+}
+
+function filterHistory() {
+  const f = document.getElementById('histFilter').value;
+  document.querySelectorAll('.hist-row').forEach(r => {
+    r.style.display = (!f || r.dataset.field === f) ? '' : 'none';
+  });
+}
+
+init();
+</script>
+</body>
+</html>
