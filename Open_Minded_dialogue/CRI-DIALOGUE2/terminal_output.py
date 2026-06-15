@@ -51,6 +51,7 @@ class LoadingStatus:
         self._last_text = ""
         self._stopped = False
         self._needs_leading_blank = True
+        self._paused = threading.Event()
 
     def __enter__(self):
         if not self.enabled:
@@ -75,6 +76,9 @@ class LoadingStatus:
 
     def _run(self):
         while not self._stop.is_set():
+            if self._paused.is_set():
+                self._stop.wait(0.1)
+                continue
             text = self._format_status()
             try:
                 clear_terminal_status_line(self.stream)
@@ -87,6 +91,28 @@ class LoadingStatus:
             except Exception:
                 return
             self._stop.wait(0.35)
+
+    def pause(self, keep_line: bool = False):
+        if not self.enabled or self._stopped:
+            return
+        self._paused.set()
+        if keep_line:
+            try:
+                text = self._format_status()
+                clear_terminal_status_line(self.stream)
+                self.stream.write(text + "\n\n")
+                self.stream.flush()
+            except Exception:
+                pass
+        else:
+            clear_terminal_status_line(self.stream)
+        self._needs_leading_blank = True
+
+    def resume(self):
+        if not self.enabled or self._stopped:
+            return
+        self._needs_leading_blank = True
+        self._paused.clear()
 
     def stop(self, keep_line: bool = False):
         if not self.enabled or self._stopped:
@@ -127,6 +153,22 @@ class LoadingStatus:
             active = cls._active
         if active is not None:
             active.stop(keep_line=keep_line)
+
+    @classmethod
+    def pause_active(cls, keep_line: bool = False) -> bool:
+        with cls._lock:
+            active = cls._active
+        if active is None:
+            return False
+        active.pause(keep_line=keep_line)
+        return True
+
+    @classmethod
+    def resume_active(cls) -> None:
+        with cls._lock:
+            active = cls._active
+        if active is not None:
+            active.resume()
 
 
 class ClearLoadingBeforeWarningFilter(logging.Filter):

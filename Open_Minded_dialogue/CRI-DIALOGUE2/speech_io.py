@@ -309,6 +309,7 @@ class SpeechIO:
         stt_device: str = "auto",
         stt_compute_type: str = "auto",
         stt_gpu_device_index: int = 0,
+        stt_input_source: str = "local",
         tts_char_seconds: float = None,
         tts_tail_buffer_seconds: float = None,
         leo_echo_similarity: float = None,
@@ -357,6 +358,10 @@ class SpeechIO:
         self._simulated_history = simulated_history if simulated_history is not None else []
         self._generate_simulated_response = generate_simulated_response_fn or (lambda: "")
         self._set_last_utterance = set_last_utterance_fn or (lambda t: None)
+        self._whisper = whisper
+        self._stt_input_source = (
+            "nao" if str(stt_input_source or "").strip().lower() == "nao" else "local"
+        )
         self._max_listen_retries = max_listen_retries
         self._stt_timeout = self._positive_float(stt_timeout)
         self._stt_phrase_limit = self._positive_float(stt_phrase_limit)
@@ -411,7 +416,19 @@ class SpeechIO:
 
         # ── Initialise RealtimeSTT recorder ──────────────────────────────────
         self._recorder = None
-        if not simulation_mode and not (use_keyboard_input_fn and use_keyboard_input_fn()):
+        if (
+            not simulation_mode
+            and not (use_keyboard_input_fn and use_keyboard_input_fn())
+            and self._stt_input_source == "nao"
+            and self._whisper is None
+        ):
+            raise RuntimeError("NAO microphone input selected, but no SIC Whisper connector was provided.")
+
+        if (
+            not simulation_mode
+            and not (use_keyboard_input_fn and use_keyboard_input_fn())
+            and self._stt_input_source == "local"
+        ):
             resolved_stt_model = (stt_model or "auto").strip() or "auto"
             resolved_stt_device = (stt_device or "auto").strip().lower() or "auto"
             resolved_stt_compute_type = (stt_compute_type or "auto").strip().lower() or "auto"
@@ -479,6 +496,13 @@ class SpeechIO:
             except Exception as e:
                 logger.debug("Error shutting down recorder: %s", e)
             self._recorder = None
+        if self._whisper is not None and hasattr(self._whisper, "stop_component"):
+            try:
+                self._whisper.stop_component()
+                logger.info("SIC Whisper connector shut down.")
+            except Exception as e:
+                logger.debug("Error shutting down SIC Whisper connector: %s", e)
+            self._whisper = None
 
     def _set_mic(self, enabled: bool):
         """
@@ -683,6 +707,65 @@ class SpeechIO:
                 self._wait_for_tts_handoff(spoken_text, started_at)
 
     # ── Input ─────────────────────────────────────────────────────────────────
+    def _request_nao_whisper_transcript(self) -> str:
+        """Return one transcript from the SIC Whisper connector fed by NAO mic."""
+        if self._whisper is None:
+            raise RuntimeError("NAO microphone input selected, but SIC Whisper is not initialized.")
+        try:
+            from sic_framework.services.openai_whisper_stt.whisper_stt import GetTranscript
+        except ModuleNotFoundError:
+            class GetTranscript:  # test fallback; real NAO connector validates its dependency earlier
+                def __init__(self, timeout=None, phrase_time_limit=None):
+                    self.timeout = timeout
+                    self.phrase_time_limit = phrase_time_limit
+
+        request_timeout = (self._stt_listen_timeout or 20.0) + 10.0
+        result = self._whisper.request(
+            GetTranscript(
+                timeout=self._stt_timeout,
+                phrase_time_limit=self._stt_phrase_limit,
+            ),
+            timeout=request_timeout,
+        )
+        return str(getattr(result, "transcript", "") or "")
+
+    def _listen_nao_whisper(self) -> str:
+        """
+        Listen through NAO's SIC microphone stream.
+
+        NAO audio is a network stream, not a PortAudio device. The transcript
+        still goes through CRI cleanup, quality filtering, terminal output, and
+        logging before the dialogue sees it.
+        """
+        logger.info("Listening via NAO microphone/SIC Whisper...")
+        try:
+            self._set_eyes("green")
+            self._start_stt_spinner("recording")
+            transcript = self._request_nao_whisper_transcript().strip()
+            transcript = self._clean_stt_transcript(transcript)
+            stt_rejection_reason = self._stt_quality_runtime_rejection_reason(transcript)
+            if stt_rejection_reason:
+                logger.warning("Rejected STT transcript (%s): %s", stt_rejection_reason, transcript)
+                self._log_event("stt_rejected", reason=stt_rejection_reason, text=transcript)
+                return ""
+            _print_transcript(transcript)
+            logger.info("Child: %s", transcript or "(nothing)")
+            self._log_event(
+                "utterance",
+                speaker="CHILD",
+                text=transcript or "(nothing)",
+                input_mode="microphone",
+                stt_backend="SICWhisperNAO",
+            )
+            return transcript
+        except Exception as e:
+            logger.error("NAO microphone STT error: %s", e)
+            self._log_event("stt_error", backend="SICWhisperNAO", error=str(e))
+            return ""
+        finally:
+            self._set_eyes("white")
+            self._stop_stt_spinner()
+
     def listen(self) -> str:
         """
         Single listen attempt — returns transcript or "" if nothing heard.
@@ -704,6 +787,9 @@ class SpeechIO:
             logger.info("Child typed: %s", transcript or "(nothing)")
             self._log_event("utterance", speaker="CHILD", text=transcript or "(nothing)", input_mode="keyboard")
             return transcript
+
+        if self._stt_input_source == "nao":
+            return self._listen_nao_whisper()
 
         logger.info("Listening via RealtimeSTT...")
         queue_warning_snapshot = None
