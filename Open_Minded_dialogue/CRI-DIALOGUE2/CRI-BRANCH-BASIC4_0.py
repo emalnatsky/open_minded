@@ -4,14 +4,12 @@ import io
 import time
 import json
 import random
-import shutil
 import copy
 import unicodedata
 import logging
 import platform
 import re
 import socket
-import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -408,7 +406,6 @@ class CRI_ScriptedDialogue(SICApplication):
         self.stt_mic_description = ""
         self.stt_mic_source = "local"
         self.nao_whisper = None
-        self.nao_whisper_process = None
         self.terminal_log_level = terminal_log_level()
         self.set_log_level(self.terminal_log_level)
         logging.getLogger().setLevel(self.terminal_log_level)
@@ -609,86 +606,19 @@ class CRI_ScriptedDialogue(SICApplication):
     def create_nao_whisper_connector(self):
         if self.nao is None:
             raise RuntimeError("Cannot initialize NAO microphone STT before NAO is connected.")
-        last_error = None
         try:
             from sic_framework.services.openai_whisper_stt.whisper_stt import (
                 SICWhisper,
                 WhisperConf,
             )
+
+            whisper_conf = WhisperConf(openai_key=os.environ["OPENAI_API_KEY"])
+            return SICWhisper(input_source=self.nao.mic, conf=whisper_conf)
         except Exception as exc:
             raise RuntimeError(
-                "NAO microphone STT dependencies are missing. "
-                "Run setup again or install SpeechRecognition, then restart CRI."
+                "NAO microphone STT could not be initialized. "
+                "Choose a local/DJI microphone or check the SIC NAO microphone service."
             ) from exc
-
-        whisper_conf = WhisperConf(openai_key=os.environ["OPENAI_API_KEY"])
-        for attempt in range(2):
-            try:
-                return SICWhisper(input_source=self.nao.mic, conf=whisper_conf)
-            except Exception as exc:
-                last_error = exc
-                if attempt == 0 and self.start_local_whisper_service():
-                    time.sleep(2.0)
-                    continue
-                break
-
-        raise RuntimeError(
-            "NAO microphone STT could not be initialized. "
-            "CRI tried to connect to SIC Whisper and auto-start run-whisper, but it still failed. "
-            "Choose a local/DJI microphone or start run-whisper manually in another terminal."
-        ) from last_error
-
-    def start_local_whisper_service(self):
-        if self.nao_whisper_process is not None and self.nao_whisper_process.poll() is None:
-            return True
-
-        run_whisper = shutil.which("run-whisper")
-        if not run_whisper:
-            scripts_dir = os.path.dirname(sys.executable)
-            candidate = os.path.join(
-                scripts_dir,
-                "run-whisper.exe" if platform.system() == "Windows" else "run-whisper",
-            )
-            if os.path.exists(candidate):
-                run_whisper = candidate
-        if not run_whisper:
-            self.logger.warning("run-whisper is not available on PATH; cannot auto-start NAO mic STT.")
-            return False
-
-        self.logger.warning("SIC Whisper is not running; starting run-whisper for NAO microphone STT.")
-        stdout_target = None if env_flag("CRI_VERBOSE_LOGS", False) else subprocess.DEVNULL
-        stderr_target = None if env_flag("CRI_VERBOSE_LOGS", False) else subprocess.DEVNULL
-        creationflags = 0
-        if platform.system() == "Windows":
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        try:
-            self.nao_whisper_process = subprocess.Popen(
-                [run_whisper],
-                cwd=os.getcwd(),
-                stdout=stdout_target,
-                stderr=stderr_target,
-                creationflags=creationflags,
-            )
-        except Exception as exc:
-            self.logger.warning("Could not start run-whisper automatically: %s", exc)
-            self.nao_whisper_process = None
-            return False
-        return True
-
-    def stop_local_whisper_service(self):
-        process = getattr(self, "nao_whisper_process", None)
-        if process is None:
-            return
-        if process.poll() is None:
-            try:
-                process.terminate()
-                process.wait(timeout=3)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
-        self.nao_whisper_process = None
 
     def configure_sic_db_ip_for_nao(self):
         target_ip = self.normalize_network_host(self.nao_ip)
@@ -4036,7 +3966,6 @@ class CRI_ScriptedDialogue(SICApplication):
             # ↓ Add this
             if hasattr(self, "speech") and self.speech is not None:
                 self.speech.shutdown()
-            self.stop_local_whisper_service()
             self.shutdown()
 
 

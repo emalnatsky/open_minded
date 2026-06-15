@@ -213,7 +213,7 @@ Use:
 - Type a number, for example `4`, to use that local/DJI microphone.
 - Type `N` only when you want to use NAO's own front microphone.
 
-Local/DJI is still the recommended default because it uses the tested RealtimeSTT path. NAO mic uses a separate SIC Whisper path because NAO is a network stream, not a macOS microphone device. If you choose `N`, CRI starts the needed `run-whisper` service once during startup if it is not already running. This can add a few startup seconds. NAO mic transcription may also be slower per child answer than local/DJI mic transcription.
+Local/DJI is still the recommended default because it uses the tested RealtimeSTT path. NAO mic uses a separate SIC Whisper path because NAO is a network stream, not a macOS microphone device.
 
 Optional overrides in `Open_Minded_dialogue/_local/config/.env`:
 
