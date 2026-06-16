@@ -9,9 +9,10 @@ import unicodedata
 import logging
 import platform
 import re
+import difflib
 import socket
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
@@ -3406,7 +3407,7 @@ class CRI_ScriptedDialogue(SICApplication):
         return re.sub(r"\s+", " ", text).strip()
 
     def memory_change_field_prompt(self) -> str:
-        return "Zeg wat je wilt veranderen op deze manier: verander puntjepuntjepuntje naar puntjepuntjepuntje."
+        return "Zeg het zo: van wat naar wat. Bijvoorbeeld: als Ik wil mijn leeftijd wil veranderen zou ik zeggen verander mijn leeftijd van 10 naar 11."
 
     def memory_change_field_unclear_prompt(self) -> str:
         return (
@@ -3462,38 +3463,73 @@ class CRI_ScriptedDialogue(SICApplication):
         return any(re.search(rf"\b{re.escape(cue)}\b", text) for cue in cues)
 
     def exact_memory_change_parts(self, transcript: str) -> tuple[str, str]:
-        text = str(transcript or "").strip()
-        match = re.search(
-            r"\bverander(?:\s+(?:mijn|je|de|het))?\s+(.+?)\s+naar\s+(.+?)\s*[.!?]*$",
-            text,
-            re.IGNORECASE,
-        )
-        if not match:
+        text = re.sub(r"\s+", " ", str(transcript or "").strip())
+        if not text:
             return "", ""
-        old_part = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?;:")
-        new_part = re.sub(r"\s+", " ", match.group(2)).strip(" .,!?;:")
-        return old_part, new_part
+        patterns = (
+            r"\bverander(?:\s+(?:mijn|je|de|het))?\s+(.+?)\s+naar\s+(.+?)\s*[.!?]*$",
+            r"\bvan\s+(.+?)\s+naar\s+(.+?)\s*[.!?]*$",
+            r"^(.+?)\s+naar\s+(.+?)\s*[.!?]*$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                old_part = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?;:")
+                new_part = re.sub(r"\s+", " ", match.group(2)).strip(" .,!?;:")
+                old_part = re.sub(r"^van\s+", "", old_part, flags=re.IGNORECASE).strip()
+                if old_part and new_part:
+                    return old_part, new_part
+        return "", ""
 
     def field_from_memory_change_old_value(self, old_value: str, context: dict, allowed_fields: list) -> str:
         old_value = str(old_value or "").strip()
-        if not old_value:
+        target = self.normalize_memory_change_text(old_value)
+        if not target:
             return ""
+
         topic = context.get("topic") or {}
         current_values = topic.get("current_values") or {}
         stored_values = topic.get("stored_values") or {}
         visible_mistakes = topic.get("visible_mistakes") or {}
-        for field in allowed_fields or []:
+
+        # The deliberate-mistake 'wrong' value is exactly what the child is
+        # replacing, so include the live mistake states as a candidate source
+        # even if allowed_fields wasn't populated by the caller.
+        fields = list(allowed_fields or [])
+        for state in (self.mistake_states or {}).values():
+            if state.get("mentioned") and not state.get("corrected") and state.get("field"):
+                if state["field"] not in fields:
+                    fields.append(state["field"])
+
+        best_field, best_score = "", 0.0
+        for field in fields:
+            mistake = visible_mistakes.get(field) or {}
+            state = next(
+                (s for s in (self.mistake_states or {}).values() if s.get("field") == field),
+                {},
+            )
             candidates = [
                 current_values.get(field),
                 stored_values.get(field),
                 self.last_um_preview.get(field),
+                mistake.get("wrong"),
+                mistake.get("actual"),
+                state.get("wrong"),
+                state.get("actual"),
             ]
-            mistake = visible_mistakes.get(field) or {}
-            candidates.extend([mistake.get("wrong"), mistake.get("actual")])
             for candidate in candidates:
-                if self.is_known(candidate) and self.actions.field_values_match(field, candidate, old_value):
-                    return field
-        return ""
+                if not self.is_known(candidate):
+                    continue
+                cand = self.normalize_memory_change_text(candidate)
+                if not cand:
+                    continue
+                if cand == target or target in cand or cand in target:
+                    score = 1.0
+                else:
+                    score = difflib.SequenceMatcher(None, cand, target).ratio()
+                if score > best_score:
+                    best_field, best_score = field, score
+        return best_field if best_score >= 0.6 else ""
 
     def exact_memory_change_from_answer(self, transcript: str, context: dict, allowed_fields: list) -> dict:
         old_part, new_value = self.exact_memory_change_parts(transcript)
@@ -3513,6 +3549,9 @@ class CRI_ScriptedDialogue(SICApplication):
             or self.UNKNOWN_VALUE
         )
         visible_mistake = ((topic.get("visible_mistakes") or {}).get(field) or {})
+
+        if not visible_mistake:
+            visible_mistake = self.visible_mistake_state_for_field(field) or {}
         change = {
             "action": "update",
             "field": field,
@@ -3647,12 +3686,17 @@ class CRI_ScriptedDialogue(SICApplication):
         pending_resume_action = None
         max_changes = int(getattr(self, "MEMORY_ACCESS_MAX_CHANGES", 8))
 
-        # Gate #1: does the child want to change anything?
-        wants_change = self.memory_access_ask_yes_no("Wil je iets veranderen?")
+        # Gate #1: change anything? Accept yes/no OR a direct "van X naar Y".
+        verdict, direct_change = self.memory_access_gate_answer(
+            "Wil je iets veranderen?", action, source_turn
+        )
 
         changes_done = 0
-        while wants_change and changes_done < max_changes:
-            change = self.memory_access_capture_two_step_change(action, source_turn)
+        while verdict in ("yes", "change") and changes_done < max_changes:
+            if verdict == "change":
+                change = direct_change
+            else:
+                change = self.memory_access_capture_two_step_change(action, source_turn)
             if change and change.get("field") and self.is_known(change.get("new_value")):
                 accepted = self.confirm_topic_change(change)
                 change_action = self.action_result(
@@ -3685,9 +3729,9 @@ class CRI_ScriptedDialogue(SICApplication):
                     "Zeg bijvoorbeeld: verander mijn lievelingssport naar hockey."
                 )
 
-            # Gate #2: any more changes?
-            wants_change = self.memory_access_ask_yes_no(
-                "Wil je nog iets anders veranderen?"
+            # Gate #2: more changes? (also accepts a direct "van X naar Y")
+            verdict, direct_change = self.memory_access_gate_answer(
+                "Wil je nog iets anders veranderen?", action, source_turn
             )
 
         # Exit acknowledgement, then resume the normal script.
@@ -3700,6 +3744,47 @@ class CRI_ScriptedDialogue(SICApplication):
             True,
             "Memory access completed via voice gates.",
         )
+
+    def memory_access_gate_answer(self, question: str, action: dict, source_turn: dict, max_tries: int = 3) -> tuple:
+        """Ask the change gate, accepting EITHER yes/no OR a direct change.
+
+        Kids answer 'Wil je iets veranderen?' with the change itself
+        ('van broccoli naar patat') instead of 'ja'. Treat a parseable change
+        as an implicit yes so the correction isn't eaten by the yes/no
+        classifier.
+
+        Returns (verdict, change):
+          ('change', {...}) -> child stated the change; skip the 2-step prompt
+          ('yes', None)     -> proceed to ask what to change
+          ('no', None)      -> exit the loop
+        Defaults to ('no', None) when still unclear after max_tries.
+        """
+        context = self.memory_access_change_context(action, source_turn)
+        allowed_fields = list(context.get("memory_review_fields") or [])
+
+        for attempt in range(max_tries):
+            self.speech.say(question)
+            self.current_turn_context = context
+            transcript = self.speech.listen_with_review()
+            with self.child_processing_loading():
+                result = self.classify_with_repeat(transcript, context)
+                direct_change = self.direct_memory_change_from_answer(
+                    result, transcript, context, allowed_fields
+                )
+            self.current_turn_context = source_turn
+
+            if direct_change and direct_change.get("field") and self.is_known(direct_change.get("new_value")):
+                return "change", direct_change
+
+            verdict = self.classify_yes_no_with_loading(transcript)
+            if verdict == "yes":
+                return "yes", None
+            if verdict == "no":
+                return "no", None
+            if attempt < max_tries - 1:
+                self.speech.say("Sorry, ik snapte het niet goed.")
+
+        return "no", None
 
     def memory_access_ask_yes_no(self, question: str, max_tries: int = 3) -> bool:
         """Ask a yes/no question by voice and return True for yes, False for no.
