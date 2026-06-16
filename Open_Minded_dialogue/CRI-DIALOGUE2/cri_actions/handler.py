@@ -1391,7 +1391,7 @@ class ActionHandler:
             self.mark_waiting_for_memory_correction(ctx, field, extra_ask)
             return ctx
 
-        ask = "Wat wil je veranderen? Zeg het zo: ik wil dit veranderen naar dat. Eerst zeg je wat er nu staat, en daarna wat het moet worden. Bijvoorbeeld, als Ik wil mijn leeftijd wil veranderen zou ik zeggen verander mijn leeftijd can 10 naar 11"
+        ask = "Wat wil je veranderen? Zeg het zo: ik wil dit veranderen naar dat. Eerst zeg je wat er nu staat, en daarna wat het moet worden. Bijvoorbeeld, als Ik wil mijn leeftijd wil veranderen zou ik zeggen verander mijn leeftijd van 10 naar 11"
         self.d.speech.say(ask)
         time.sleep(0.5)
         answer = self.d.speech.listen_with_review()
@@ -3697,7 +3697,7 @@ class ActionHandler:
 
     def retry_rejected_memory_access_change(self, turn: dict) -> dict:
         while self.d.memory_access_ask_yes_no("Oké, wil je nog iets anders veranderen?"):
-            ask = "Wat wil je veranderen? Zeg het zo: ik wil dit veranderen naar dat. Eerst zeg je wat er nu staat, en daarna wat het moet worden. Bijvoorbeeld, als Ik wil mijn leeftijd wil veranderen zou ik zeggen verander mijn leeftijd can 10 naar 11."
+            ask = "Wat wil je veranderen? Zeg het zo: ik wil dit veranderen naar dat. Eerst zeg je wat er nu staat, en daarna wat het moet worden. Bijvoorbeeld, als Ik wil mijn leeftijd wil veranderen zou ik zeggen verander mijn leeftijd van 10 naar 11."
             self.d.speech.say(ask)
             answer = self.d.speech.listen_with_review()
             retry_turn = dict(turn or {})
