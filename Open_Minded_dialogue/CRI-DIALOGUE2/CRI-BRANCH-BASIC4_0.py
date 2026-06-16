@@ -937,7 +937,8 @@ class CRI_ScriptedDialogue(SICApplication):
     # --- NudgeManager (cri_actions/nudge.py) ----------------------------------
 
     def register_mistake_phase(self, turn):
-        return self.nudge.register_mistake_phase(turn)
+        self.nudge.register_mistake_phase(turn)
+        return self.ensure_mistake_state_details(turn)
 
     def mark_current_mistake_corrected(self):
         return self.nudge.mark_current_mistake_corrected()
@@ -992,6 +993,98 @@ class CRI_ScriptedDialogue(SICApplication):
         state["corrected_at"] = corrected_at
         state["corrected_at_phase"] = self.turn_phase(turn or self.current_turn_context or {})
         self.update_mistake_latency(state, corrected_at)
+
+    def ensure_mistake_state_details(self, turn: dict) -> dict:
+        """Keep child-visible mistake state complete for logging and tablet overlays."""
+        turn = turn or {}
+        mistake_id = turn.get("mistake_id")
+        if not mistake_id:
+            return {}
+        state = self.mistake_states.setdefault(mistake_id, {"id": mistake_id})
+        state["id"] = mistake_id
+        state["mentioned"] = state.get("mentioned", True)
+        state["corrected"] = bool(state.get("corrected", False))
+        for state_key, turn_key in (
+            ("phase", "phase"),
+            ("field", "mistake_field"),
+            ("actual", "mistake_actual"),
+            ("wrong", "mistake_wrong"),
+            ("type", "mistake_type"),
+            ("spt_layer", "spt_layer"),
+        ):
+            value = turn.get(turn_key)
+            if value not in (None, ""):
+                state[state_key] = value
+        if turn.get("m3_requires_school_difficulty_resolution"):
+            state["m3_requires_school_difficulty_resolution"] = True
+        if state.get("field") and not state.get("field_label"):
+            state["field_label"] = self.mistake_field_label(turn)
+        return state
+
+    def persist_uncorrected_mistake_value(self, turn: dict) -> bool:
+        """Store an unchallenged wrong value as Leo's remembered value.
+
+        This is intentionally silent: if the child did not notice/challenge the
+        deliberate mistake, the interaction treats Leo's stated value as accepted.
+        Explicitly rejected mistakes are not written here.
+        """
+        turn = turn or {}
+        if not turn.get("mistake_id"):
+            return False
+        state = self.ensure_mistake_state_details(turn)
+        if not state:
+            return False
+        if (
+            state.get("corrected")
+            or state.get("wrong_value_rejected")
+            or state.get("accepted_wrong_value")
+            or state.get("uncorrected_value_persisted")
+            or state.get("outcome_logged")
+        ):
+            return False
+
+        field = turn.get("mistake_field") or state.get("field")
+        wrong_value = turn.get("mistake_wrong") or state.get("wrong")
+        if not (field and self.is_known(wrong_value)):
+            return False
+
+        validator = getattr(getattr(self, "actions", None), "validate_memory_value", None)
+        if callable(validator):
+            validation = validator(field, str(wrong_value), "", turn)
+            if not validation.get("accepted"):
+                return False
+            wrong_value = validation.get("normalized_value") or wrong_value
+
+        old_value = (
+            self.known(self.last_um_preview, field, "")
+            or turn.get("mistake_actual")
+            or state.get("actual")
+            or self.UNKNOWN_VALUE
+        )
+        change = {
+            "action": "update",
+            "field": field,
+            "field_label": state.get("field_label") or self.field_label(field),
+            "old_value": str(old_value),
+            "new_value": str(wrong_value),
+            "confidence": 1.0,
+            "reason": "Deliberate mistake was not corrected by the child; storing Leo's unchallenged value.",
+            "source_text": "",
+            "replace_field": True,
+            "uncorrected_mistake_value": True,
+            "mistake_id": turn.get("mistake_id"),
+        }
+        written = self.write_um_change(change)
+        if not written:
+            return False
+        state["uncorrected_value_persisted"] = True
+        state["accepted_value"] = str(wrong_value)
+        state["accepted_field"] = field
+        tablet_state = getattr(self, "tablet_state", None)
+        refresh = getattr(tablet_state, "refresh", None)
+        if callable(refresh):
+            refresh(phase=self.turn_phase(turn))
+        return True
 
     def current_session_id(self):
         log = getattr(self, "conversation_log", None) or {}
@@ -3300,10 +3393,7 @@ class CRI_ScriptedDialogue(SICApplication):
         return re.sub(r"\s+", " ", text).strip()
 
     def memory_change_field_prompt(self) -> str:
-        return (
-            "Welk stukje van mijn geheugen wil je veranderen? Bijvoorbeeld je lievelingseten, "
-            "je favoriete hobby, je lievelingsvak, of wat je later wilt worden."
-        )
+        return "Zeg wat je wilt veranderen op deze manier: verander puntjepuntjepuntje naar puntjepuntjepuntje."
 
     def memory_change_field_unclear_prompt(self) -> str:
         return (
@@ -3358,7 +3448,81 @@ class CRI_ScriptedDialogue(SICApplication):
         )
         return any(re.search(rf"\b{re.escape(cue)}\b", text) for cue in cues)
 
+    def exact_memory_change_parts(self, transcript: str) -> tuple[str, str]:
+        text = str(transcript or "").strip()
+        match = re.search(
+            r"\bverander(?:\s+(?:mijn|je|de|het))?\s+(.+?)\s+naar\s+(.+?)\s*[.!?]*$",
+            text,
+            re.IGNORECASE,
+        )
+        if not match:
+            return "", ""
+        old_part = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?;:")
+        new_part = re.sub(r"\s+", " ", match.group(2)).strip(" .,!?;:")
+        return old_part, new_part
+
+    def field_from_memory_change_old_value(self, old_value: str, context: dict, allowed_fields: list) -> str:
+        old_value = str(old_value or "").strip()
+        if not old_value:
+            return ""
+        topic = context.get("topic") or {}
+        current_values = topic.get("current_values") or {}
+        stored_values = topic.get("stored_values") or {}
+        visible_mistakes = topic.get("visible_mistakes") or {}
+        for field in allowed_fields or []:
+            candidates = [
+                current_values.get(field),
+                stored_values.get(field),
+                self.last_um_preview.get(field),
+            ]
+            mistake = visible_mistakes.get(field) or {}
+            candidates.extend([mistake.get("wrong"), mistake.get("actual")])
+            for candidate in candidates:
+                if self.is_known(candidate) and self.actions.field_values_match(field, candidate, old_value):
+                    return field
+        return ""
+
+    def exact_memory_change_from_answer(self, transcript: str, context: dict, allowed_fields: list) -> dict:
+        old_part, new_value = self.exact_memory_change_parts(transcript)
+        if not (old_part and self.is_known(new_value)):
+            return {}
+        field = self.field_from_memory_change_answer(old_part, None, allowed_fields)
+        if not field:
+            field = self.field_from_memory_change_old_value(old_part, context, allowed_fields)
+        if not field:
+            return {}
+
+        topic = context.get("topic") or {}
+        field_label = (topic.get("field_labels") or {}).get(field) or self.field_label(field)
+        old_value = (
+            (topic.get("current_values") or {}).get(field)
+            or self.last_um_preview.get(field)
+            or self.UNKNOWN_VALUE
+        )
+        visible_mistake = ((topic.get("visible_mistakes") or {}).get(field) or {})
+        change = {
+            "action": "update",
+            "field": field,
+            "field_label": field_label,
+            "old_value": str(old_value),
+            "new_value": str(new_value),
+            "confidence": 0.95,
+            "reason": "Child gave exact memory change sentence.",
+            "source_text": transcript,
+            "confirmation_question": f"Wil je dat ik {field_label} verander naar {new_value}?",
+        }
+        if visible_mistake:
+            change["visible_mistake_id"] = visible_mistake.get("id")
+            change["visible_mistake_field"] = visible_mistake.get("field")
+            change["visible_mistake_wrong"] = visible_mistake.get("wrong")
+            change["visible_mistake_actual"] = visible_mistake.get("actual")
+            change["replace_field"] = True
+        return change
+
     def direct_memory_change_from_answer(self, result, transcript: str, context: dict, allowed_fields: list) -> dict:
+        exact_change = self.exact_memory_change_from_answer(transcript, context, allowed_fields)
+        if exact_change:
+            return exact_change
         if not (
             self.has_memory_change_field_cue(transcript, allowed_fields)
             and self.has_memory_change_value_cue(transcript)
@@ -3425,16 +3589,35 @@ class CRI_ScriptedDialogue(SICApplication):
         return change or {}
 
     def memory_access_capture_two_step_change(self, action: dict, source_turn: dict) -> dict:
-        field, direct_change, _context = self.ask_memory_change_field(action, source_turn)
-        if direct_change:
-            return direct_change
-        if not field:
-            self.speech.say(
-                "Ik weet nog niet goed wat ik moet veranderen. "
-                "Zeg bijvoorbeeld: mijn lievelingseten."
-            )
-            return {}
-        return self.ask_memory_change_value_for_field(action, source_turn, field)
+        context = self.memory_access_change_context(action, source_turn)
+        allowed_fields = list(context.get("memory_review_fields") or [])
+
+        for attempt in range(2):
+            self.speech.say(self.memory_change_field_prompt())
+            self.current_turn_context = context
+            transcript = self.speech.listen_with_review()
+            with self.child_processing_loading():
+                result = self.classify_with_repeat(transcript, context)
+                change = self.direct_memory_change_from_answer(
+                    result,
+                    transcript,
+                    context,
+                    allowed_fields,
+                )
+                self.log_action_handler_result(
+                    self.action_result(
+                        "memory_access_exact_change_captured" if change else "memory_access_exact_change_missing",
+                        bool(change),
+                        "Child answered the exact memory-change prompt.",
+                        change=change or None,
+                    )
+                )
+            self.current_turn_context = source_turn
+            if change:
+                return change
+
+        self.speech.say("Dan verander ik het nu nog niet.")
+        return {}
 
     def memory_access_interrupt_control(self, action: dict) -> dict:
         """Explicit, gated voice flow for memory access (no researcher keyboard).
@@ -3994,6 +4177,7 @@ class CRI_ScriptedDialogue(SICApplication):
             self.run_phase_segment(turn, turn)
         finally:
             if turn.get("mistake_id"):
+                self.persist_uncorrected_mistake_value(turn)
                 self.record_mistake_outcome(turn)
             self.finish_turn_log()
             self.current_turn_context = None

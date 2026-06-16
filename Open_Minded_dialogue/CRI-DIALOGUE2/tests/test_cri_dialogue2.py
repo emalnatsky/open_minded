@@ -1303,7 +1303,9 @@ class CRIDialogue2Tests(unittest.TestCase):
         phase36 = next(turn for turn in script if turn.get("phase_id") == "3.6/7")
         review_segment = phase36["segments"][1]
 
-        self.assertIn("Kijk maar op de tablet", app.turn_text(review_segment))
+        review_text = app.turn_text(review_segment)
+        self.assertIn("tablet", review_text.lower())
+        self.assertIn("hoofdstukken", review_text.lower())
         self.assertTrue(review_segment["memory_review_from_access_scope"])
         self.assertFalse(review_segment["speak_memory_review_from_access_scope"])
         self.assertTrue(review_segment["activate_tablet_memory_access"])
@@ -3847,16 +3849,16 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(context["memory_review_fields"], ["sports_enjoys", "sports_fav_play"])
         self.assertEqual(set(app.allowed_change_fields(context)), {"sports_enjoys", "sports_fav_play"})
 
-    def test_memory_access_interrupt_uses_two_step_field_then_value_flow(self):
+    def test_memory_access_interrupt_uses_exact_change_sentence_flow(self):
         app = make_app()
         app.last_um_preview = sample_um()
-        app.speech = FakeSpeech(["ja", "lievelingseten", "pizza", "ja", "nee"])
+        app.speech = FakeSpeech(["ja", "verander mijn lievelingseten naar pizza", "ja", "nee"])
         writes = []
         app.write_um_change = lambda change: writes.append(dict(change)) or True
 
         class FoodClassifier:
             def classify(self, text, turn_context=None):
-                if str(text).strip().lower() == "pizza":
+                if "pizza" in str(text).lower():
                     return IntentResult(intent="um_update", field="fav_food", value="pizza", confidence=0.95)
                 return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
 
@@ -3876,21 +3878,17 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(writes[0]["field"], "fav_food")
         self.assertEqual(writes[0]["new_value"], "pizza")
         self.assertIn(
-            "Welk stukje van mijn geheugen wil je veranderen?",
+            "Zeg wat je wilt veranderen op deze manier: verander puntjepuntjepuntje naar puntjepuntjepuntje.",
             app.speech.spoken[1],
         )
-        self.assertIn(
-            "Oke, je lievelingseten. Waar wil je dat ik dat naar verander?",
-            app.speech.spoken[2],
-        )
-        self.assertIn("je lievelingseten", app.speech.spoken[3])
-        self.assertIn("naar pizza", app.speech.spoken[3])
+        self.assertIn("je lievelingseten", app.speech.spoken[2])
+        self.assertIn("naar pizza", app.speech.spoken[2])
         self.assertIn("Wil je nog iets anders veranderen?", app.speech.spoken)
 
     def test_memory_access_interrupt_does_not_treat_lone_value_as_field(self):
         app = make_app()
         app.last_um_preview = sample_um()
-        app.speech = FakeSpeech(["ja", "pizza", "lievelingseten", "pizza", "ja", "nee"])
+        app.speech = FakeSpeech(["ja", "pizza", "pizza", "nee"])
         writes = []
         app.write_um_change = lambda change: writes.append(dict(change)) or True
 
@@ -3912,12 +3910,17 @@ class CRIDialogue2Tests(unittest.TestCase):
         with patch("time.sleep", lambda *_args, **_kwargs: None):
             result = app.memory_access_interrupt_control(action)
 
-        self.assertEqual(result["action"], "memory_access_change_confirmed")
-        self.assertEqual(writes[0]["field"], "fav_food")
-        self.assertEqual(writes[0]["new_value"], "pizza")
-        self.assertTrue(
-            any("Ik weet nog niet welk stukje je bedoelt" in text for text in app.speech.spoken)
+        self.assertEqual(result["action"], "memory_access_continue")
+        self.assertEqual(writes, [])
+        self.assertEqual(
+            sum(
+                1
+                for text in app.speech.spoken
+                if "verander puntjepuntjepuntje naar puntjepuntjepuntje" in text
+            ),
+            2,
         )
+        self.assertIn("Dan verander ik het nu nog niet.", app.speech.spoken)
 
     def test_memory_access_interrupt_preserves_full_change_shortcut(self):
         app = make_app()
@@ -3951,16 +3954,40 @@ class CRIDialogue2Tests(unittest.TestCase):
             any("Waar wil je dat ik dat naar verander" in text for text in app.speech.spoken)
         )
 
+    def test_memory_access_interrupt_resolves_visible_value_to_field(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["fav_food"] = "broccoli"
+        app.speech = FakeSpeech(["ja", "verander broccoli naar pizza", "ja", "nee"])
+        writes = []
+        app.write_um_change = lambda change: writes.append(dict(change)) or True
+
+        app.clf = cri_module.StubIntentClassifier(valid_fields=list(CRI.UM_FIELDS))
+        action = {
+            "visible_fields": ["fav_food", "hobby_fav"],
+            "memory_scope": ["fav_food", "hobby_fav"],
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            result = app.memory_access_interrupt_control(action)
+
+        self.assertEqual(result["action"], "memory_access_change_confirmed")
+        self.assertEqual(writes[0]["field"], "fav_food")
+        self.assertEqual(writes[0]["old_value"], "broccoli")
+        self.assertEqual(writes[0]["new_value"], "pizza")
+        self.assertIn("je lievelingseten", app.speech.spoken[2])
+        self.assertIn("naar pizza", app.speech.spoken[2])
+
     def test_memory_access_interrupt_rejects_field_outside_visible_scope(self):
         app = make_app()
         app.last_um_preview = sample_um()
-        app.speech = FakeSpeech(["ja", "lievelingseten", "hobby", "tekenen", "ja", "nee"])
+        app.speech = FakeSpeech(["ja", "verander mijn lievelingseten naar pizza", "verander hobby naar tekenen", "ja", "nee"])
         writes = []
         app.write_um_change = lambda change: writes.append(dict(change)) or True
 
         class HobbyClassifier:
             def classify(self, text, turn_context=None):
-                if str(text).strip().lower() == "tekenen":
+                if "tekenen" in str(text).lower():
                     return IntentResult(intent="um_update", field="hobby_fav", value="tekenen", confidence=0.95)
                 return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
 
@@ -3979,7 +4006,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(result["action"], "memory_access_change_confirmed")
         self.assertEqual(writes[0]["field"], "hobby_fav")
         self.assertTrue(
-            any("Ik weet nog niet welk stukje je bedoelt" in text for text in app.speech.spoken)
+            any("verander puntjepuntjepuntje naar puntjepuntjepuntje" in text for text in app.speech.spoken)
         )
 
     def test_memory_access_change_handles_ambiguous_yes_no_without_write(self):
@@ -5339,10 +5366,11 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertIn(6, app.phases_with_confirmed_change)
         self.assertTrue(app.mistake_states["M1"].get("corrected"))
 
-    def test_mistake_one_clear_yes_to_wrong_hobby_continues_without_change(self):
+    def test_mistake_one_clear_yes_to_wrong_hobby_persists_at_phase_end(self):
         app = make_app()
         app.last_um_preview = sample_um()
-        app.write_um_change = lambda change: self.fail("clear yes to M1 wrong value must not write UM")
+        writes = []
+        app.write_um_change = lambda change: writes.append(dict(change)) or True
         turn = {
             "phase": 6,
             "mistake_id": "M1",
@@ -5363,7 +5391,15 @@ class CRIDialogue2Tests(unittest.TestCase):
 
         self.assertEqual(action["action"], "continue_wrong_value_followup")
         self.assertEqual(action["change"], {})
+        self.assertEqual(writes, [])
         self.assertEqual(app.last_um_preview["hobby_fav"], sample_um()["hobby_fav"])
+
+        persisted = app.persist_uncorrected_mistake_value(turn)
+
+        self.assertTrue(persisted)
+        self.assertEqual(writes[0]["field"], "hobby_fav")
+        self.assertEqual(writes[0]["new_value"], "hockey")
+        self.assertTrue(writes[0]["uncorrected_mistake_value"])
 
     def test_mistake_one_hobby_specific_rejection_asks_correction_detail(self):
         phrases = (
@@ -6169,7 +6205,7 @@ class CRIDialogue2Tests(unittest.TestCase):
             app.speech.spoken[0],
             "Ik kan hier een ding onthouden. Waar ben jij vooral goed in op school? Noem een ding.",
         )
-        self.assertIn("waar je goed in bent op school verander naar Gym", app.speech.spoken[1])
+        self.assertIn("waar je goed in bent op school van begrijpend lezen naar Gym verander", app.speech.spoken[1])
 
     def test_part2_mistake3_multiple_strengths_without_clarification_does_not_update(self):
         app = make_app()
@@ -6221,6 +6257,307 @@ class CRIDialogue2Tests(unittest.TestCase):
             "Dat zijn er nog te veel. Ik kan hier een ding onthouden. Waar ben jij vooral goed in op school? Noem een ding.",
         )
         self.assertIn("Dan verander ik het nu nog niet", app.speech.spoken[2])
+
+    def test_memory_value_validation_accepts_open_values_and_rejects_closed_invalid(self):
+        app = make_app()
+
+        accepted_cases = (
+            ("hobby_fav", "Spelen", "spelen"),
+            ("hobby_fav", "buiten spelen", "buiten spelen"),
+            ("hobby_fav", "lego bouwen", "lego bouwen"),
+            ("fav_food", "shoarma", "shoarma"),
+            ("fav_food", "pasta met kaas", "pasta met kaas"),
+            ("fav_subject", "gym en rekenen", "gym en rekenen"),
+            ("has_pet", "ja", "ja"),
+            ("has_pet", "nee", "nee"),
+            ("has_pet", "misschien", "misschien"),
+        )
+        for field, value, normalized in accepted_cases:
+            with self.subTest(field=field, value=value):
+                result = app.actions.validate_memory_value(field, value, value, {})
+                self.assertTrue(result["accepted"], result)
+                self.assertEqual(result["normalized_value"], normalized)
+
+        rejected_cases = (
+            ("fav_subject", "voetbal"),
+            ("school_strength", "spelen"),
+            ("has_pet", "pizza"),
+        )
+        for field, value in rejected_cases:
+            with self.subTest(field=field, value=value):
+                result = app.actions.validate_memory_value(field, value, value, {})
+                self.assertFalse(result["accepted"], result)
+
+    def test_memory_value_validation_uses_gpt_for_ambiguous_open_values(self):
+        app = make_app([{
+            "accept": True,
+            "normalized_value": "oude stenen verzamelen",
+            "reason": "plausible concrete interest",
+        }])
+
+        result = app.actions.validate_memory_value(
+            "interest",
+            "een hele bijzondere verzameling van oude stenen",
+            "een hele bijzondere verzameling van oude stenen",
+            {},
+        )
+
+        self.assertTrue(result["accepted"], result)
+        self.assertEqual(result["normalized_value"], "oude stenen verzamelen")
+        self.assertEqual(result["source"], "gpt")
+        self.assertEqual(len(app.openai_client.requests), 1)
+
+    def test_tablet_m1_rejected_mistake_accepts_spelen_as_hobby_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "keemen",
+        }
+        app.mistake_states = {
+            "M1": {
+                "id": "M1",
+                "mentioned": True,
+                "field": "hobby_fav",
+                "actual": "tekenen",
+                "wrong": "keemen",
+                "corrected": False,
+                "wrong_value_rejected": True,
+            }
+        }
+        writes = []
+
+        def write_um_change(change):
+            writes.append(dict(change))
+            app.last_um_preview[change["field"]] = change["new_value"]
+            return True
+
+        class TabletClassifier:
+            def classify(self, text, turn_context=None):
+                text = str(text or "").strip().lower()
+                if text == "spelen":
+                    return IntentResult(intent="um_update", field="hobby_fav", value="spelen", confidence=0.95)
+                if text == "hobby":
+                    return IntentResult(intent="um_update", field="hobby_fav", value="hobby", confidence=0.85)
+                if text == "ja":
+                    return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.8)
+
+            classify_retry = classify
+
+        app.write_um_change = write_um_change
+        app.clf = TabletClassifier()
+        app.speech = FakeSpeech(["Ja", "Hobby", "Spelen", "ja"])
+        turn = dict(app.current_turn_context)
+        turn.update({
+            "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
+        })
+
+        with patch("time.sleep", lambda _seconds: None):
+            action = app.actions.tablet_change_loop(turn, loop=False)
+
+        self.assertTrue(action["change_confirmed"])
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0]["field"], "hobby_fav")
+        self.assertEqual(writes[0]["new_value"], "spelen")
+        self.assertIn("Oeps, wat is dan je favoriete hobby?", app.speech.spoken)
+        self.assertTrue(any("Wat is jouw allerliefste hobby" in text for text in app.speech.spoken))
+
+    def test_tablet_mistake_intro_goes_directly_to_correction_prompt(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "E"
+        app.local_condition = "E"
+        writes = []
+
+        def write_um_change(change):
+            writes.append(dict(change))
+            app.last_um_preview[change["field"]] = change["new_value"]
+            return True
+
+        class TabletClassifier:
+            def classify(self, text, turn_context=None):
+                text = str(text or "").strip().lower()
+                if text == "spelen":
+                    return IntentResult(intent="um_update", field="hobby_fav", value="spelen", confidence=0.95)
+                if text == "ja":
+                    return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.8)
+
+            classify_retry = classify
+
+        app.write_um_change = write_um_change
+        app.clf = TabletClassifier()
+        app.speech = FakeSpeech(["Ja", "ja", "ja", "oke", "ja", "Spelen", "ja"])
+        turn = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "keemen",
+            "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
+        }
+        app.current_turn_context = turn
+
+        with patch("time.sleep", lambda _seconds: None):
+            action = app.actions.tablet_mistake_correction_action("Nee", turn)
+
+        self.assertTrue(action["change_confirmed"])
+        self.assertTrue(app.tablet_intro_shown)
+        self.assertEqual(writes[0]["field"], "hobby_fav")
+        self.assertEqual(writes[0]["new_value"], "spelen")
+        self.assertTrue(any("Haal het doek van de tablet" in text for text in app.speech.spoken))
+        self.assertFalse(any(text == "Wil je iets veranderen of niet?" for text in app.speech.spoken))
+        self.assertIn("Oeps, wat is dan je favoriete hobby?", app.speech.spoken)
+
+    def test_tablet_m1_invalid_value_does_not_continue_wrong_followup(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.current_turn_context = {
+            "phase": 6,
+            "mistake_id": "M1",
+            "mistake_field": "hobby_fav",
+            "mistake_actual": "tekenen",
+            "mistake_wrong": "keemen",
+        }
+        app.mistake_states = {
+            "M1": {
+                "id": "M1",
+                "mentioned": True,
+                "field": "hobby_fav",
+                "actual": "tekenen",
+                "wrong": "keemen",
+                "corrected": False,
+                "wrong_value_rejected": True,
+            }
+        }
+        app.write_um_change = lambda change: self.fail("Invalid tablet value must not be written")
+
+        class InvalidTabletClassifier:
+            def classify(self, text, turn_context=None):
+                text = str(text or "").strip().lower()
+                if text == "hobby":
+                    return IntentResult(intent="um_update", field="hobby_fav", value="hobby", confidence=0.85)
+                if text == "ja":
+                    return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.8)
+
+            classify_retry = classify
+
+        app.clf = InvalidTabletClassifier()
+        app.speech = FakeSpeech(["Ja", "Hobby", "Hobby"])
+        turn = dict(app.current_turn_context)
+        turn.update({
+            "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
+        })
+
+        with patch("time.sleep", lambda _seconds: None):
+            action = app.actions.tablet_change_loop(turn, loop=False)
+
+        self.assertFalse(action["change_confirmed"])
+        self.assertTrue(action["stop_phase_after_change"])
+        self.assertIn("Dan verander ik het nu nog niet.", app.speech.spoken)
+
+    def test_uncorrected_mistakes_persist_wrong_value_for_all_mistake_fields(self):
+        cases = (
+            ("M1", 6, "hobby_fav", "tekenen", "hockey"),
+            ("M2", 8, "fav_food", "pannenkoeken", "broccoli"),
+            ("M3", 13, "school_strength", "taal", "begrijpend lezen"),
+            ("M4", 17, "aspiration", "dierenarts worden", "schooldirecteur worden"),
+        )
+        for mistake_id, phase, field, actual, wrong in cases:
+            with self.subTest(mistake_id=mistake_id):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                writes = []
+
+                def write_um_change(change):
+                    writes.append(dict(change))
+                    app.last_um_preview[change["field"]] = change["new_value"]
+                    return True
+
+                app.write_um_change = write_um_change
+                turn = {
+                    "phase": phase,
+                    "mistake_id": mistake_id,
+                    "mistake_field": field,
+                    "mistake_actual": actual,
+                    "mistake_wrong": wrong,
+                    "mistake_type": "completely-wrong",
+                }
+                app.register_mistake_phase(turn)
+
+                persisted = app.persist_uncorrected_mistake_value(turn)
+
+                self.assertTrue(persisted)
+                self.assertEqual(len(writes), 1)
+                self.assertEqual(writes[0]["field"], field)
+                self.assertEqual(writes[0]["old_value"], actual)
+                self.assertEqual(writes[0]["new_value"], wrong)
+                self.assertTrue(writes[0]["replace_field"])
+                self.assertTrue(writes[0]["uncorrected_mistake_value"])
+                self.assertEqual(app.last_um_preview[field], wrong)
+                self.assertFalse(app.mistake_states[mistake_id].get("corrected"))
+                self.assertTrue(app.mistake_states[mistake_id].get("uncorrected_value_persisted"))
+
+    def test_uncorrected_mistake_persist_skips_already_written_m2_acceptance(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "broccoli",
+                "corrected": False,
+                "accepted_wrong_value": True,
+            }
+        }
+        app.write_um_change = lambda change: self.fail("M2 accepted wrong food should not be written twice")
+        turn = {
+            "phase": 8,
+            "mistake_id": "M2",
+            "mistake_field": "fav_food",
+            "mistake_actual": "pannenkoeken",
+            "mistake_wrong": "broccoli",
+        }
+
+        self.assertFalse(app.persist_uncorrected_mistake_value(turn))
+
+    def test_rejected_unresolved_mistake_does_not_persist_wrong_value(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.mistake_states = {
+            "M4": {
+                "id": "M4",
+                "mentioned": True,
+                "field": "aspiration",
+                "actual": "dierenarts worden",
+                "wrong": "schooldirecteur worden",
+                "corrected": False,
+                "wrong_value_rejected": True,
+            }
+        }
+        app.write_um_change = lambda change: self.fail("explicitly rejected mistake must not silently write wrong value")
+        turn = {
+            "phase": 17,
+            "mistake_id": "M4",
+            "mistake_field": "aspiration",
+            "mistake_actual": "dierenarts worden",
+            "mistake_wrong": "schooldirecteur worden",
+        }
+
+        self.assertFalse(app.persist_uncorrected_mistake_value(turn))
 
     def test_mistake_phase_logs_not_corrected_outcome_with_leo_memory_value(self):
         app = make_app()
@@ -6924,6 +7261,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         app.last_um_preview["condition"] = "C2"
         app.last_um_preview["hobby_fav"] = "gamen"
         app.local_condition = "C2"
+        app.tablet_intro_shown = True
         app.current_turn_context = {
             "phase": 6,
             "mistake_id": "M1",
@@ -6951,6 +7289,8 @@ class CRIDialogue2Tests(unittest.TestCase):
             "mistake_actual": "gamen",
             "mistake_wrong": "padel",
             "response_mode": "mistake_interpretation",
+            "memory_correction_available": True,
+            "memory_correction_field": "hobby_fav",
             "mistake_topic": app.hobby_mistake_topic(app.last_um_preview),
             "defer_corrected_response": True,
         }
@@ -6962,7 +7302,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         )
 
         self.assertEqual(action["action"], "confirm_update")
-        self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby verander naar gamen?"))
+        self.assertEqual(events[0], ("say", "Wil je dat ik je favoriete hobby van padel naar gamen verander?"))
         self.assertEqual(
             events[2],
             (
@@ -7717,6 +8057,108 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(declined_action["action"], "nudge_memory_offer_declined")
         self.assertEqual(declined_action["leo_response"], "Oké, dan hoeft dat nu niet.")
 
+    def test_nudge_first_answer_with_concrete_correction_is_handled_immediately(self):
+        for transcript, result in (
+            (
+                "Nee, pannenkoeken",
+                IntentResult(intent="um_update", field="fav_food", value="pannenkoeken", confidence=0.95),
+            ),
+            (
+                "pannenkoeken",
+                IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            ),
+        ):
+            with self.subTest(transcript=transcript):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                app.mistake_states = {
+                    "M2": {
+                        "id": "M2",
+                        "mentioned": True,
+                        "field": "fav_food",
+                        "actual": "pannenkoeken",
+                        "wrong": "pizza",
+                        "corrected": False,
+                    }
+                }
+                turn = {
+                    "phase": 9,
+                    "response_mode": "nudge_interpretation",
+                    "topic": app.general_memory_topic(app.last_um_preview),
+                }
+
+                action = app.action_handler(result, transcript, turn)
+
+                self.assertEqual(action["action"], "nudge_correction_detail")
+                self.assertEqual(action["mistake_id"], "M2")
+                self.assertEqual(action["corrected_value"], "pannenkoeken")
+                self.assertTrue(app.mistake_states["M2"]["corrected"])
+                self.assertEqual(app.corrections_seen, 1)
+                self.assertNotIn("nudge_correction_requested", turn)
+                self.assertTrue(action["follow_up_needed"])
+                self.assertTrue(turn["nudge_memory_offer_made"])
+                self.assertEqual(action["acknowledgement"], "Dankjewel, dan let ik daar beter op.")
+                self.assertEqual(action["leo_response"], "We kunnen ook samen kijken wat ik over jou onthoud, als je wilt.")
+                self.assertEqual(
+                    app.speech.spoken[-2:],
+                    [
+                        "Dankjewel, dan let ik daar beter op.",
+                        "We kunnen ook samen kijken wat ik over jou onthoud, als je wilt.",
+                    ],
+                )
+
+    def test_nudge_first_answer_without_concrete_correction_still_asks_detail(self):
+        for transcript in ("Nee", "niet echt", "klopt niet"):
+            with self.subTest(transcript=transcript):
+                app = make_app()
+                app.last_um_preview = sample_um()
+                app.mistake_states = {
+                    "M2": {
+                        "id": "M2",
+                        "mentioned": True,
+                        "field": "fav_food",
+                        "actual": "pannenkoeken",
+                        "wrong": "pizza",
+                        "corrected": False,
+                    }
+                }
+                turn = {
+                    "phase": 9,
+                    "response_mode": "nudge_interpretation",
+                    "topic": app.general_memory_topic(app.last_um_preview),
+                }
+
+                action = app.action_handler(
+                    IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+                    transcript,
+                    turn,
+                )
+
+                self.assertEqual(action["action"], "nudge_ask_correction_detail")
+                self.assertTrue(turn["nudge_correction_requested"])
+                self.assertFalse(app.mistake_states["M2"]["corrected"])
+
+    def test_final_memory_change_decline_with_everything_good_does_not_ask_change(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.write_um_change = lambda *_args, **_kwargs: self.fail("Decline must not write UM")
+        turn = {
+            "phase": 18,
+            "phase_id": "3.6/7",
+            "response_mode": "memory_access_change",
+            "allow_memory_change": True,
+            "memory_correction_requested": True,
+        }
+
+        action = app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Nee, het was allemaal goed",
+            turn,
+        )
+
+        self.assertEqual(action["action"], "memory_access_change_none")
+        self.assertEqual(app.speech.spoken, ["Oké, dan laat ik alles zo."])
+
     def test_nudge_memory_offer_followup_runs_change_gate(self):
         app = make_app()
         app.last_um_preview = sample_um()
@@ -7750,6 +8192,134 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(action["action"], "memory_access_continue")
         self.assertIn("Wil je iets veranderen?", app.speech.spoken)
         self.assertIn("Oke, we gaan verder.", app.speech.spoken)
+
+    def test_nudge_experiment_first_memory_access_runs_tablet_walk(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "E"
+        app.local_condition = "E"
+        app.speech = FakeSpeech(["Ja", "Ja", "ja", "ja", "oke", "ja", "nee"])
+        app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+        phase = {
+            "phase": 9,
+            "phase_id": "1.9",
+            "name": "Nudge",
+            "part": 1,
+        }
+        segment = {
+            "content_plan": app.l1("Zeg, ik heb al een paar dingen over jou gezegd vandaag. Klopte eigenlijk alles wat ik zei?"),
+            "expects_response": True,
+            "response_mode": "nudge_interpretation",
+            "topic": app.general_memory_topic(app.last_um_preview),
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, segment)
+
+        self.assertEqual(action["action"], "memory_access_continue")
+        self.assertTrue(app.tablet_intro_shown)
+        self.assertIn("We kunnen ook samen op de tablet kijken wat ik over jou onthoud, als je wilt.", app.speech.spoken)
+        self.assertTrue(any("Zie jij het boek met jouw naam erop?" in text for text in app.speech.spoken))
+        self.assertTrue(any("Haal het doek van de tablet" in text for text in app.speech.spoken))
+        self.assertTrue(any("Open nu het hoofdstuk waar we net over hebben gepraat" in text for text in app.speech.spoken))
+        self.assertTrue(any("Zie je daar wat ik over jou heb onthouden?" in text for text in app.speech.spoken))
+        self.assertIn("Wil je iets veranderen?", app.speech.spoken)
+        self.assertNotIn("Je kunt mijn geheugenboek op de tablet bekijken.", app.speech.spoken)
+
+    def test_nudge_experiment_later_memory_access_skips_tablet_walk(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.last_um_preview["condition"] = "E"
+        app.local_condition = "E"
+        app.tablet_intro_shown = True
+        app.speech = FakeSpeech(["Ja", "Ja", "nee"])
+        app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+        phase = {
+            "phase": 9,
+            "phase_id": "1.9",
+            "name": "Nudge",
+            "part": 1,
+        }
+        segment = {
+            "content_plan": app.l1("Zeg, ik heb al een paar dingen over jou gezegd vandaag. Klopte eigenlijk alles wat ik zei?"),
+            "expects_response": True,
+            "response_mode": "nudge_interpretation",
+            "topic": app.general_memory_topic(app.last_um_preview),
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, segment)
+
+        self.assertEqual(action["action"], "memory_access_continue")
+        self.assertIn("We kunnen ook samen op de tablet kijken wat ik over jou onthoud, als je wilt.", app.speech.spoken)
+        self.assertIn("Wil je iets veranderen?", app.speech.spoken)
+        self.assertFalse(any("Zie jij het boek met jouw naam erop?" in text for text in app.speech.spoken))
+        self.assertFalse(any("Haal het doek van de tablet" in text for text in app.speech.spoken))
+        self.assertNotIn("Je kunt mijn geheugenboek op de tablet bekijken.", app.speech.spoken)
+
+    def test_nudge_direct_correction_still_runs_memory_change_gate(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech = FakeSpeech(["Nee, pannenkoeken", "Ja", "Nee"])
+        app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+
+        class DirectCorrectionClassifier:
+            def classify(self, text, turn_context=None):
+                if "pannenkoeken" in str(text).lower():
+                    return IntentResult(intent="um_update", field="fav_food", value="pannenkoeken", confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9)
+
+            classify_retry = classify
+
+        app.clf = DirectCorrectionClassifier()
+        phase = {
+            "phase": 9,
+            "phase_id": "1.9",
+            "name": "Nudge",
+            "part": 1,
+        }
+        segment = {
+            "content_plan": app.l1("Zeg, ik heb al een paar dingen over jou gezegd vandaag. Klopte eigenlijk alles wat ik zei?"),
+            "expects_response": True,
+            "response_mode": "nudge_interpretation",
+            "topic": app.general_memory_topic(app.last_um_preview),
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, segment)
+
+        self.assertEqual(action["action"], "memory_access_continue")
+        self.assertTrue(app.mistake_states["M2"]["corrected"])
+        self.assertIn("Dankjewel, dan let ik daar beter op.", app.speech.spoken)
+        self.assertIn("We kunnen ook samen kijken wat ik over jou onthoud, als je wilt.", app.speech.spoken)
+        self.assertIn("Wil je iets veranderen?", app.speech.spoken)
 
     def test_stub_classifier_detects_memory_access_phrases(self):
         clf = cri_module.StubIntentClassifier(valid_fields=list(CRI.UM_FIELDS))
