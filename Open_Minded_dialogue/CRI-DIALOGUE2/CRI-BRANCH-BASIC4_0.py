@@ -1357,6 +1357,19 @@ class CRI_ScriptedDialogue(SICApplication):
             load_dotenv(self.openai_env_path)
 
         if "OPENAI_API_KEY" not in os.environ:
+            env_candidates = [
+                self.openai_env_path,
+                os.path.join(config.OUTER_ROOT, "conf", ".env"),   # where it was before
+                os.path.join(config.OUTER_ROOT, ".env"),
+                os.path.join(config.PACKAGE_ROOT, ".env"),
+            ]
+            for _env_path in env_candidates:
+                if _env_path and os.path.exists(_env_path):
+                    load_dotenv(_env_path)
+                    if "OPENAI_API_KEY" in os.environ:
+                        break
+
+        if "OPENAI_API_KEY" not in os.environ:
             raise RuntimeError("OPENAI_API_KEY not found.")
 
         self.openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
