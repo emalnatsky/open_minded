@@ -1058,6 +1058,7 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(phase16["segments"][1]["memory_correction_available"])
         self.assertEqual(phase16["segments"][1]["memory_correction_field"], "hobby_fav")
         self.assertEqual(phase16["segments"][2]["response_mode"], "listen_only")
+
         phase18 = script[7]
         self.assertEqual(phase18["phase_id"], "1.8")
         self.assertEqual(phase18["mistake_field"], "fav_food")
@@ -1227,6 +1228,65 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertEqual(script[7]["mistake_id"], "M2")
         self.assertEqual(script[7]["mistake_field"], "fav_food")
         self.assertEqual(script[8]["condition"], "run_if_two_mistakes_no_corrections")
+
+    def test_direct_start_at_nudge_primes_two_uncorrected_mistakes(self):
+        app = make_app()
+        app.local_child_name = "Sam"
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        script = app.build_script()
+        nudge_index = app.session_setup.script_phase_id_map()["1.9"]
+        app.start_phase_index = nudge_index
+
+        with patch("builtins.print"):
+            primed = app.prime_direct_nudge_test_if_needed(script)
+
+        self.assertTrue(primed)
+        self.assertEqual(app.mistakes_mentioned, 2)
+        self.assertEqual(app.corrections_seen, 0)
+        self.assertIn("M1", app.mistake_states)
+        self.assertIn("M2", app.mistake_states)
+        self.assertFalse(app.mistake_states["M1"].get("corrected"))
+        self.assertFalse(app.mistake_states["M2"].get("corrected"))
+        self.assertIn("hobby_fav", app.memory_fields_mentioned_so_far)
+        self.assertIn("fav_food", app.memory_fields_mentioned_so_far)
+        self.assertFalse(app.should_skip_phase(script[nudge_index]))
+
+    def test_direct_nudge_priming_does_not_affect_normal_or_mistake_start(self):
+        app = make_app()
+        app.local_child_name = "Sam"
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        script = app.build_script()
+
+        app.start_phase_index = app.session_setup.script_phase_id_map()["1.1"]
+        self.assertFalse(app.prime_direct_nudge_test_if_needed(script))
+        self.assertEqual(app.mistakes_mentioned, 0)
+        self.assertEqual(app.mistake_states, {})
+
+        app.start_phase_index = app.session_setup.script_phase_id_map()["1.6"]
+        self.assertFalse(app.prime_direct_nudge_test_if_needed(script))
+        self.assertEqual(app.mistakes_mentioned, 0)
+        self.assertEqual(app.mistake_states, {})
+
+    def test_direct_nudge_priming_skips_resume_sessions(self):
+        app = make_app()
+        app.local_child_name = "Sam"
+        app.USE_FAKE_PERSONA_UM = False
+        app.pull_um = sample_um
+        app.last_cri_scenario_loaded = True
+        app.last_cri_scenario = {"utterances": {}, "mistakes": []}
+        script = app.build_script()
+        app.start_phase_index = app.session_setup.script_phase_id_map()["1.9"]
+        app.resume_from_log_path = "previous_session.json"
+
+        self.assertFalse(app.prime_direct_nudge_test_if_needed(script))
+        self.assertEqual(app.mistakes_mentioned, 0)
+        self.assertEqual(app.mistake_states, {})
 
     def test_build_script_condition_e_uses_tablet_for_explicit_memory_review(self):
         app = make_app()
@@ -3786,6 +3846,141 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(context["memory_correction_requested"])
         self.assertEqual(context["memory_review_fields"], ["sports_enjoys", "sports_fav_play"])
         self.assertEqual(set(app.allowed_change_fields(context)), {"sports_enjoys", "sports_fav_play"})
+
+    def test_memory_access_interrupt_uses_two_step_field_then_value_flow(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech = FakeSpeech(["ja", "lievelingseten", "pizza", "ja", "nee"])
+        writes = []
+        app.write_um_change = lambda change: writes.append(dict(change)) or True
+
+        class FoodClassifier:
+            def classify(self, text, turn_context=None):
+                if str(text).strip().lower() == "pizza":
+                    return IntentResult(intent="um_update", field="fav_food", value="pizza", confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = FoodClassifier()
+        action = {
+            "visible_fields": ["fav_food", "hobby_fav"],
+            "memory_scope": ["fav_food", "hobby_fav"],
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            result = app.memory_access_interrupt_control(action)
+
+        self.assertEqual(result["action"], "memory_access_change_confirmed")
+        self.assertEqual(writes[0]["field"], "fav_food")
+        self.assertEqual(writes[0]["new_value"], "pizza")
+        self.assertIn(
+            "Welk stukje van mijn geheugen wil je veranderen?",
+            app.speech.spoken[1],
+        )
+        self.assertIn(
+            "Oke, je lievelingseten. Waar wil je dat ik dat naar verander?",
+            app.speech.spoken[2],
+        )
+        self.assertIn("je lievelingseten", app.speech.spoken[3])
+        self.assertIn("naar pizza", app.speech.spoken[3])
+        self.assertIn("Wil je nog iets anders veranderen?", app.speech.spoken)
+
+    def test_memory_access_interrupt_does_not_treat_lone_value_as_field(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech = FakeSpeech(["ja", "pizza", "lievelingseten", "pizza", "ja", "nee"])
+        writes = []
+        app.write_um_change = lambda change: writes.append(dict(change)) or True
+
+        class ValueFirstClassifier:
+            def classify(self, text, turn_context=None):
+                if str(text).strip().lower() == "pizza":
+                    return IntentResult(intent="um_update", field="fav_food", value="pizza", confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = ValueFirstClassifier()
+        action = {
+            "visible_fields": ["fav_food", "hobby_fav"],
+            "memory_scope": ["fav_food", "hobby_fav"],
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            result = app.memory_access_interrupt_control(action)
+
+        self.assertEqual(result["action"], "memory_access_change_confirmed")
+        self.assertEqual(writes[0]["field"], "fav_food")
+        self.assertEqual(writes[0]["new_value"], "pizza")
+        self.assertTrue(
+            any("Ik weet nog niet welk stukje je bedoelt" in text for text in app.speech.spoken)
+        )
+
+    def test_memory_access_interrupt_preserves_full_change_shortcut(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech = FakeSpeech(["ja", "verander mijn lievelingseten naar pizza", "ja", "nee"])
+        writes = []
+        app.write_um_change = lambda change: writes.append(dict(change)) or True
+
+        class FullChangeClassifier:
+            def classify(self, text, turn_context=None):
+                if "pizza" in str(text).lower():
+                    return IntentResult(intent="um_update", field="fav_food", value="pizza", confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = FullChangeClassifier()
+        action = {
+            "visible_fields": ["fav_food", "hobby_fav"],
+            "memory_scope": ["fav_food", "hobby_fav"],
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            result = app.memory_access_interrupt_control(action)
+
+        self.assertEqual(result["action"], "memory_access_change_confirmed")
+        self.assertEqual(writes[0]["field"], "fav_food")
+        self.assertEqual(writes[0]["new_value"], "pizza")
+        self.assertFalse(
+            any("Waar wil je dat ik dat naar verander" in text for text in app.speech.spoken)
+        )
+
+    def test_memory_access_interrupt_rejects_field_outside_visible_scope(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech = FakeSpeech(["ja", "lievelingseten", "hobby", "tekenen", "ja", "nee"])
+        writes = []
+        app.write_um_change = lambda change: writes.append(dict(change)) or True
+
+        class HobbyClassifier:
+            def classify(self, text, turn_context=None):
+                if str(text).strip().lower() == "tekenen":
+                    return IntentResult(intent="um_update", field="hobby_fav", value="tekenen", confidence=0.95)
+                return IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.95)
+
+            def classify_retry(self, text, turn_context=None):
+                return self.classify(text, turn_context)
+
+        app.clf = HobbyClassifier()
+        action = {
+            "visible_fields": ["hobby_fav"],
+            "memory_scope": ["hobby_fav"],
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            result = app.memory_access_interrupt_control(action)
+
+        self.assertEqual(result["action"], "memory_access_change_confirmed")
+        self.assertEqual(writes[0]["field"], "hobby_fav")
+        self.assertTrue(
+            any("Ik weet nog niet welk stukje je bedoelt" in text for text in app.speech.spoken)
+        )
 
     def test_memory_access_change_handles_ambiguous_yes_no_without_write(self):
         app = make_app()
@@ -7406,6 +7601,62 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(app.mistake_states["M2"]["corrected"])
         self.assertEqual(app.corrections_seen, 1)
 
+        missing_app = make_app()
+        missing_app.last_um_preview = sample_um()
+        missing_topic = missing_app.general_memory_topic(missing_app.last_um_preview)
+        missing_app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+        missing_turn = {
+            "phase": 9,
+            "response_mode": "nudge_interpretation",
+            "topic": missing_topic,
+            "nudge_correction_requested": True,
+        }
+        missing_action = missing_app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Nee",
+            missing_turn,
+        )
+        self.assertEqual(missing_action["action"], "nudge_correction_detail_missing")
+        self.assertEqual(missing_action["leo_response"], "Oké, dan gaan we gewoon verder.")
+        self.assertFalse(missing_app.mistake_states["M2"]["corrected"])
+
+        soft_missing_app = make_app()
+        soft_missing_app.last_um_preview = sample_um()
+        soft_missing_topic = soft_missing_app.general_memory_topic(soft_missing_app.last_um_preview)
+        soft_missing_app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+        soft_missing_turn = {
+            "phase": 9,
+            "response_mode": "nudge_interpretation",
+            "topic": soft_missing_topic,
+            "nudge_correction_requested": True,
+        }
+        soft_missing_action = soft_missing_app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "niet echt",
+            soft_missing_turn,
+        )
+        self.assertEqual(soft_missing_action["action"], "nudge_correction_detail_missing")
+        self.assertEqual(soft_missing_action["leo_response"], "Oké, dan gaan we gewoon verder.")
+        self.assertFalse(soft_missing_app.mistake_states["M2"]["corrected"])
+
         offer_turn = {
             "phase": 9,
             "response_mode": "nudge_interpretation",
@@ -7421,6 +7672,84 @@ class CRIDialogue2Tests(unittest.TestCase):
         self.assertTrue(fine_action["follow_up_needed"])
         self.assertEqual(fine_action["leo_response"], "We kunnen ook samen kijken wat ik over jou onthoud, als je wilt.")
         self.assertTrue(offer_turn["nudge_memory_offer_made"])
+
+        fallback_app = make_app()
+        fallback_app.last_um_preview = sample_um()
+        fallback_app.memory_fields_mentioned_so_far = set()
+        fallback_app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+        fallback_turn = {
+            "phase": 9,
+            "response_mode": "nudge_interpretation",
+            "topic": fallback_app.general_memory_topic(fallback_app.last_um_preview),
+            "nudge_memory_offer_made": True,
+        }
+        fallback_action = fallback_app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Ja",
+            fallback_turn,
+        )
+        self.assertEqual(fallback_action["action"], "memory_access")
+        self.assertIn("fav_food", fallback_action["memory_scope"])
+        self.assertIn("lievelingseten", fallback_action["leo_response"])
+        self.assertNotIn("nog niet zoveel", fallback_action["leo_response"])
+
+        declined_app = make_app()
+        declined_app.last_um_preview = sample_um()
+        declined_turn = {
+            "phase": 9,
+            "response_mode": "nudge_interpretation",
+            "nudge_memory_offer_made": True,
+        }
+        declined_action = declined_app.action_handler(
+            IntentResult(intent="dialogue_answer", field=None, value=None, confidence=0.9),
+            "Nee",
+            declined_turn,
+        )
+        self.assertEqual(declined_action["action"], "nudge_memory_offer_declined")
+        self.assertEqual(declined_action["leo_response"], "Oké, dan hoeft dat nu niet.")
+
+    def test_nudge_memory_offer_followup_runs_change_gate(self):
+        app = make_app()
+        app.last_um_preview = sample_um()
+        app.speech = FakeSpeech(["Ja", "Ja", "Nee"])
+        app.mistake_states = {
+            "M2": {
+                "id": "M2",
+                "mentioned": True,
+                "field": "fav_food",
+                "actual": "pannenkoeken",
+                "wrong": "pizza",
+                "corrected": False,
+            }
+        }
+        phase = {
+            "phase": 9,
+            "phase_id": "1.9",
+            "name": "Nudge",
+            "part": 1,
+        }
+        segment = {
+            "content_plan": app.l1("Zeg, ik heb al een paar dingen over jou gezegd vandaag. Klopte eigenlijk alles wat ik zei?"),
+            "expects_response": True,
+            "response_mode": "nudge_interpretation",
+            "topic": app.general_memory_topic(app.last_um_preview),
+        }
+
+        with patch("time.sleep", lambda *_args, **_kwargs: None):
+            action = app.run_phase_segment(phase, segment)
+
+        self.assertEqual(action["action"], "memory_access_continue")
+        self.assertIn("Wil je iets veranderen?", app.speech.spoken)
+        self.assertIn("Oke, we gaan verder.", app.speech.spoken)
 
     def test_stub_classifier_detects_memory_access_phrases(self):
         clf = cri_module.StubIntentClassifier(valid_fields=list(CRI.UM_FIELDS))

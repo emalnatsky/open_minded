@@ -3241,13 +3241,208 @@ class CRI_ScriptedDialogue(SICApplication):
             )
         return change_action
 
+    MEMORY_CHANGE_FIELD_ALIASES = {
+        "fav_food": (
+            "lievelingseten",
+            "lievelings eten",
+            "favoriete eten",
+            "favoriet eten",
+            "eten",
+        ),
+        "hobby_fav": (
+            "favoriete hobby",
+            "lievelingshobby",
+            "lievelings hobby",
+            "hobby",
+            "allerliefste hobby",
+        ),
+        "fav_subject": (
+            "lievelingsvak",
+            "lievelings vak",
+            "favoriete vak",
+            "favoriet vak",
+            "vak op school",
+            "schoolvak",
+            "school vak",
+        ),
+        "school_strength": (
+            "goed in op school",
+            "waar ik goed in ben",
+            "waar je goed in bent",
+            "goed in ben",
+            "goed in bent",
+            "school sterkte",
+        ),
+        "aspiration": (
+            "later worden",
+            "later wilt worden",
+            "later wil worden",
+            "wat ik later wil worden",
+            "wat je later wilt worden",
+            "beroep",
+            "toekomst",
+        ),
+        "role_model": (
+            "opkijkt",
+            "op kijk",
+            "voorbeeld",
+            "rolmodel",
+            "rol model",
+            "naar wie ik opkijk",
+            "naar wie je opkijkt",
+        ),
+    }
+
+    def normalize_memory_change_text(self, text: str) -> str:
+        text = unicodedata.normalize("NFKD", str(text or "").lower())
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def memory_change_field_prompt(self) -> str:
+        return (
+            "Welk stukje van mijn geheugen wil je veranderen? Bijvoorbeeld je lievelingseten, "
+            "je favoriete hobby, je lievelingsvak, of wat je later wilt worden."
+        )
+
+    def memory_change_field_unclear_prompt(self) -> str:
+        return (
+            "Ik weet nog niet welk stukje je bedoelt. Gaat het om je lievelingseten, "
+            "je favoriete hobby, je lievelingsvak, of iets anders?"
+        )
+
+    def memory_change_value_prompt(self, field: str) -> str:
+        label = self.field_label(field)
+        return f"Oke, {label}. Waar wil je dat ik dat naar verander? Noem maar een ding."
+
+    def field_from_memory_change_answer(self, transcript: str, result=None, allowed_fields=None) -> str:
+        allowed = list(dict.fromkeys(allowed_fields or []))
+        text = self.normalize_memory_change_text(transcript)
+        matches = []
+        for field, aliases in self.MEMORY_CHANGE_FIELD_ALIASES.items():
+            if allowed and field not in allowed:
+                continue
+            for alias in aliases:
+                alias_text = self.normalize_memory_change_text(alias)
+                if alias_text and alias_text in text:
+                    matches.append(field)
+                    break
+
+        unique_matches = list(dict.fromkeys(matches))
+        if len(unique_matches) == 1:
+            return unique_matches[0]
+
+        result_field = getattr(result, "field", None)
+        result_value = getattr(result, "value", None)
+        if result_field and not self.is_known(result_value) and (not allowed or result_field in allowed):
+            return result_field
+
+        return ""
+
+    def has_memory_change_field_cue(self, transcript: str, allowed_fields=None) -> bool:
+        return bool(self.field_from_memory_change_answer(transcript, None, allowed_fields))
+
+    def has_memory_change_value_cue(self, transcript: str) -> bool:
+        text = self.normalize_memory_change_text(transcript)
+        cues = (
+            "naar",
+            "is",
+            "zijn",
+            "wordt",
+            "worden",
+            "verander",
+            "veranderen",
+            "onthoud",
+            "onthouden",
+            "moet",
+        )
+        return any(re.search(rf"\b{re.escape(cue)}\b", text) for cue in cues)
+
+    def direct_memory_change_from_answer(self, result, transcript: str, context: dict, allowed_fields: list) -> dict:
+        if not (
+            self.has_memory_change_field_cue(transcript, allowed_fields)
+            and self.has_memory_change_value_cue(transcript)
+        ):
+            return {}
+        change = self.change_from_intent_result(result, context, transcript)
+        if change and change.get("field") and self.is_known(change.get("new_value")):
+            return change
+        return {}
+
+    def ask_memory_change_field(self, action: dict, source_turn: dict, max_tries: int = 2) -> tuple:
+        context = self.memory_access_change_context(action, source_turn)
+        allowed_fields = list(context.get("memory_review_fields") or [])
+
+        for attempt in range(max_tries):
+            self.speech.say(
+                self.memory_change_field_prompt()
+                if attempt == 0
+                else self.memory_change_field_unclear_prompt()
+            )
+            transcript = self.speech.listen_with_review()
+            with self.child_processing_loading():
+                result = self.classify_with_repeat(transcript, context)
+                direct_change = self.direct_memory_change_from_answer(
+                    result,
+                    transcript,
+                    context,
+                    allowed_fields,
+                )
+            if direct_change:
+                return "", direct_change, context
+
+            field = self.field_from_memory_change_answer(transcript, result, allowed_fields)
+            if field:
+                return field, {}, context
+
+        return "", {}, context
+
+    def ask_memory_change_value_for_field(self, action: dict, source_turn: dict, field: str) -> dict:
+        change_context = self.memory_access_change_context(action, source_turn)
+        change_context["memory_correction_field"] = field
+        change_context["mistake_field"] = field
+        change_context["memory_review_fields"] = [field]
+        topic = change_context.setdefault("topic", {})
+        topic["fields"] = [field]
+        topic.setdefault("field_labels", {})[field] = self.field_label(field)
+
+        prompt = self.memory_change_value_prompt(field)
+        self.speech.say(prompt)
+        self.current_turn_context = change_context
+        transcript = self.speech.listen_with_review()
+        with self.child_processing_loading():
+            result = self.classify_with_repeat(transcript, change_context)
+            change = self.change_from_intent_result(result, change_context, transcript)
+            self.log_action_handler_result(
+                self.action_result(
+                    "memory_access_change_value_captured" if change else "memory_access_change_value_missing",
+                    bool(change),
+                    "Child answered the second step of the memory-change flow.",
+                    change=change or None,
+                )
+            )
+        self.current_turn_context = source_turn
+        return change or {}
+
+    def memory_access_capture_two_step_change(self, action: dict, source_turn: dict) -> dict:
+        field, direct_change, _context = self.ask_memory_change_field(action, source_turn)
+        if direct_change:
+            return direct_change
+        if not field:
+            self.speech.say(
+                "Ik weet nog niet goed wat ik moet veranderen. "
+                "Zeg bijvoorbeeld: mijn lievelingseten."
+            )
+            return {}
+        return self.ask_memory_change_value_for_field(action, source_turn, field)
+
     def memory_access_interrupt_control(self, action: dict) -> dict:
         """Explicit, gated voice flow for memory access (no researcher keyboard).
 
         Flow:
           Leo: "Wil je iets veranderen?"
             NO  -> acknowledge, exit to script
-            YES -> "Wat wil je veranderen?" -> child says it ->
+            YES -> ask which memory field -> ask the new value ->
                    action_handler confirms (X to Y?) and applies on yes ->
                    acknowledge -> "Wil je nog iets anders veranderen?" -> loop
         Unclear yes/no answers re-ask the same question.
@@ -3261,17 +3456,23 @@ class CRI_ScriptedDialogue(SICApplication):
 
         changes_done = 0
         while wants_change and changes_done < max_changes:
-            # Ask what to change, listen, and let the action handler run its
-            # own "Wil je dat ik X veranderen naar Y?" confirm + apply flow.
-            self.speech.say("Wat wil je veranderen?")
-            change_context = self.memory_access_change_context(action, source_turn)
-            self.current_turn_context = change_context
-            transcript = self.speech.listen_with_review()
-            with self.child_processing_loading():
-                result = self.classify_with_repeat(transcript, change_context)
-                change_action = self.action_handler(result, transcript, change_context)
-                self.log_action_handler_result(change_action)
-            self.current_turn_context = source_turn
+            change = self.memory_access_capture_two_step_change(action, source_turn)
+            if change and change.get("field") and self.is_known(change.get("new_value")):
+                accepted = self.confirm_topic_change(change)
+                change_action = self.action_result(
+                    "memory_access_change_confirmed" if accepted else "memory_access_change_rejected",
+                    True,
+                    "Child provided a two-step memory change after memory access.",
+                    change=change,
+                    change_confirmed=accepted,
+                )
+            else:
+                change_action = self.action_result(
+                    "memory_access_change_no_value",
+                    True,
+                    "Child wanted to change something but no clear field/value was captured.",
+                )
+            self.log_action_handler_result(change_action)
 
             if change_action.get("change_confirmed") and change_action.get("change"):
                 # Acknowledge is produced by the action handler; record it so
@@ -3439,6 +3640,51 @@ class CRI_ScriptedDialogue(SICApplication):
         if condition == "run_if_memory_review_requested":
             return not getattr(self, "memory_review_requested", False)
         return False
+
+    def prime_direct_nudge_test_if_needed(self, script: list) -> bool:
+        """Allow starting directly at phase 1.9 by seeding two uncorrected mistakes.
+
+        Normal runs build this state by actually passing M1 and M2. A direct start
+        at the nudge phase is a tester shortcut, so only prime when the selected
+        start phase is the nudge phase itself and there is no resume state.
+        """
+        if self.resume_from_log_path:
+            return False
+        if not script:
+            return False
+
+        start_index = max(0, min(int(self.start_phase_index or 0), len(script) - 1))
+        start_turn = script[start_index]
+        if start_turn.get("condition") != "run_if_two_mistakes_no_corrections":
+            return False
+
+        previous_mistakes = [
+            turn for turn in script[:start_index]
+            if turn.get("mistake_id")
+        ]
+        if len(previous_mistakes) < 2:
+            return False
+
+        self.mistakes_mentioned = 0
+        self.corrections_seen = 0
+        mentioned_fields = getattr(self, "memory_fields_mentioned_so_far", None)
+        if mentioned_fields is None:
+            self.memory_fields_mentioned_so_far = set()
+            mentioned_fields = self.memory_fields_mentioned_so_far
+
+        for turn in previous_mistakes[:2]:
+            self.register_mistake_phase(turn)
+            state = self.mistake_states.get(turn.get("mistake_id"), {})
+            state["mentioned"] = True
+            state["corrected"] = False
+            for field in self.child_facing_memory_fields([state.get("field") or turn.get("mistake_field")]):
+                mentioned_fields.add(field)
+            self.mistakes_mentioned += 1
+
+        message = "Direct nudge test: primed 2 uncorrected mistakes so phase 1.9 can run."
+        print(message)
+        self.logger.info(message)
+        return True
 
     def topic_label_fields_for_domain(self, domain: str) -> tuple:
         return {
@@ -3688,7 +3934,14 @@ class CRI_ScriptedDialogue(SICApplication):
                 continue
 
             if action.get("follow_up_needed"):
-                return self.follow_up_action_handler(context)
+                follow_up_action = self.follow_up_action_handler(context)
+                if self.is_memory_access_action(follow_up_action):
+                    memory_action = self.memory_access_interrupt_control(follow_up_action)
+                    self.current_turn_context = context
+                    if self.should_reroute_after_memory_change(memory_action):
+                        self.apply_memory_access_change_to_phase(phase, memory_action)
+                    return memory_action
+                return follow_up_action
 
             if not action.get("handled"):
                 if context.get("llm_turn") and transcript:
@@ -3757,6 +4010,7 @@ class CRI_ScriptedDialogue(SICApplication):
                 self.memory_review_requested = False
             self.logger.info("Script ready - %d phases.", len(script))
             self.start_conversation_log(script)
+            self.prime_direct_nudge_test_if_needed(script)
         self.print_prestart_preview(script)
         self.print_resume_context_before_interaction()
 

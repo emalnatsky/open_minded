@@ -2877,6 +2877,16 @@ class ActionHandler:
             return "We kunnen ook samen op de tablet kijken wat ik over jou onthoud, als je wilt."
         return "We kunnen ook samen kijken wat ik over jou onthoud, als je wilt."
 
+    def nudge_memory_fallback_fields(self) -> list:
+        fields = []
+        for state in getattr(self.d, "mistake_states", {}).values():
+            if not state.get("mentioned") or state.get("corrected"):
+                continue
+            field = state.get("field")
+            if field and field not in fields:
+                fields.append(field)
+        return self.d.child_facing_memory_fields(fields)
+
     def nudge_memory_access_action(self, result, turn: dict) -> dict:
         condition = self.d.tutorial_condition(self.d.last_um_preview)
         if condition == self.d.CONDITION_EXPERIMENT:
@@ -2890,6 +2900,12 @@ class ActionHandler:
                 tutorial_condition=condition,
                 requested_field=result.field,
             )
+
+        if not self.d.memory_access_scope(turn):
+            fallback_fields = self.nudge_memory_fallback_fields()
+            if fallback_fields:
+                turn = dict(turn)
+                turn["spoken_fields"] = list(turn.get("spoken_fields") or []) + fallback_fields
 
         response, memory_scope, returned_fields = self.d.memory_access_response(result, turn)
         self.d.speech.say(response)
@@ -2986,7 +3002,7 @@ class ActionHandler:
 
         if turn.get("nudge_correction_requested"):
             if self.is_soft_memory_rejection(result, transcript, turn):
-                response = "OkÃ©, als je het zo weet, mag je het gewoon zeggen."
+                response = "Oké, dan gaan we gewoon verder."
                 self.d.speech.say(response)
                 return self.action_result(
                     "nudge_correction_detail_missing",
@@ -2997,7 +3013,7 @@ class ActionHandler:
             correction_action = self.nudge_correction_detail_action(result, transcript, turn)
             if correction_action:
                 return correction_action
-            response = "Oké, als je het zo weet, mag je het gewoon zeggen."
+            response = "Oké, dan gaan we gewoon verder."
             self.d.speech.say(response)
             return self.action_result(
                 "nudge_correction_detail_missing",
