@@ -724,9 +724,18 @@ class CRI_ScriptedDialogue(SICApplication):
         return self.conv_log.max_conversation_timestamp(log)
 
     def start_conversation_log(self, script):
-        # Reset cumulative unlocked-categories set at the start of every session
-        # (and resume) so the tablet starts blank.
         self.tablet_state.reset()
+        # Pre-populate mistake states so the tablet shows wrong values
+        # before the mistake phase runs. mentioned=False keeps nudges silent.
+        for turn in script:
+            if turn.get("mistake_id") and turn.get("mistake_wrong"):
+                state = self.mistake_states.setdefault(
+                    turn["mistake_id"], {"id": turn["mistake_id"]}
+                )
+                state.setdefault("field", turn.get("mistake_field"))
+                state.setdefault("wrong", turn.get("mistake_wrong"))
+                state.setdefault("corrected", False)
+                state.setdefault("mentioned", False)  # nudge guard — don't set True
         return self.conv_log.start_conversation_log(script)
 
     def finish_conversation_log(self):
@@ -2158,7 +2167,7 @@ class CRI_ScriptedDialogue(SICApplication):
         if condition == self.CONDITION_EXPERIMENT:
             return (
                 "Dan kan je jouw geheugenboek op de tablet bekijken om te zien waar we het over gehad hebben. "
-                "Je kan op het geheugenboek tikken en daarna op de categorieen tikken om erdoorheen te bladeren."
+                "Je kan op het geheugenboek tikken en daarna op de hoofdstukken tikken om erdoorheen te bladeren."
             )
         return "Dan herhaal ik waar we het over gehad hebben."
 

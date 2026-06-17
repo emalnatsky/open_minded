@@ -499,7 +499,8 @@ class ScriptBuilder:
         reflection_fallback = (
             "Dat past ook wel mooi bij jou, vind ik. "
             f"{profile_line}"
-            f"Wat lijkt jou het mooiste aan {actual}?"
+            f"Wat spreekt jou zo aan in dit beroep?"
+            #f"Wat lijkt jou het mooiste aan {actual}?"
         )
 
         return [
